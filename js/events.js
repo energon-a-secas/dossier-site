@@ -94,6 +94,24 @@ export function bindEvents(state, els) {
     filterLibrary(els, els.reportFilter.value);
   });
 
+  // The wipe and the fade are range inputs, so they report on `input` rather
+  // than on click. Both set one custom property and let CSS do the work: the
+  // wipe is a clip-path and the fade is an opacity, so dragging either costs
+  // no layout. A range input also means arrow keys work and the control
+  // announces itself, which a custom drag handle would not.
+  document.addEventListener('input', (event) => {
+    const control = event.target.closest('[data-action="compare-wipe"], [data-action="compare-opacity"]');
+    if (!control) return;
+    const block = control.closest('.compare');
+    if (!block) return;
+    const value = Number(control.value) || 0;
+    if (control.dataset.action === 'compare-wipe') {
+      block.style.setProperty('--wipe', `${value}%`);
+    } else {
+      block.style.setProperty('--fade', String(value / 100));
+    }
+  });
+
   // A dropped file anywhere on the page opens it. The page is one surface and
   // making the reader find a target is a courtesy nobody asked for.
   document.addEventListener('dragover', (e) => {
@@ -193,10 +211,8 @@ function runAction(action, ctx) {
       state.page = target.dataset.page;
       rerender(state, els);
       break;
-    case 'compare-opacity':
     case 'compare-toggle':
-      // Owned by the comparison block's own markup; the renderer wires the
-      // behaviour off the same data-action in js/render/compare.js.
+      compareToggle(target);
       break;
     default:
       // A control with an action nobody handles is a dead button, which is a
@@ -422,6 +438,19 @@ function formatCurrent(state, els) {
   if (editor) editor.setValue?.(text);
   rerender(state, els);
   showToast('Formatted.');
+}
+
+/** Flip a comparison between its two faces, keeping aria-pressed honest. */
+function compareToggle(target) {
+  const block = target.closest('.compare--toggle');
+  if (!block) return;
+  const wanted = target.dataset.side === 'right' ? 'right' : 'left';
+  for (const face of block.querySelectorAll('.compare__face')) {
+    face.hidden = face.dataset.side !== wanted;
+  }
+  for (const button of block.querySelectorAll('[data-action="compare-toggle"]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.side === wanted));
+  }
 }
 
 function describeDetected(els, text) {

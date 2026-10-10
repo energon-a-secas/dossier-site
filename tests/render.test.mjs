@@ -338,3 +338,89 @@ test('a page route is the page id, with one scheme', async () => {
     assert.ok(id && !id.startsWith('page-'), `page id "${id}" carries a route prefix`);
   }
 });
+
+// ── The comparison block ─────────────────────────────────────────────────────
+// The block that justifies this site, so it gets its own coverage. It shipped
+// once as a one line placeholder reading "Compare (code): mode side" while the
+// module written for it sat unimported.
+
+test('a side by side comparison marks the lines that differ', async () => {
+  const { compareHtml } = await import('../js/render/compare.js');
+  const html = compareHtml({
+    type: 'compare',
+    kind: 'code',
+    left: { value: 'const a = 1;\nconst b = 2;\nreturn a + b;' },
+    right: { value: 'const a = 1;\nconst b = 3;\nreturn a + b;' },
+  }, {});
+
+  assert.ok(html.includes('compare--side'), 'not laid out side by side');
+  assert.ok(html.includes('compare__line--removed'), 'the changed line is not marked as gone');
+  assert.ok(html.includes('compare__line--added'), 'the changed line is not marked as new');
+  assert.ok(html.includes('1 line gone'), `no change summary: ${html.slice(-200)}`);
+});
+
+test('identical sides say so rather than implying a change', async () => {
+  const { compareHtml } = await import('../js/render/compare.js');
+  const same = 'const a = 1;';
+  const html = compareHtml(
+    { type: 'compare', kind: 'code', left: { value: same }, right: { value: same } },
+    {},
+  );
+  assert.ok(html.includes('identical'), 'two identical sides did not say so');
+});
+
+test('the line diff gives up loudly rather than stalling', async () => {
+  const { lineDiff } = await import('../js/render/compare.js');
+  const big = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n');
+  const result = lineDiff(big, `${big}\nextra`);
+  assert.strictEqual(result.gaveUp, true, 'it tried to diff 500 lines');
+  assert.strictEqual(result.left, null);
+});
+
+test('a wipe uses a range input, so a keyboard can drive it', async () => {
+  const { compareHtml } = await import('../js/render/compare.js');
+  const html = compareHtml({
+    type: 'compare',
+    kind: 'image',
+    mode: 'slider',
+    left: { src: 'https://example.invalid/a.png', label: 'Before' },
+    right: { src: 'https://example.invalid/b.png', label: 'After' },
+  }, {});
+  assert.ok(/<input[^>]*type="range"/.test(html), 'the wipe is not a range input');
+  assert.ok(html.includes('data-action="compare-wipe"'), 'the wipe control has no action');
+  assert.ok(html.includes('--wipe'), 'the wipe has no custom property to drive');
+});
+
+test('a wipe over something that is not an image refuses with a reason', async () => {
+  const { compareHtml } = await import('../js/render/compare.js');
+  const html = compareHtml({
+    type: 'compare', kind: 'code', mode: 'slider',
+    left: { value: 'a' }, right: { value: 'b' },
+  }, {});
+  assert.ok(html.includes('nothing to wipe'), `expected a reason, got: ${html.slice(0, 160)}`);
+});
+
+test('a toggle keeps both faces in the document and one pressed', async () => {
+  const { compareHtml } = await import('../js/render/compare.js');
+  const html = compareHtml({
+    type: 'compare', kind: 'text', mode: 'toggle',
+    left: { value: 'before' }, right: { value: 'after' },
+  }, {});
+  assert.ok(html.includes('aria-pressed="true"'), 'no side is pressed');
+  assert.ok(html.includes('aria-pressed="false"'), 'both sides are pressed');
+  assert.ok(html.includes('before') && html.includes('after'), 'a face is missing from the document');
+});
+
+test('slopeSvg scales to its own values, not to a hundred', async () => {
+  const { slopeSvg } = await import('../js/render/compare.js');
+  // These are milliseconds. The first version divided every value by 100, so
+  // anything that was not a percentage drew off the end of the plot.
+  const html = slopeSvg([{ label: 'p95', before: 340, after: 182, unit: 'ms' }], { uid: 'u' });
+  const xs = [...html.matchAll(/<circle[^>]*cx="([\d.]+)"/g)].map((m) => Number(m[1]));
+  assert.strictEqual(xs.length, 2, 'expected a before and an after point');
+  const width = 520;
+  for (const x of xs) {
+    assert.ok(x >= 0 && x <= width, `point at ${x} is outside the 0..${width} plot`);
+  }
+  assert.ok(html.includes('before 340'), 'the before value is not in its tooltip');
+});
