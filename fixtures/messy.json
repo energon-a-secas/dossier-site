@@ -1,0 +1,190 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Deliberately broken report for testing",
+    "pages": [
+      {
+        "title": "Page with errors",
+        "blocks": [
+          {
+            "type": "unknownblock",
+            "text": "Unknown block type"
+          },
+          {
+            "type": "metrics",
+            "title": "Bad metric",
+            "items": [
+              {
+                "label": "metric with delta",
+                "value": 100,
+                "delta": 50,
+                "baseline": 50
+              }
+            ]
+          },
+          {
+            "type": "prose",
+            "text": "Prose with <script>alert('xss')</script> block HTML inside"
+          },
+          {
+            "type": "chart",
+            "title": "Chart with bad URL",
+            "form": "bar",
+            "series": [
+              {
+                "label": "data",
+                "values": [1]
+              }
+            ],
+            "evidence": [
+              {
+                "label": "Bad link",
+                "href": "javascript:alert('xss')"
+              }
+            ]
+          },
+          {
+            "type": "scorecard",
+            "title": "Scorecard with fails",
+            "criteria": [
+              {
+                "label": "Feature A",
+                "verdict": "fail"
+              },
+              {
+                "label": "Feature B",
+                "verdict": "partial"
+              },
+              {
+                "label": "Feature C",
+                "verdict": "skipped"
+              }
+            ]
+          },
+          {
+            "type": "gauge",
+            "title": "Bad gauge",
+            "value": 150,
+            "max": 100
+          },
+          {
+            "type": "findings",
+            "title": "Finding with backwards line span",
+            "items": [
+              {
+                "message": "Error at line range",
+                "level": "error",
+                "path": "src/file.ts",
+                "line": 50,
+                "endLine": 10
+              }
+            ]
+          },
+          {
+            "type": "tests",
+            "title": "Test with no output",
+            "items": [
+              {
+                "name": "Failed test",
+                "state": "failed"
+              }
+            ]
+          },
+          {
+            "type": "checklist",
+            "title": "Skipped without explanation",
+            "items": [
+              {
+                "label": "Item A",
+                "done": true
+              },
+              {
+                "label": "Item B",
+                "done": false
+              },
+              {
+                "label": "Item C skipped",
+                "done": false
+              }
+            ]
+          },
+          {
+            "type": "risks",
+            "title": "Risks with no mitigation",
+            "items": [
+              {
+                "title": "High severity risk",
+                "severity": "high"
+              }
+            ]
+          },
+          {
+            "type": "decision",
+            "title": "Decision with no context",
+            "chosen": "Something"
+          },
+          {
+            "type": "table",
+            "title": "Table with wrong row counts",
+            "columns": [
+              { "label": "Col A" },
+              { "label": "Col B" },
+              { "label": "Col C" }
+            ],
+            "rows": [
+              ["A", "B"],
+              ["X", "Y", "Z", "Extra"]
+            ]
+          },
+          {
+            "type": "prose",
+            "text": "Wrong type for text field",
+            "textField": 123
+          },
+          {
+            "type": "files",
+            "title": "Files with supplied totals",
+            "items": [
+              {
+                "path": "src/file.ts",
+                "added": 10,
+                "removed": 5
+              }
+            ],
+            "totals": {
+              "added": 100,
+              "removed": 50
+            }
+          },
+          {
+            "type": "compare",
+            "title": "Comparison identical sides",
+            "kind": "text",
+            "left": {
+              "value": "Same text"
+            },
+            "right": {
+              "value": "Same text"
+            }
+          },
+          {
+            "type": "tests",
+            "title": "Evidence checked by LLM",
+            "items": [
+              {
+                "name": "Test",
+                "state": "passed"
+              }
+            ],
+            "evidence": [
+              {
+                "label": "LLM verified",
+                "checkedBy": "llm"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

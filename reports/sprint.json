@@ -1,0 +1,114 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Sprint 42 summary: Oct 1-15",
+    "subtitle": "Built text search and saved filters. Resolved five tech debt items. Dropped streaming due to missing spec.",
+    "kind": "summary",
+    "status": "shipped",
+    "owner": "Product team",
+    "tags": ["sprint"],
+    "period": {
+      "from": "2026-10-01",
+      "to": "2026-10-15"
+    },
+    "pages": [
+      {
+        "title": "What got done",
+        "summary": "Completed work.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "The sprint completed 8 of 9 planned features. We closed 45 issues and shipped v2.3.0 to production."
+          },
+          {
+            "type": "metrics",
+            "items": [
+              {
+                "label": "Features shipped",
+                "value": 8,
+                "unit": "of 9"
+              },
+              {
+                "label": "Issues resolved",
+                "value": 45,
+                "unit": "count"
+              },
+              {
+                "label": "Tech debt items",
+                "value": 5,
+                "unit": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Dropped work",
+        "summary": "What we said no to and why.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "We dropped the streaming API feature (planned as a low-priority nice-to-have). The spec was incomplete when the sprint started, and tech debt cleanup took longer than estimated. We will revisit this in Sprint 44."
+          },
+          {
+            "type": "callout",
+            "tone": "info",
+            "text": "Dropping one thing meant we had time to fix the database connection pooling issue that was on the backlog. That fix has higher ROI."
+          }
+        ]
+      },
+      {
+        "title": "What went well",
+        "summary": "Wins and learnings.",
+        "blocks": [
+          {
+            "type": "checklist",
+            "items": [
+              {
+                "text": "Search performance exceeded targets (140ms instead of 250ms)",
+                "done": true,
+                "checkedBy": "code"
+              },
+              {
+                "text": "A/B test showed 15% increase in feature usage after rollout",
+                "done": true,
+                "checkedBy": "human"
+              },
+              {
+                "text": "Zero incidents during release. Rollback was not needed.",
+                "done": true,
+                "checkedBy": "code"
+              },
+              {
+                "text": "Pair programming on indexer improved code quality",
+                "done": true,
+                "checkedBy": "human"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "What could improve",
+        "summary": "Retrospective notes.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "Two things slowed us down. First, we underestimated database migration complexity (added 3 days). Second, design review cycles were slower than planned (one design was reworked twice before dev started)."
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "text": "For next sprint: schedule design reviews earlier and aim for one round of feedback"
+              },
+              {
+                "text": "For database work: reserve 25% buffer on estimates instead of 10%"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

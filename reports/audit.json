@@ -1,0 +1,95 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Database query performance audit",
+    "subtitle": "Reviewed slow queries in production over the past month. Found three candidates for indexing.",
+    "kind": "audit",
+    "status": "in-review",
+    "owner": "Database team",
+    "tags": ["database", "performance", "indexing"],
+    "pages": [
+      {
+        "title": "Summary",
+        "summary": "High-level findings and recommendations.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "We analyzed 50,000 slow queries (>500ms) from the production logs over 30 days. Three queries account for 65% of the slow query volume and all three lack covering indexes."
+          },
+          {
+            "type": "metrics",
+            "items": [
+              {
+                "label": "Slow queries",
+                "value": 50000,
+                "unit": "count"
+              },
+              {
+                "label": "Top 3 queries",
+                "value": 32500,
+                "unit": "count",
+                "better": "lower"
+              },
+              {
+                "label": "Estimated speedup",
+                "value": 8,
+                "unit": "x",
+                "better": "higher"
+              }
+            ]
+          },
+          {
+            "type": "callout",
+            "tone": "warn",
+            "text": "The three queries involve the users and orders tables. Index changes must be tested in staging first."
+          }
+        ]
+      },
+      {
+        "title": "Query details",
+        "summary": "The three slow queries and their index plans.",
+        "blocks": [
+          {
+            "type": "heading",
+            "text": "Query 1: User profile lookup",
+            "level": 2
+          },
+          {
+            "type": "prose",
+            "text": "SELECT * FROM users WHERE email = ? AND deleted_at IS NULL. Runs 15,000 times per day, average 850ms."
+          },
+          {
+            "type": "prose",
+            "text": "Recommendation: Add index on (email, deleted_at). This is a covering index for the query condition."
+          },
+          {
+            "type": "heading",
+            "text": "Query 2: Recent orders for a user",
+            "level": 2
+          },
+          {
+            "type": "prose",
+            "text": "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 20. Runs 12,000 times per day, average 620ms."
+          },
+          {
+            "type": "prose",
+            "text": "Recommendation: Add index on (user_id, created_at). The sort order matches, so it covers both the filter and the sort."
+          },
+          {
+            "type": "heading",
+            "text": "Query 3: Search orders by date range",
+            "level": 2
+          },
+          {
+            "type": "prose",
+            "text": "SELECT * FROM orders WHERE created_at BETWEEN ? AND ? AND status = ?. Runs 5,500 times per day, average 920ms."
+          },
+          {
+            "type": "prose",
+            "text": "Recommendation: Add index on (created_at, status). This covers both conditions."
+          }
+        ]
+      }
+    ]
+  }
+}

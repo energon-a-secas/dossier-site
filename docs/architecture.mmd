@@ -1,0 +1,64 @@
+flowchart TB
+    subgraph input["What comes in"]
+        file["A file: JSON, YAML,<br/>Markdown or HTML"]
+        link["A link: #dz= payload<br/>or ?src= URL"]
+        tool["Tool output: git diff, JUnit,<br/>SARIF, CTRF, Lighthouse"]
+        form["The form and the<br/>block catalog"]
+    end
+
+    subgraph contract["The contract"]
+        registry["js/registry<br/>27 block types as data"]
+        schema["schema.json<br/>draft-07, self-contained"]
+        llms["llms.txt and SKILL.md<br/>instructions for an agent"]
+    end
+
+    subgraph pipeline["One path to the screen"]
+        adapters["js/adapters<br/>foreign format to document"]
+        parse["js/parse<br/>tolerant, never throws"]
+        derive["js/derive<br/>deltas, totals, ceilings"]
+        validate["js/validate<br/>findings, not rejections"]
+        render["js/render<br/>the only renderer"]
+    end
+
+    subgraph out["What goes out"]
+        screen["The report on screen"]
+        standalone["One HTML file<br/>no account, no network"]
+        shared["A link carrying<br/>the whole report"]
+        paper["Print or PDF,<br/>light palette"]
+        deck["Presentation Sage<br/>YAML"]
+    end
+
+    store[("IndexedDB<br/>the report library")]
+    viz["Viz Kit<br/>charts, tiles, gauges"]
+
+    file --> parse
+    link --> parse
+    tool --> adapters --> parse
+    form --> parse
+
+    parse --> derive --> validate --> render
+    registry -.describes.-> parse
+    registry -.describes.-> validate
+    registry -.describes.-> render
+    registry -.generates.-> schema
+    registry -.generates.-> llms
+    registry -.builds.-> form
+
+    viz -.draws.-> render
+
+    render --> screen
+    render --> standalone
+    render --> paper
+    render --> deck
+    derive --> shared
+
+    parse <--> store
+
+    classDef contractBox fill:#1b1d2b,stroke:#a5b4fc,color:#e8eaf6
+    classDef pipeBox fill:#161822,stroke:#6b7280,color:#e8eaf6
+    classDef outBox fill:#14241c,stroke:#34d399,color:#e8f5ee
+    classDef inBox fill:#231a24,stroke:#c084fc,color:#f3e8ff
+    class registry,schema,llms contractBox
+    class adapters,parse,derive,validate,render pipeBox
+    class screen,standalone,shared,paper,deck outBox
+    class file,link,tool,form inBox

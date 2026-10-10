@@ -1,0 +1,37 @@
+{
+  "lighthouseVersion": "10.0.0",
+  "fetchTime": "2026-10-10T12:00:00Z",
+  "categories": {
+    "performance": {
+      "title": "Performance",
+      "score": 0.85
+    },
+    "accessibility": {
+      "title": "Accessibility",
+      "score": 0.92
+    },
+    "best-practices": {
+      "title": "Best Practices",
+      "score": 0.88
+    },
+    "seo": {
+      "title": "SEO",
+      "score": 0.95
+    }
+  },
+  "audits": {
+    "first-contentful-paint": {
+      "title": "First Contentful Paint",
+      "score": 0.9,
+      "displayValue": "1.2 s"
+    },
+    "unused-css": {
+      "title": "Reduce unused CSS",
+      "score": 0.5,
+      "displayValue": "Potential savings of 45 KiB",
+      "details": {
+        "type": "opportunity"
+      }
+    }
+  }
+}

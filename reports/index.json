@@ -1,0 +1,66 @@
+[
+  {
+    "file": "fix.json",
+    "title": "Fixed limiter race condition",
+    "kind": "fix",
+    "summary": "Request counter was not shared across worker processes, allowing 4x the configured rate.",
+    "pages": 2,
+    "blocks": 7
+  },
+  {
+    "file": "audit.json",
+    "title": "Database query performance audit",
+    "kind": "audit",
+    "summary": "Reviewed slow queries in production. Found three candidates for indexing.",
+    "pages": 2,
+    "blocks": 10
+  },
+  {
+    "file": "migration.json",
+    "title": "Migrated auth from Okta to Clerk",
+    "kind": "migration",
+    "summary": "Replaced Okta SAML with Clerk OAuth for 40% cost savings and faster login.",
+    "pages": 4,
+    "blocks": 11
+  },
+  {
+    "file": "performance.json",
+    "title": "Performance baseline: core web vitals",
+    "kind": "performance",
+    "summary": "Measured against the SLA. All metrics in green.",
+    "pages": 3,
+    "blocks": 9
+  },
+  {
+    "file": "incident.json",
+    "title": "Database failover incident: 45 minute outage",
+    "kind": "incident",
+    "summary": "Primary became unavailable. Failover to replica succeeded. RCA identified replication lag detection failure.",
+    "pages": 4,
+    "blocks": 10
+  },
+  {
+    "file": "release.json",
+    "title": "Release: v2.3.0 - Search and filters",
+    "kind": "release",
+    "summary": "Full-text search across document fields, saved filters, and 30% speedup on large datasets.",
+    "pages": 3,
+    "blocks": 9
+  },
+  {
+    "file": "comparison.json",
+    "title": "Architecture decision: Monolith or microservices",
+    "kind": "comparison",
+    "summary": "Evaluated both paths. Chose monolith for now because we lack operational maturity for services.",
+    "pages": 4,
+    "blocks": 9
+  },
+  {
+    "file": "sprint.json",
+    "title": "Sprint 42 summary: Oct 1-15",
+    "kind": "summary",
+    "summary": "Built text search and saved filters. Resolved five tech debt items. Dropped streaming due to missing spec.",
+    "pages": 4,
+    "blocks": 10
+  }
+]

@@ -1,0 +1,473 @@
+/*
+ * The application shell: the three regions, the two modes, and the furniture.
+ *
+ * Fleet tokens only. Every colour, type step, spacing step and radius comes
+ * from the CDN base.css, so a seasonal theme or a site skin re-skins this file
+ * without it knowing either exists. The one identity knob is --accent, set in
+ * css/style.css.
+ *
+ * Read mode is the state that matters. A report that arrived in a link is
+ * something to read, so the rail, the source pane and the findings step out of
+ * the way and the document gets the window. H still works, because the kit
+ * owns it; see js/chrome.js for why read mode is a separate attribute.
+ */
+
+/* ── Regions ───────────────────────────────────────────────────────────── */
+
+.ds-shell {
+  display: grid;
+  grid-template-columns: minmax(200px, 250px) minmax(0, 1fr) minmax(320px, 430px);
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-4);
+  max-width: 2100px;
+  margin: 0 auto;
+  min-height: calc(100dvh - 160px);
+}
+
+/* Nothing open: the welcome screen owns the window and the regions stand down. */
+body.is-empty .ds-shell { display: none; }
+body:not(.is-empty) .ds-welcome { display: none; }
+
+.ds-rail,
+.ds-source,
+.ds-findings {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  position: sticky;
+  top: var(--space-4);
+  max-height: calc(100dvh - 120px);
+  overflow: auto;
+}
+
+.ds-rail__group + .ds-rail__group { margin-top: var(--space-4); }
+
+.ds-rail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.ds-rail__head h2 {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.ds-rail input[type="search"] {
+  width: 100%;
+  margin-bottom: var(--space-2);
+}
+
+/* ── The report library ────────────────────────────────────────────────── */
+
+.ds-library { list-style: none; margin: 0; padding: 0; }
+
+.ds-library__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.ds-library__item[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.ds-library__open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: var(--space-2);
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.ds-library__open:hover { background: var(--surface-2); }
+
+.ds-library__title {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.ds-library__meta { font-size: var(--text-xs); color: var(--text-muted); }
+
+.ds-library__delete {
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.ds-library__item:hover .ds-library__delete,
+.ds-library__delete:focus-visible { opacity: 1; }
+.ds-library__delete:hover { color: var(--danger-hover); }
+
+.ds-library__empty { font-size: var(--text-xs); color: var(--text-muted); padding: var(--space-2); }
+
+/* ── The outline ──────────────────────────────────────────────────────── */
+
+.ds-outline, .ds-outline ul { list-style: none; margin: 0; padding: 0; }
+.ds-outline ul { margin-left: var(--space-3); }
+
+.ds-outline a {
+  display: block;
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-outline a:hover { background: var(--surface-2); color: var(--text-primary); }
+
+.ds-outline a[aria-current="page"] {
+  color: var(--accent-bright);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.ds-outline__heading { font-size: var(--text-xs); color: var(--text-muted); }
+
+/* ── The stage ────────────────────────────────────────────────────────── */
+
+.ds-stage { min-width: 0; }
+
+.ds-report { min-width: 0; }
+
+/*
+ * Dimmed, not replaced. While the source does not parse, what is on screen is
+ * the last version that did, and the reader has to be able to tell. Replacing
+ * it with an error is the behaviour this exists to avoid.
+ */
+.ds-report.is-stale {
+  opacity: .45;
+  filter: saturate(.5);
+  pointer-events: none;
+}
+
+/* ── The source pane ──────────────────────────────────────────────────── */
+
+.ds-source__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.ds-source__head h2 {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--text-muted);
+  margin: 0;
+  margin-right: auto;
+}
+
+.ds-source__tabs { display: inline-flex; gap: 2px; }
+
+.ds-source__tabs [role="tab"] {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  padding: 4px var(--space-2);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.ds-source__tabs [role="tab"][aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+/* ── The findings panel ───────────────────────────────────────────────── */
+
+.ds-findings { grid-column: 1 / -1; position: static; max-height: none; }
+
+.ds-findings__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.ds-findings__head h2 { font-size: var(--text-sm); margin: 0; }
+
+.ds-findings__head button {
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: var(--space-1);
+}
+
+/* The count beside the toolbar control, so a clipped list still says how much
+ * it clipped. A panel that hides findings without saying so is a defect. */
+.ds-count {
+  display: inline-block;
+  min-width: 1.25em;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.ds-count.is-error {
+  background: color-mix(in srgb, var(--danger) 26%, transparent);
+  color: var(--text-primary);
+}
+
+/* ── Metric tiles ─────────────────────────────────────────────────────── */
+
+/*
+ * The delta tone rules live in css/blocks.css, not here. They were here first
+ * and lost the cascade to a plain `.metric-delta { color: var(--text-secondary) }`
+ * in blocks.css, which loads after this file, so every delta rendered grey
+ * however good or bad it was. Block styling belongs in the block stylesheet.
+ */
+.metric-baseline,
+.metric-target { display: block; font-size: var(--text-xs); color: var(--text-muted); }
+.metric-unit { font-size: .78em; color: var(--text-muted); margin-left: 2px; }
+.metric-spark { display: block; margin-top: 4px; }
+
+/* ── The welcome screen ───────────────────────────────────────────────── */
+
+.ds-welcome {
+  display: grid;
+  place-items: center;
+  min-height: calc(100dvh - 220px);
+  padding: var(--space-6) var(--space-4);
+}
+
+.ds-welcome__inner { max-width: 54ch; text-align: center; }
+.ds-welcome__inner h2 { margin: 0 0 var(--space-2); font-size: var(--text-xl); }
+.ds-welcome__inner p { color: var(--text-secondary); margin: 0 0 var(--space-4); }
+
+.ds-welcome__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: center;
+}
+
+.ds-welcome__note { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-4); }
+
+/* ── Dialogs ──────────────────────────────────────────────────────────── */
+
+.ds-dialog {
+  margin: auto;
+  width: min(620px, 94vw);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-modal);
+}
+
+.ds-dialog--wide { width: min(980px, 95vw); }
+.ds-dialog::backdrop { background: rgb(2 4 10 / .66); }
+.ds-dialog h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
+.ds-dialog__lead { color: var(--text-secondary); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
+.ds-dialog label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin: var(--space-3) 0 4px; }
+.ds-dialog textarea { width: 100%; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-sm); }
+.ds-dialog__detected { font-size: var(--text-xs); color: var(--accent-bright); min-height: 1.2em; margin: var(--space-2) 0 0; }
+
+.ds-dialog__actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  margin-top: var(--space-4);
+}
+
+.ds-export__choices { display: grid; gap: var(--space-2); }
+
+.ds-export__choice {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  cursor: pointer;
+  color: inherit;
+}
+
+.ds-export__choice:hover { border-color: var(--accent); }
+.ds-export__choice span { font-size: var(--text-xs); color: var(--text-muted); }
+.ds-export__budget { font-size: var(--text-xs); color: var(--text-muted); margin: var(--space-3) 0 0; }
+
+/* ── Read mode ────────────────────────────────────────────────────────── */
+
+html[data-dossier-chrome="hidden"] .header-bar { display: none; }
+
+html[data-dossier-mode="read"] .ds-shell {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1100px;
+}
+
+html[data-dossier-mode="read"] .ds-rail,
+html[data-dossier-mode="read"] .ds-source { display: none; }
+
+/* ── A dropped file ───────────────────────────────────────────────────── */
+
+body.is-dropping::after {
+  content: "Drop the file to open it";
+  position: fixed;
+  inset: var(--space-4);
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  z-index: 50;
+  pointer-events: none;
+}
+
+/* ── Narrow ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 1200px) {
+  .ds-shell { grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); }
+  .ds-source { grid-column: 1 / -1; position: static; max-height: none; }
+}
+
+@media (max-width: 820px) {
+  .ds-shell { grid-template-columns: minmax(0, 1fr); padding: var(--space-2); }
+  .ds-rail { position: static; max-height: none; }
+}
+
+/* ── Print ────────────────────────────────────────────────────────────── */
+
+/*
+ * Printing is how a report gets attached to a ticket, so it is a first class
+ * output rather than an afterthought. Everything that is not the document
+ * goes, and the document keeps its backgrounds because a metric tile with no
+ * fill is a different chart.
+ */
+@media print {
+  .header-bar,
+  .neo-footer,
+  .ds-rail,
+  .ds-source,
+  .ds-findings,
+  .ds-welcome,
+  .nk-toast,
+  .neo-beacon,
+  dialog { display: none !important; }
+
+  .ds-shell {
+    display: block;
+    padding: 0;
+    max-width: none;
+    min-height: 0;
+  }
+
+  .ds-report.is-stale { opacity: 1; filter: none; }
+
+  /*
+   * A light palette, for paper.
+   *
+   * This is the one place the site overrides fleet colour tokens, and it is
+   * not a style preference. The fleet's tokens are a dark theme: text is
+   * #f9f9f9 and surfaces are white at 3% alpha. Printing that on white paper
+   * gives near white text on white, so the report comes out blank while
+   * looking perfect on screen. base.css has no print palette to inherit, so
+   * these values are declared rather than referenced.
+   *
+   * Only the roles that carry text or a surface are overridden. The accent
+   * and the semantic good and bad colours keep their meaning, darkened enough
+   * to read on paper.
+   */
+  :root {
+    --bg: #ffffff;
+    --surface-1: #f6f7f9;
+    --surface-2: #eceef2;
+    --surface-toast: #eceef2;
+    --text-primary: #16181d;
+    --text-secondary: #3c414b;
+    --text-muted: #5f6672;
+    --border: rgba(0, 0, 0, .14);
+    --border-strong: rgba(0, 0, 0, .26);
+    --accent: #4f46e5;
+    --accent-bright: #4338ca;
+    --ok: #15803d;
+    --warn: #a16207;
+    --danger: #b91c1c;
+    --danger-hover: #b91c1c;
+    --viz-surface: #ffffff;
+    --viz-ink: #16181d;
+    --viz-ink-2: #3c414b;
+    --viz-ink-mute: #5f6672;
+    --viz-grid: rgba(0, 0, 0, .10);
+    --viz-grid-2: rgba(0, 0, 0, .06);
+    --viz-border: rgba(0, 0, 0, .14);
+    --viz-border-strong: rgba(0, 0, 0, .26);
+    --shadow-card: none;
+    --shadow-modal: none;
+  }
+
+  body { background: #fff; color: var(--text-primary); }
+
+  /* A chart's fill carries its meaning, so the browser must not drop it to
+     save ink. Without this a banded gauge prints as an empty outline. */
+  .ds-report,
+  .ds-report * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Every page starts a sheet, and a block is not split down the middle. */
+  .report-page { break-after: page; page-break-after: always; }
+  .report-page:last-child { break-after: auto; page-break-after: auto; }
+  .block,
+  .viz-panel,
+  .block-metrics,
+  .block-grid { break-inside: avoid; page-break-inside: avoid; }
+
+  /* A disclosure the reader cannot open on paper has to be open already. */
+  details { display: block; }
+  details > summary { list-style: none; }
+  details[open] > summary,
+  details > summary { font-weight: 600; }
+  details > *:not(summary) { display: revert !important; }
+
+  /* A link is useless on paper unless it says where it goes. */
+  .ds-report a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: .76em;
+    color: var(--text-muted);
+    word-break: break-all;
+  }
+}

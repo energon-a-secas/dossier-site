@@ -1,0 +1,12 @@
+{
+  "name": "dossier-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Render AI-written work reports from one JSON file",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/",
+    "validate": "node bin/validate.mjs"
+  }
+}

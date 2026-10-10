@@ -1,0 +1,20 @@
+[
+  {
+    "file": "minimal.json",
+    "title": "Minimal valid document",
+    "blocks": 1,
+    "findings": 0
+  },
+  {
+    "file": "complete.json",
+    "title": "Rate limiter fix: comprehensive example with all block types",
+    "blocks": 27,
+    "findings": 0
+  },
+  {
+    "file": "messy.json",
+    "title": "Deliberately broken document for testing validation",
+    "blocks": 17,
+    "findings": "multiple"
+  }
+]

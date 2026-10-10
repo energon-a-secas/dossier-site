@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="Tests" tests="4" failures="1" errors="0" skipped="1" time="1.234">
+  <testcase classname="limiter.BucketTest" name="test_increment" time="0.123"/>
+  <testcase classname="limiter.BucketTest" name="test_reset" time="0.089">
+    <failure message="Expected 0 but got 1">
+    java.lang.AssertionError: Expected 0 but got 1
+    </failure>
+  </testcase>
+  <testcase classname="limiter.SharedStoreTest" name="test_set" time="0.456"/>
+  <testcase classname="limiter.SharedStoreTest" name="test_get_missing" time="0.066">
+    <skipped/>
+  </testcase>
+</testsuite>

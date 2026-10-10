@@ -1,0 +1,102 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Performance baseline: core web vitals",
+    "subtitle": "Measured against the new threshold-based SLA. All metrics in green.",
+    "kind": "performance",
+    "status": "shipped",
+    "owner": "Performance team",
+    "tags": ["performance", "web-vitals"],
+    "pages": [
+      {
+        "title": "Key metrics",
+        "summary": "The three core web vitals and our SLA compliance.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "We measure Core Web Vitals every 10 minutes from 12 synthetic probes globally. The SLA requires 90th percentile values within the green threshold for each metric."
+          },
+          {
+            "type": "metrics",
+            "items": [
+              {
+                "label": "LCP (Largest Contentful Paint)",
+                "value": 1.8,
+                "unit": "s",
+                "baseline": 3.2,
+                "target": 2.5,
+                "better": "lower"
+              },
+              {
+                "label": "FID (First Input Delay)",
+                "value": 45,
+                "unit": "ms",
+                "baseline": 110,
+                "target": 100,
+                "better": "lower"
+              },
+              {
+                "label": "CLS (Cumulative Layout Shift)",
+                "value": 0.04,
+                "baseline": 0.12,
+                "target": 0.1,
+                "better": "lower"
+              }
+            ]
+          },
+          {
+            "type": "callout",
+            "tone": "good",
+            "text": "All three metrics meet the SLA. LCP and FID are significantly improved."
+          }
+        ]
+      },
+      {
+        "title": "Distribution by bin",
+        "summary": "Distribution of metric values over the measurement period.",
+        "blocks": [
+          {
+            "type": "chart",
+            "form": "bar",
+            "title": "LCP distribution",
+            "unit": "samples",
+            "categories": ["0-500ms", "500-1000ms", "1000-1500ms", "1500-2000ms", "2000-2500ms", "2500ms+"],
+            "series": [
+              {
+                "label": "Samples",
+                "values": [12000, 8500, 4200, 2100, 1800, 1400]
+              }
+            ]
+          },
+          {
+            "type": "prose",
+            "text": "The distribution shows LCP is fast for most users (68% are under 1 second). The long tail beyond 2.5s is mostly users on 3G or slower networks."
+          }
+        ]
+      },
+      {
+        "title": "Regional breakdown",
+        "summary": "How metrics vary by geography.",
+        "blocks": [
+          {
+            "type": "chart",
+            "form": "bar",
+            "title": "LCP by region",
+            "unit": "ms",
+            "categories": ["US East", "US West", "Europe", "Asia Pacific", "South America"],
+            "series": [
+              {
+                "label": "50th percentile",
+                "values": [1200, 1450, 1680, 2340, 2800]
+              }
+            ]
+          },
+          {
+            "type": "prose",
+            "text": "The biggest variation is with Asia Pacific and South America. Both regions have higher latency to our origin in US East. We are considering regional CDN nodes."
+          }
+        ]
+      }
+    ]
+  }
+}

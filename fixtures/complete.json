@@ -1,0 +1,648 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Rate limiter fix: shared state instead of per-process",
+    "subtitle": "Deployed to staging, load-tested, pending production window.",
+    "kind": "fix",
+    "status": "in-review",
+    "owner": "Platform team",
+    "period": {
+      "from": "2026-10-01",
+      "to": "2026-10-09"
+    },
+    "source": {
+      "repo": "monorepo",
+      "branch": "main",
+      "commit": "4f2a9c1d8e3f6b9c2a5d8e1f4a7b9c2",
+      "href": "https://github.com/example/monorepo/commit/4f2a9c1"
+    },
+    "tags": [
+      "performance",
+      "staging"
+    ],
+    "chrome": "auto",
+    "pages": [
+      {
+        "title": "Results",
+        "summary": "Measurements from the fix",
+        "blocks": [
+          {
+            "type": "metrics",
+            "title": "Before and after",
+            "items": [
+              {
+                "label": "p95 latency",
+                "value": 182,
+                "unit": "ms",
+                "baseline": 340,
+                "better": "lower",
+                "spark": [
+                  340,
+                  320,
+                  310,
+                  290,
+                  250,
+                  220,
+                  190,
+                  182
+                ]
+              },
+              {
+                "label": "Error rate",
+                "value": 0.3,
+                "unit": "%",
+                "baseline": 2.1,
+                "better": "lower"
+              },
+              {
+                "label": "Requests served",
+                "value": 1420000,
+                "unit": "req/day",
+                "target": 1500000
+              }
+            ],
+            "evidence": [
+              {
+                "label": "Load test run",
+                "href": "https://example.invalid/ci/runs/8842",
+                "kind": "run",
+                "checkedBy": "code",
+                "confidence": "high"
+              }
+            ]
+          },
+          {
+            "type": "chart",
+            "title": "Requests rejected per hour during load test",
+            "form": "bar",
+            "unit": "req",
+            "categories": [
+              "09",
+              "10",
+              "11",
+              "12",
+              "13"
+            ],
+            "series": [
+              {
+                "label": "before",
+                "values": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              },
+              {
+                "label": "after",
+                "values": [
+                  12,
+                  340,
+                  410,
+                  388,
+                  402
+                ]
+              }
+            ]
+          },
+          {
+            "type": "gauge",
+            "title": "Error budget spent",
+            "value": 32,
+            "max": 100,
+            "unit": "%",
+            "bands": [
+              {
+                "to": 50,
+                "tone": "good"
+              },
+              {
+                "to": 80,
+                "tone": "warn"
+              },
+              {
+                "to": 100,
+                "tone": "bad"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "What changed",
+        "summary": "Code and files touched",
+        "blocks": [
+          {
+            "type": "heading",
+            "text": "The problem",
+            "level": 2
+          },
+          {
+            "type": "prose",
+            "text": "The rate limiter counted requests per process, so four workers allowed four times the configured ceiling. The fix shares one counter across all workers using a distributed store.",
+            "evidence": [
+              {
+                "label": "Ticket",
+                "href": "https://example.invalid/tickets/2847",
+                "kind": "ticket",
+                "checkedBy": "human"
+              }
+            ]
+          },
+          {
+            "type": "compare",
+            "title": "How the limit is now counted",
+            "kind": "code",
+            "language": "ts",
+            "left": {
+              "label": "Before",
+              "value": "const count = local.get(key) ?? 0;\nif (count >= limit) return 429;"
+            },
+            "right": {
+              "label": "After",
+              "value": "const count = await shared.get(key) ?? 0;\nif (count >= limit) return 429;"
+            }
+          },
+          {
+            "type": "files",
+            "title": "Files touched",
+            "items": [
+              {
+                "path": "src/limiter/bucket.ts",
+                "state": "modified",
+                "added": 48,
+                "removed": 31,
+                "href": "https://example.invalid/blob/main/src/limiter/bucket.ts"
+              },
+              {
+                "path": "src/limiter/shared-store.ts",
+                "state": "added",
+                "added": 112,
+                "removed": 0
+              },
+              {
+                "path": "src/limiter/per-process.ts",
+                "state": "removed",
+                "added": 0,
+                "removed": 87
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "text": "Tests",
+            "level": 2
+          },
+          {
+            "type": "tests",
+            "title": "Limiter suite",
+            "suite": "npm test -- limiter",
+            "duration": 14.2,
+            "items": [
+              {
+                "name": "shares one counter across four workers",
+                "state": "passed",
+                "duration": 2.1
+              },
+              {
+                "name": "falls back when the store is unreachable",
+                "state": "passed",
+                "duration": 0.4
+              },
+              {
+                "name": "applies a per-route ceiling",
+                "state": "skipped",
+                "message": "Not implemented, see the scope block."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Decisions",
+        "summary": "Trade-offs and risks",
+        "blocks": [
+          {
+            "type": "heading",
+            "text": "Why this approach",
+            "level": 2
+          },
+          {
+            "type": "decision",
+            "title": "Shared counter over Redis",
+            "context": "The limiter needs one view of the count across all processes.",
+            "decision": "Use a local distributed consensus store, not a remote Redis.",
+            "consequences": "Lower latency and no external dependency on Redis. The trade-off is that a cascading failure of all store replicas is now possible, versus a single Redis failure affecting only one endpoint."
+          },
+          {
+            "type": "callout",
+            "tone": "warn",
+            "text": "The fix is deployed to staging only. Production still runs the per-process counter."
+          },
+          {
+            "type": "risks",
+            "title": "What could still go wrong",
+            "items": [
+              {
+                "title": "Store unavailability causes all requests to error",
+                "severity": "high",
+                "likelihood": "unlikely",
+                "mitigation": "A local cache with a 60-second TTL serves stale counts when the store is down, so requests do not error."
+              },
+              {
+                "title": "Rebalancing during a spike creates a gap",
+                "severity": "medium",
+                "likelihood": "possible",
+                "mitigation": "The rebalancing waits for in-flight requests to drain, up to a 30-second timeout."
+              }
+            ]
+          },
+          {
+            "type": "scorecard",
+            "title": "Acceptance criteria",
+            "criteria": [
+              {
+                "label": "One counter shared across workers",
+                "verdict": "pass"
+              },
+              {
+                "label": "Configurable per route",
+                "verdict": "partial",
+                "detail": "Global only. Per-route needs a schema change."
+              },
+              {
+                "label": "Deployed to production",
+                "verdict": "fail",
+                "detail": "Staging only, pending a release window."
+              },
+              {
+                "label": "Documentation updated",
+                "verdict": "pass"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Summary table",
+        "blocks": [
+          {
+            "type": "table",
+            "title": "Endpoints and their changes",
+            "columns": [
+              {
+                "label": "Route",
+                "align": "left"
+              },
+              {
+                "label": "Status",
+                "format": "status",
+                "align": "left"
+              },
+              {
+                "label": "p95",
+                "format": "ms",
+                "align": "right",
+                "total": "max"
+              },
+              {
+                "label": "Load",
+                "format": "number",
+                "align": "right",
+                "total": "sum"
+              }
+            ],
+            "rows": [
+              [
+                "POST /login",
+                "fixed",
+                182,
+                4200
+              ],
+              [
+                "POST /token",
+                "fixed",
+                164,
+                8900
+              ],
+              [
+                "GET /me",
+                "unchanged",
+                41,
+                12400
+              ],
+              [
+                "POST /logout",
+                "fixed",
+                98,
+                2100
+              ]
+            ],
+            "filter": true
+          },
+          {
+            "type": "kv",
+            "title": "Key facts",
+            "items": [
+              {
+                "label": "Lead engineer",
+                "value": "Alice Chen"
+              },
+              {
+                "label": "Review status",
+                "value": "Pending",
+                "tone": "warn"
+              },
+              {
+                "label": "Environment",
+                "value": "Staging",
+                "href": "https://staging.example.invalid/"
+              },
+              {
+                "label": "Store vendor",
+                "value": "Consul"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Extras",
+        "blocks": [
+          {
+            "type": "quote",
+            "text": "This has been paging us twice a week since June. I am tired.",
+            "who": "On-call rotation",
+            "role": "External stakeholder"
+          },
+          {
+            "type": "steps",
+            "title": "How to verify",
+            "items": [
+              {
+                "title": "Point a load generator at staging at 200 requests per second"
+              },
+              {
+                "title": "Watch the 429 rate",
+                "detail": "It should settle at the configured ceiling within ten seconds, not at 4x the ceiling."
+              },
+              {
+                "title": "Kill one store replica",
+                "detail": "The limiter should not error. Verify via the metrics dashboard."
+              }
+            ]
+          },
+          {
+            "type": "grid",
+            "title": "Side-by-side view",
+            "blocks": [
+              {
+                "type": "metrics",
+                "items": [
+                  {
+                    "label": "Staging latency",
+                    "value": 182,
+                    "unit": "ms",
+                    "baseline": 340,
+                    "better": "lower"
+                  }
+                ]
+              },
+              {
+                "type": "metrics",
+                "items": [
+                  {
+                    "label": "Production latency",
+                    "value": 340,
+                    "unit": "ms"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "The change itself",
+        "summary": "The patch, the new path, and what was in scope",
+        "blocks": [
+          {
+            "type": "heading",
+            "level": 2,
+            "text": "Where the count came from"
+          },
+          {
+            "type": "diff",
+            "path": "src/limiter/bucket.ts",
+            "language": "ts",
+            "patch": "@@ -10,9 +10,9 @@ export async function allow(key: string) {\n-  const count = local.get(key) ?? 0;\n-  if (count >= limit) return false;\n-  local.set(key, count + 1);\n+  const count = await shared.take(key, 1);\n+  if (count > limit) return false;\n   return true;\n }",
+            "evidence": [
+              {
+                "label": "Commit 4f2a9c1",
+                "kind": "commit",
+                "checkedBy": "code",
+                "hash": "4f2a9c1"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "path": "src/limiter/shared-store.ts",
+            "language": "ts",
+            "startLine": 18,
+            "highlight": [
+              2
+            ],
+            "source": "export async function take(key: string, cost = 1) {\n  // One round trip, and the script is atomic, so two workers\n  // cannot both read the same remaining budget.\n  return redis.eval(TAKE_SCRIPT, 1, key, String(cost));\n}"
+          },
+          {
+            "type": "checklist",
+            "title": "Scope, and what was left",
+            "items": [
+              {
+                "label": "One counter shared across every worker",
+                "state": "done"
+              },
+              {
+                "label": "Fall back to the old behaviour when the store is unreachable",
+                "state": "done"
+              },
+              {
+                "label": "Per-route limits",
+                "state": "skipped",
+                "note": "Needs a config schema change, which is its own review. Raised as PLAT-512."
+              },
+              {
+                "label": "Production rollout",
+                "state": "blocked",
+                "note": "Waiting on the Thursday release window. Nothing in the change blocks it."
+              }
+            ]
+          },
+          {
+            "type": "timeline",
+            "title": "How it went",
+            "items": [
+              {
+                "at": "2026-10-01 09:14",
+                "label": "Paged on a 429 storm",
+                "tone": "bad",
+                "href": "https://example.invalid/alerts/8812"
+              },
+              {
+                "at": "2026-10-01 11:40",
+                "label": "Found the per-process counter",
+                "tone": "info"
+              },
+              {
+                "at": "2026-10-06 15:20",
+                "label": "Shared counter behind a flag",
+                "tone": "neutral"
+              },
+              {
+                "at": "2026-10-09 16:02",
+                "label": "Flag on in staging, load test clean",
+                "tone": "good",
+                "href": "https://example.invalid/runs/8812"
+              }
+            ]
+          },
+          {
+            "type": "actions",
+            "title": "Still to do",
+            "items": [
+              {
+                "label": "Roll the shared counter to production",
+                "intent": "mitigate",
+                "state": "todo",
+                "owner": "Platform",
+                "due": "2026-10-16"
+              },
+              {
+                "label": "Add per-route limits to the config schema",
+                "intent": "prevent",
+                "state": "todo",
+                "owner": "Platform",
+                "href": "https://example.invalid/tickets/PLAT-512"
+              },
+              {
+                "label": "Alert on the limiter falling back",
+                "intent": "prevent",
+                "state": "in-progress",
+                "owner": "Platform"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "How this was checked",
+        "summary": "The artefacts behind every claim on the first page",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "Every number on the Results page comes from one of the artefacts below. The two claims that rest on a reading rather than a measurement are marked as such."
+          },
+          {
+            "type": "findings",
+            "title": "What the scanner said, before and after",
+            "items": [
+              {
+                "message": "Rate limit state is per process",
+                "level": "error",
+                "path": "src/limiter/bucket.ts",
+                "line": 12,
+                "rule": "concurrency/shared-state",
+                "state": "fixed"
+              },
+              {
+                "message": "Retry loop has no upper bound",
+                "level": "warning",
+                "path": "src/limiter/retry.ts",
+                "line": 48,
+                "rule": "reliability/retry-bound",
+                "state": "open"
+              },
+              {
+                "message": "Fallback path is untested",
+                "level": "note",
+                "path": "src/limiter/shared-store.ts",
+                "line": 61,
+                "rule": "coverage/branch",
+                "state": "fixed"
+              }
+            ],
+            "evidence": [
+              {
+                "label": "Scan run 2291",
+                "kind": "run",
+                "checkedBy": "code",
+                "href": "https://example.invalid/scans/2291"
+              }
+            ]
+          },
+          {
+            "type": "log",
+            "title": "Load test, after the change",
+            "collapsed": true,
+            "highlight": [
+              "p95"
+            ],
+            "source": "running 200 rps for 60s against staging\n  accepted  : 11882\n  rejected  : 24118  (429)\n  p95       : 182ms\n  p99       : 241ms\n  fallbacks : 0\ndone in 60.4s",
+            "evidence": [
+              {
+                "label": "Run 8812",
+                "kind": "run",
+                "checkedBy": "code",
+                "href": "https://example.invalid/runs/8812"
+              }
+            ]
+          },
+          {
+            "type": "image",
+            "src": "https://example.invalid/charts/429-storm.png",
+            "alt": "A spike of 429 responses between 09:00 and 11:00 on 1 October, flat afterwards",
+            "caption": "The storm that started the investigation"
+          },
+          {
+            "type": "embed",
+            "title": "Coverage report, as the tool generated it",
+            "note": "Rendered in a sandboxed frame. Nothing in it runs.",
+            "html": "<table><tr><th>File</th><th>Covered</th></tr><tr><td>bucket.ts</td><td>94%</td></tr><tr><td>shared-store.ts</td><td>88%</td></tr></table>"
+          },
+          {
+            "type": "evidence",
+            "title": "Everything this report rests on",
+            "items": [
+              {
+                "label": "Load test run 8812, 200 rps for 60s",
+                "kind": "run",
+                "checkedBy": "code",
+                "href": "https://example.invalid/runs/8812"
+              },
+              {
+                "label": "Limiter suite, 41 tests",
+                "kind": "test",
+                "checkedBy": "code",
+                "href": "https://example.invalid/ci/5521"
+              },
+              {
+                "label": "Reviewed by the on-call rotation",
+                "kind": "doc",
+                "checkedBy": "human"
+              },
+              {
+                "label": "Estimate that production traffic looks like staging traffic",
+                "kind": "other",
+                "checkedBy": "llm",
+                "confidence": "low",
+                "excerpt": "Inferred from the shape of last week request logs. Not measured against production."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

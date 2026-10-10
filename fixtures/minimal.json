@@ -1,0 +1,17 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Minimal report",
+    "pages": [
+      {
+        "title": "Overview",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "This is the smallest valid document."
+          }
+        ]
+      }
+    ]
+  }
+}

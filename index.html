@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Strict CSP. An inline script runs only if its sha256 is listed: the two hashes are the
+       theme guard and the NeoKeys chrome guard below, so editing either means re-hashing it
+       (smoke check 29 hashes every inline script and reports a mismatch, in both directions).
+       Inline on*="" handlers never run; attach listeners from a script file.
+
+       Three directives are wider than the template's, each for one feature, and each is a
+       deliberate trade rather than an oversight:
+
+       img-src https:    a report points at the artefacts it is reporting on, and a screenshot
+                         lives wherever CI put it. An allowlist cannot be written in advance.
+       connect-src https: the ?src= form fetches a document the visitor explicitly named. This
+                         is the one outbound request this page can make, and only on demand.
+       frame-src 'self' data: blob:  the embed block renders foreign HTML through a sandboxed
+                         srcdoc frame. A remote URL is NOT frameable under this policy and the
+                         renderer says so rather than showing an empty box.
+
+       What this page still cannot do is the part that matters: no third-party script, no eval,
+       no object, no base-uri, no worker, and no form posts off-origin. There is no account and
+       no session here, so there is no credential for a script injection to steal. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-na6phygP/tfoCIp4oBeQgGJJpQsZob/udrLum+20QTI=' 'sha256-gDRsS/PYkjbFDPVw+Hmsifzt2FnbMWzsp48fw8BxrHk=' https://gc.zgo.at https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://cdn.neorgon.org/v1.0.0/; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https:; manifest-src 'self'; frame-src 'self' data: blob:; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Dossier">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="neo-mark" content="on">
+  <title>Dossier | Work report renderer</title>
+  <meta name="description" content="Render AI-written work reports from one JSON file: metric tiles, charts and before-and-after comparisons, kept in your browser and shared by link">
+  <meta property="og:title" content="Dossier">
+  <meta property="og:description" content="Render AI-written work reports from one JSON file: metric tiles, charts and before-and-after comparisons, kept in your browser and shared by link">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://dossier.neorgon.com/">
+  <meta property="og:site_name" content="Neorgon">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Dossier">
+  <meta name="twitter:description" content="Render AI-written work reports from one JSON file: metric tiles, charts and before-and-after comparisons, kept in your browser and shared by link">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://dossier.neorgon.com/">
+  <meta property="og:locale" content="en_US">
+  <meta name="theme-color" content="#040714">
+  <meta property="og:image" content="https://dossier.neorgon.com/og-preview.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Dossier: work reports, rendered from one file">
+  <meta name="twitter:image" content="https://dossier.neorgon.com/og-preview.jpg">
+  <!-- Fleet design tokens: canonical, do not redeclare locally (docs/references/new-project-context.md, Design) -->
+  <link rel="stylesheet" href="https://cdn.neorgon.org/v1.0.0/styles/base.css">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- template:styles -->
+  <!-- Viz Kit: every chart is a builder from js/viz.js. Canonical source is
+       packages/neorgon-ui/{css/viz.css,js/viz.js}, refreshed by sync-viz.sh.
+       Do not edit these copies. -->
+  <link rel="stylesheet" href="css/viz.css">
+  <!-- NeoKeys: owns H, the ? sheet and the WCAG 2.1.4 remap panel. The render
+       mode is a separate site-owned attribute, see js/chrome.js for why. -->
+  <meta name="neo-chrome-toggle" content="on">
+  <link rel="stylesheet" href="css/neorgon-keys.css">
+  <!-- The report document and its blocks. -->
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/report.css">
+  <link rel="stylesheet" href="css/blocks.css">
+  <link rel="stylesheet" href="css/authoring.css">
+  <!-- /template:styles -->
+  <!-- Neorgon Header Kit (vendored; ?header=live swaps CSS to CDN). Keep after style.css, the kit owns the header. -->
+  <script>(function(){var m=location.search.match(/[?&]theme=([\w-]+)/)||document.cookie.match(/(?:^|;\s*)neo_theme=([\w-]+)/);if(m&&m[1]!=='default')document.documentElement.dataset.theme=decodeURIComponent(m[1]);})();</script>
+  <script>try{if(/(?:^|;\s*)neo_chrome=off/.test(document.cookie))document.documentElement.dataset.chrome='off'}catch(e){}</script>
+  <link rel="stylesheet" href="css/neorgon-header.css">
+  <link rel="stylesheet" href="css/neorgon-themes.css">
+  <link rel="stylesheet" href="https://cdn.neorgon.org/v1.0.0/header/season.css">
+  <script defer src="js/neorgon-header.js"></script>
+  <!-- Neorgon Footer Kit (vendored). Pins the footer to the viewport floor on short
+       pages and builds the meta bar + back-to-top. See packages/neorgon-ui/footer/README.md.
+       Optional stamps: <meta name="neo-repo"|"neo-version"|"neo-updated"> -->
+  <link rel="stylesheet" href="css/neorgon-footer.css">
+  <script defer src="js/neorgon-footer.js"></script>
+  <!-- Neorgon Beacon Kit (vendored). Bottom-left correction reporter: it
+       carries page context to balise.neorgon.com in a URL fragment and the
+       visitor writes there. No form on this page and no request from it.
+       Opt out per page with <meta name="beacon" content="off">.
+       See packages/neorgon-ui/beacon/README.md. -->
+  <meta name="beacon-site" content="dossier-site">
+  <link rel="stylesheet" href="css/neorgon-beacon.css">
+  <script defer src="js/neorgon-beacon.js"></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Dossier",
+    "description": "Render AI-written work reports from one JSON file: metric tiles, charts and before-and-after comparisons, kept in your browser and shared by link",
+    "url": "https://dossier.neorgon.com/",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Any",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Organization", "name": "Neorgon", "url": "https://neorgon.com/" }
+  }
+  </script>
+</head>
+<body>
+
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- Neorgon Header Kit contract (packages/neorgon-ui/header/README.md).
+       data-header-mode: hub (glass) | content (sticky gradient) | app (slim, auto-hides on scroll).
+       Pick content for learning/content sites, app for tool-dense sites. -->
+  <header class="header-bar" data-header-mode="app">
+    <div class="header-logo">
+      <!-- PATTERN: one link: mark + name go to THIS site's home (root or #home)
+           so clicking either resets the view. The hub icon in .header-right
+           is the only header link to neorgon.com. -->
+      <a href="./" class="header-title-link">
+        <img src="energon-classic-logo.png" class="header-logo-img" alt="">
+        <div class="header-title-wrap">
+          <h1>Dossier</h1>
+          <div class="header-subtitle">Work reports, rendered from one file</div>
+        </div>
+      </a>
+    </div>
+
+    <!-- .header-right owns margin-left:auto; home icon is always last. -->
+    <div class="header-right">
+      <!-- template:actions -->
+      <!-- Controls live inside .header-actions so the kit gives them one height
+           and folds the rest into its own overflow menu at narrow widths. Only
+           Open keeps its place at narrow widths: the shell contract allows one
+           primary action beside home, and bringing a report in is the one that
+           has to be reachable with nothing open. A labelled control wraps its
+           label in a span, which is how the kit tells it from an icon button. -->
+      <div class="header-actions">
+        <button type="button" id="openReport" data-action="open" data-keep-mobile
+                title="Open a report file, or paste one">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+          </svg>
+          <span>Open</span>
+        </button>
+        <button type="button" id="shareReport" data-action="share"
+                title="Copy a link with the report inside it">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8.6 13.5 15.4 17M15.4 7 8.6 10.5"/>
+            <circle cx="18" cy="5.5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="18.5" r="2.6"/>
+          </svg>
+          <span>Share</span>
+        </button>
+        <button type="button" id="openCatalog" data-action="catalog" title="Pick a block to add">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/>
+            <rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.2"/>
+          </svg>
+          <span>Blocks</span>
+        </button>
+        <button type="button" id="exportReport" data-action="export" title="Download a file that opens anywhere">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 21V9m0 12-4-4m4 4 4-4M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"/>
+          </svg>
+          <span>Export</span>
+        </button>
+        <button type="button" id="toggleFindings" data-action="findings"
+                aria-expanded="false" aria-controls="findingsPanel"
+                title="What the linter says about this report">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 9v4m0 3h.01M10.3 4.3 2.8 17.2A1.6 1.6 0 0 0 4.2 19.6h15.6a1.6 1.6 0 0 0 1.4-2.4L13.7 4.3a1.6 1.6 0 0 0-2.8 0Z"/>
+          </svg>
+          <span>Findings</span>
+          <span class="ds-count" id="findingsCount" hidden>0</span>
+        </button>
+        <button type="button" id="toggleMode" data-action="toggle-mode" aria-pressed="false"
+                title="Put the editor away, or bring it back (R)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/>
+            <circle cx="12" cy="12" r="2.6"/>
+          </svg>
+          <span>Read</span>
+        </button>
+      </div>
+      <!-- /template:actions -->
+
+      <!-- Accounts (only for a site with sign-in): the Neorgon Auth Kit renders a "Sign in"
+           button in this slot, and Clerk's avatar menu once signed in. It also owns the
+           sign-in dialog, so there is no panel or modal to write. Vendor it with
+           packages/neorgon-ui/sync-auth.sh (its header shows how to adopt one site), then add
+             <meta name="clerk-publishable-key" content="pk_live_...">
+             a stylesheet link to css/neorgon-auth.css (named in prose here, because the
+             smoke ref checker reads comments and this file does not exist until you vendor it)
+           to <head>, and in js/events.js:
+             import { NeoAuth } from './neorgon-auth.js';
+             NeoAuth.onChange(({ signedIn, label }) => ...); NeoAuth.start({ convex });
+           Contract, CSP and gated actions: packages/neorgon-ui/auth/README.md
+      <div class="neo-auth" data-neo-auth data-keep-mobile hidden></div>
+      -->
+
+      <a class="header-home" href="https://neorgon.com/" title="neorgon.com" aria-label="Neorgon home">
+        <svg class="nh-hub-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 4.4 18.58 8.2 18.58 15.8 12 19.6 5.42 15.8 5.42 8.2Z" fill="currentColor" stroke="none"/>
+          <g class="nh-orbit">
+            <path d="M2.47 17.50 A11.0 11.0 0 0 1 14.85 1.37" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round"/>
+            <path d="M21.53 6.50 A11.0 11.0 0 0 1 9.15 22.63" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round"/>
+            <circle cx="21.71" cy="6.84" r="1.25" fill="currentColor"/>
+            <circle cx="2.29" cy="17.16" r="1.25" fill="currentColor"/>
+          </g>
+        </svg>
+      </a>
+    </div>
+  </header>
+
+  <!-- template:main -->
+  <main id="main" tabindex="-1">
+
+    <!-- Three regions. Read mode hides the rail and the source pane and gives
+         the whole window to the report, which is what a link recipient wants.
+         Build mode shows all three. css/report.css owns the switch. -->
+    <div class="ds-shell" id="shell">
+
+      <aside class="ds-rail" id="rail" aria-label="Reports and pages">
+        <section class="ds-rail__group" aria-labelledby="libraryHeading">
+          <div class="ds-rail__head">
+            <h2 id="libraryHeading">Reports</h2>
+            <button type="button" data-action="new-report" title="Start an empty report">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                   stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+              <span class="visually-hidden">New report</span>
+            </button>
+          </div>
+          <label class="visually-hidden" for="reportFilter">Filter reports and pages</label>
+          <input type="search" id="reportFilter" placeholder="Filter" autocomplete="off"
+                 enterkeyhint="search" maxlength="120">
+          <ul class="ds-library" id="library"></ul>
+        </section>
+
+        <section class="ds-rail__group" aria-labelledby="outlineHeading">
+          <div class="ds-rail__head"><h2 id="outlineHeading">This report</h2></div>
+          <nav id="outline" aria-labelledby="outlineHeading"></nav>
+        </section>
+      </aside>
+
+      <div class="ds-stage" id="stageWrap">
+        <nav class="ds-tabs" id="pageTabs" aria-label="Report pages" hidden></nav>
+        <div class="ds-report" id="stage" aria-live="polite" aria-busy="false"></div>
+      </div>
+
+      <section class="ds-source" id="sourcePane" aria-labelledby="sourceHeading">
+        <div class="ds-source__head">
+          <h2 id="sourceHeading">Source</h2>
+          <div class="ds-source__tabs" role="tablist" aria-label="How to edit">
+            <button type="button" role="tab" id="tabForm" aria-selected="true"
+                    aria-controls="formPane" data-action="source-tab" data-pane="form">Form</button>
+            <button type="button" role="tab" id="tabJson" aria-selected="false"
+                    aria-controls="jsonPane" data-action="source-tab" data-pane="json">JSON</button>
+          </div>
+          <button type="button" data-action="format-json" title="Tidy the document">Format</button>
+        </div>
+
+        <div id="formPane" role="tabpanel" aria-labelledby="tabForm"></div>
+
+        <!-- js/editor.js builds the textarea, its toolbar and the error banner,
+             so this is a mount point rather than a second copy of them. -->
+        <div id="jsonPane" role="tabpanel" aria-labelledby="tabJson" hidden></div>
+      </section>
+
+      <section class="ds-findings" id="findingsPanel" aria-labelledby="findingsHeading" hidden>
+        <div class="ds-findings__head">
+          <h2 id="findingsHeading">Findings</h2>
+          <button type="button" data-action="findings" aria-label="Close findings">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6 6 18"/>
+            </svg>
+          </button>
+        </div>
+        <div id="findingsBody"></div>
+      </section>
+    </div>
+
+    <!-- The front door for someone with nothing open yet. Replaced by the
+         report as soon as there is one, and brought back when the last one is
+         closed. "Nothing open" and "that file would not load" are different
+         states and never share a message. -->
+    <div class="ds-welcome" id="welcome">
+      <div class="ds-welcome__inner">
+        <h2>Paste a report, or start from one</h2>
+        <p>
+          Everything stays in this browser. There is no account and no server,
+          and a report you share travels inside its own link.
+        </p>
+        <div class="ds-welcome__actions">
+          <button type="button" class="btn btn--primary" data-action="open">Open a file or paste</button>
+          <button type="button" class="btn" data-action="templates">Start from a template</button>
+          <button type="button" class="btn" data-action="demo">See the example report</button>
+        </div>
+        <p class="ds-welcome__note">
+          Writing one with an agent? Point it at
+          <a href="llms.txt">llms.txt</a> and
+          <a href="schema.json">schema.json</a>.
+        </p>
+      </div>
+    </div>
+
+    <!-- Paste and import. A native dialog: the platform owns Escape and the
+         focus trap, and js/dialogs.js owns launch and return focus. -->
+    <dialog id="importDialog" class="ds-dialog" aria-labelledby="importHeading">
+      <form method="dialog">
+        <h2 id="importHeading">Open a report</h2>
+        <p class="ds-dialog__lead">
+          A Dossier document, or something else a report can be built from:
+          a diff, a test run, a scan, a Lighthouse report, Markdown or HTML.
+        </p>
+        <label for="importFile">Choose a file</label>
+        <input type="file" id="importFile"
+               accept=".json,.yaml,.yml,.md,.html,.htm,.xml,.sarif,.txt">
+        <label for="importText">Or paste it here</label>
+        <textarea id="importText" rows="10" spellcheck="false" data-text-surface
+                  placeholder='{"dossier": {"version": 1, "title": "...", "pages": []}}'></textarea>
+        <p class="ds-dialog__detected" id="importDetected" role="status"></p>
+        <div class="ds-dialog__actions">
+          <button type="button" class="btn btn--primary" data-action="import-confirm">Open it</button>
+          <button type="submit" class="btn" value="cancel">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- The block catalog is a dialog built by js/catalog.js and appended at
+         boot, because its cards are previewed with the real renderer and the
+         markup has to come from the module that knows the registry. -->
+
+    <dialog id="exportDialog" class="ds-dialog" aria-labelledby="exportHeading">
+      <form method="dialog">
+        <h2 id="exportHeading">Export</h2>
+        <div id="exportBody"></div>
+        <div class="ds-dialog__actions">
+          <button type="submit" class="btn" value="cancel">Close</button>
+        </div>
+      </form>
+    </dialog>
+  </main>
+  <!-- /template:main -->
+
+  <!-- Neorgon Footer Kit contract. data-footer-mode: minimal (default) | content | app.
+       Replace the copy with a real note (privacy, data provenance, disclaimer) or drop
+       the text entirely, the kit appends "Part of Neorgon" and any version stamps. -->
+  <footer class="neo-footer" data-footer-mode="minimal">
+    <!-- Optional: one accurate line about provenance or data use. The kit adds attribution. -->
+  </footer>
+
+  <div id="app-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

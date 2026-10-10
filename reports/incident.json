@@ -1,0 +1,138 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Database failover incident: 45 minute outage",
+    "subtitle": "Primary database became unavailable. Failover to replica succeeded. RCA identified replication lag detection failure.",
+    "kind": "incident",
+    "status": "shipped",
+    "owner": "Infrastructure team",
+    "tags": ["database", "reliability"],
+    "period": {
+      "from": "2026-10-08",
+      "to": "2026-10-08"
+    },
+    "pages": [
+      {
+        "title": "Summary",
+        "summary": "What happened and what we did about it.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "At 2026-10-08T14:32Z, our primary PostgreSQL database became unresponsive. Automated failover detected the issue at T+8 minutes and promoted the standby replica. Service was fully restored at T+45 minutes."
+          },
+          {
+            "type": "metrics",
+            "items": [
+              {
+                "label": "Outage duration",
+                "value": 45,
+                "unit": "min",
+                "better": "lower"
+              },
+              {
+                "label": "Customer impact",
+                "value": 32000,
+                "unit": "req",
+                "better": "lower"
+              },
+              {
+                "label": "Failover latency",
+                "value": 8,
+                "unit": "min",
+                "better": "lower"
+              }
+            ]
+          },
+          {
+            "type": "callout",
+            "tone": "warn",
+            "text": "Failover detection was slower than the SLA of 5 minutes because replication lag checks were not running."
+          }
+        ]
+      },
+      {
+        "title": "Timeline",
+        "summary": "When things happened.",
+        "blocks": [
+          {
+            "type": "timeline",
+            "items": [
+              {
+                "time": "2026-10-08T14:32:00Z",
+                "label": "Primary becomes unresponsive",
+                "body": "Connection pool starts timing out on all queries."
+              },
+              {
+                "time": "2026-10-08T14:35:00Z",
+                "label": "Alerting fires",
+                "body": "On-call team is paged. Application error rate reaches 95%."
+              },
+              {
+                "time": "2026-10-08T14:40:00Z",
+                "label": "Manual investigation begins",
+                "body": "Team connects to replica, checks replication lag. Shows 20ms lag, which is normal."
+              },
+              {
+                "time": "2026-10-08T14:42:00Z",
+                "label": "Failover automation triggers",
+                "body": "After 10 minutes of primary unavailability, the automatic failover script promotes the replica."
+              },
+              {
+                "time": "2026-10-08T14:50:00Z",
+                "label": "Application reconnects",
+                "body": "Application detects replica is now primary and failover config propagates."
+              },
+              {
+                "time": "2026-10-08T15:17:00Z",
+                "label": "All traffic restored",
+                "body": "Last customer reconnects. Error rate returns to baseline."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Root cause",
+        "summary": "Why the primary went down and how we could have detected it sooner.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "The primary database ran out of disk space at 14:32Z. The event was not detected because disk usage monitoring had a 15-minute resolution, so it missed the spike."
+          },
+          {
+            "type": "callout",
+            "tone": "info",
+            "text": "We got lucky: the replica was caught up and promoted cleanly. If replication had lagged, we would have lost 20 minutes of recent writes."
+          }
+        ]
+      },
+      {
+        "title": "Action items",
+        "summary": "What we are doing to prevent this.",
+        "blocks": [
+          {
+            "type": "checklist",
+            "items": [
+              {
+                "text": "Add disk usage alert with 1-minute resolution and 80% threshold",
+                "done": false
+              },
+              {
+                "text": "Restore replication lag detection script and test in staging",
+                "done": false
+              },
+              {
+                "text": "Reduce failover detection timeout from 10 to 5 minutes",
+                "done": false
+              },
+              {
+                "text": "Set up automatic disk cleanup for old log files",
+                "done": false
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

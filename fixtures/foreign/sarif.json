@@ -1,0 +1,54 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ESLint",
+          "version": "8.0.0"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "no-unused-vars",
+          "level": "error",
+          "message": {
+            "text": "Variable 'x' is defined but never used"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.js"
+                },
+                "region": {
+                  "startLine": 42
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "no-console",
+          "level": "warning",
+          "message": {
+            "text": "Unexpected console statement"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/debug.js"
+                },
+                "region": {
+                  "startLine": 15
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

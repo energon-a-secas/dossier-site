@@ -1,0 +1,71 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Architecture decision: Monolith or microservices",
+    "subtitle": "Evaluated both paths. Chose monolith for now because we lack operational maturity for services.",
+    "kind": "comparison",
+    "status": "shipped",
+    "owner": "Architecture team",
+    "tags": ["architecture", "decision"],
+    "pages": [
+      {
+        "title": "The decision",
+        "summary": "What we decided and why.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "We evaluated splitting the codebase into three services: auth, API, and compute. We chose to stay monolithic for now. The operational cost of microservices (deployment, monitoring, debugging) would exceed any benefit until we reach 500 QPS."
+          },
+          {
+            "type": "callout",
+            "tone": "info",
+            "text": "The decision is not permanent. We marked three services as 'extract when scaling becomes a bottleneck'. The code is organized so extraction is a bounded task."
+          }
+        ]
+      },
+      {
+        "title": "Tradeoff",
+        "summary": "Monolith vs microservices.",
+        "blocks": [
+          {
+            "type": "compare",
+            "title": "Monolith vs microservices",
+            "kind": "code",
+            "left": {
+              "label": "Monolith",
+              "value": "Deploy: all or nothing\nDebug: one service\nScale: whole system"
+            },
+            "right": {
+              "label": "Microservices",
+              "value": "Deploy: per service\nDebug: trace across three\nScale: independent"
+            }
+          }
+        ]
+      },
+      {
+        "title": "When to revisit",
+        "summary": "Triggering conditions for re-evaluating this decision.",
+        "blocks": [
+          {
+            "type": "steps",
+            "items": [
+              {
+                "text": "Sustained traffic reaches 300 QPS (currently 100 QPS, growing 10% per quarter)"
+              },
+              {
+                "text": "OR compute capacity becomes the bottleneck in production"
+              },
+              {
+                "text": "OR auth or API becomes a performance hotspot that needs separate optimization"
+              }
+            ]
+          },
+          {
+            "type": "prose",
+            "text": "At that point we will revisit. Extraction takes an estimated 4 weeks per service. We will do auth first (lowest risk), then compute (highest value), then API."
+          }
+        ]
+      }
+    ]
+  }
+}

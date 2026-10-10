@@ -1,0 +1,85 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Fixed limiter race condition",
+    "subtitle": "Request counter was not shared across worker processes, allowing 4x the configured rate.",
+    "kind": "fix",
+    "status": "shipped",
+    "owner": "Service team",
+    "tags": ["limiter", "concurrency"],
+    "pages": [
+      {
+        "title": "Overview",
+        "summary": "The problem and the fix.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "The rate limiter counted requests per process. With four workers, each worker had its own counter, so the service allowed four times the configured rate. The fix moves the counter to shared memory."
+          },
+          {
+            "type": "metrics",
+            "items": [
+              {
+                "label": "Requests per second",
+                "value": 250,
+                "unit": "req/s",
+                "baseline": 1000,
+                "better": "lower"
+              },
+              {
+                "label": "Peak latency",
+                "value": 182,
+                "unit": "ms",
+                "baseline": 340,
+                "better": "lower"
+              }
+            ]
+          },
+          {
+            "type": "callout",
+            "tone": "good",
+            "text": "The fix is deployed to production. Requests are now properly rate limited."
+          }
+        ]
+      },
+      {
+        "title": "Technical details",
+        "summary": "How the race condition happened and how it was resolved.",
+        "blocks": [
+          {
+            "type": "heading",
+            "text": "Root cause",
+            "level": 2
+          },
+          {
+            "type": "prose",
+            "text": "Each worker process imported the limiter at startup, creating a fresh counter. The counter was a module-level variable, so no data was shared. The first request on any worker would see a zero counter and increment it locally."
+          },
+          {
+            "type": "heading",
+            "text": "The fix",
+            "level": 2
+          },
+          {
+            "type": "prose",
+            "text": "We moved the counter to a Redis key. Every worker increments the same key and checks the same value. One Redis call per request is acceptable for the configured rate."
+          },
+          {
+            "type": "code",
+            "lang": "javascript",
+            "source": "const result = await redis.incrby(`limit:${key}`, 1);\nif (result > maxPerSecond) {\n  await redis.decr(`limit:${key}`);\n  return 429;\n}"
+          },
+          {
+            "type": "heading",
+            "text": "Verification",
+            "level": 2
+          },
+          {
+            "type": "prose",
+            "text": "We ran load tests sending 1000 requests per second across four workers. With the old code, all 1000 were accepted. With the new code, the configured limit of 250 per second was enforced consistently."
+          }
+        ]
+      }
+    ]
+  }
+}

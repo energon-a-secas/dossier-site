@@ -1,0 +1,126 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Migrated auth from Okta to Clerk",
+    "subtitle": "Replaced Okta SAML with Clerk OAuth for reduced vendor lock-in and 40% cost savings.",
+    "kind": "migration",
+    "status": "shipped",
+    "owner": "Platform team",
+    "tags": ["auth", "infrastructure"],
+    "pages": [
+      {
+        "title": "Overview",
+        "summary": "Why we migrated and what changed.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "We moved from Okta's SAML-based authentication to Clerk's OAuth provider. The change reduces vendor lock-in, cuts auth costs by 40%, and gives our users a faster login flow."
+          },
+          {
+            "type": "metrics",
+            "items": [
+              {
+                "label": "Annual cost savings",
+                "value": 28000,
+                "unit": "$",
+                "better": "higher"
+              },
+              {
+                "label": "Login time",
+                "value": 1.2,
+                "unit": "s",
+                "baseline": 2.8,
+                "better": "lower"
+              },
+              {
+                "label": "Sessions handled",
+                "value": 45000,
+                "unit": "per day"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Before and after",
+        "summary": "How the login flow changed.",
+        "blocks": [
+          {
+            "type": "compare",
+            "title": "Auth provider comparison",
+            "kind": "code",
+            "left": {
+              "label": "Okta SAML",
+              "value": "Setup: 3 weeks\nTimeout: 1 hour\nMFA: via Okta rules\nCost: $0.08 per user"
+            },
+            "right": {
+              "label": "Clerk OAuth",
+              "value": "Setup: 2 days\nTimeout: up to 30 days\nMFA: TOTP or passkeys\nCost: $0.048 per user"
+            }
+          }
+        ]
+      },
+      {
+        "title": "Rollback plan",
+        "summary": "How to revert if we hit a blocker.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "The Okta configuration remains active in production until we ship Clerk to 100% of users. If we hit a critical bug, we can roll back in two steps."
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "text": "Flip the environment variable AUTH_PROVIDER to 'okta' and deploy"
+              },
+              {
+                "text": "Drain Clerk sessions (users will be asked to login again)"
+              }
+            ]
+          },
+          {
+            "type": "callout",
+            "tone": "info",
+            "text": "Rollback can happen without user downtime if done within 24 hours. After that, Okta sessions will have expired."
+          }
+        ]
+      },
+      {
+        "title": "Rollout",
+        "summary": "How we deployed the migration.",
+        "blocks": [
+          {
+            "type": "prose",
+            "text": "We used a gradual rollout: 10% of users on day 1, 50% on day 2, 100% on day 3. At each step we monitored error rates, login latency, and session failures."
+          },
+          {
+            "type": "checklist",
+            "items": [
+              {
+                "text": "Stage environment passed auth flow tests",
+                "done": true,
+                "checkedBy": "code"
+              },
+              {
+                "text": "Staging SAML and OAuth both working in parallel",
+                "done": true,
+                "checkedBy": "human"
+              },
+              {
+                "text": "Canary (10%) running for 24 hours, no errors",
+                "done": true,
+                "checkedBy": "code"
+              },
+              {
+                "text": "Feature flag kill switch tested in production",
+                "done": true,
+                "checkedBy": "human"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

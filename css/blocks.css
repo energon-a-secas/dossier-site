@@ -1,0 +1,815 @@
+/**
+ * Block styling for all dossier block types.
+ */
+
+.block {
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+.block-heading {
+  margin: var(--space-4) 0 var(--space-2) 0;
+  font-weight: 600;
+}
+
+.block h2 {
+  font-size: var(--text-xl);
+}
+
+.block h3 {
+  font-size: var(--text-lg);
+}
+
+.block-prose {
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+.block-prose code {
+  background: var(--surface-2);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.block-prose a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.block-prose a:hover {
+  text-decoration: underline;
+}
+
+.block-callout {
+  padding: var(--space-4);
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.block-callout--neutral {
+  border-left-color: var(--text-secondary);
+}
+
+.block-callout--good {
+  border-left-color: rgb(34, 197, 94);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.block-callout--bad {
+  border-left-color: rgb(239, 68, 68);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.block-callout--warn {
+  border-left-color: rgb(234, 179, 8);
+  background: rgba(234, 179, 8, 0.1);
+}
+
+.block-callout--info {
+  border-left-color: var(--accent);
+  background: rgba(165, 180, 252, 0.1);
+}
+
+.block-quote {
+  border-left: 3px solid var(--accent);
+  padding: var(--space-3) 0 var(--space-3) var(--space-4);
+  font-style: italic;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.block-quote p {
+  margin: 0;
+}
+
+.quote-attr {
+  display: block;
+  font-style: normal;
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.quote-who::after {
+  content: ', ';
+}
+
+.block-steps,
+.block-kv,
+.block-checklist {
+  margin: var(--space-4) 0;
+  padding: 0 0 0 var(--space-6);
+}
+
+.block-steps li {
+  margin: var(--space-3) 0;
+  line-height: 1.6;
+}
+
+.block-steps li p {
+  margin: var(--space-2) 0 0 0;
+}
+
+.block-kv {
+  list-style: none;
+  padding: 0;
+}
+
+.block-kv dt {
+  font-weight: 600;
+  margin: var(--space-3) 0 var(--space-1) 0;
+}
+
+.block-kv dd {
+  margin: 0 0 var(--space-4) 0;
+  color: var(--text-secondary);
+}
+
+.block-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-4);
+}
+
+.grid-item--full {
+  grid-column: 1 / -1;
+}
+
+.grid-item--half {
+  grid-column: span 1;
+}
+
+.grid-item--third {
+  grid-column: span 1;
+}
+
+.grid-item--two-thirds {
+  grid-column: span 2;
+}
+
+.grid-content {
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+
+/* Metrics */
+.block-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4);
+}
+
+.metric-tile {
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  border: 1px solid var(--border);
+}
+
+.metric-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.metric-value {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/*
+ * The arrow says which way the number moved. The colour says whether that was
+ * good. Those are two different facts: a latency drop is down and good, and a
+ * throughput drop is down and bad, which is why these classes are named for
+ * goodness rather than direction.
+ *
+ * The word is always rendered beside the colour, because roughly one reader in
+ * twelve cannot use hue to tell them apart, and a report whose headline
+ * finding is carried by a shade of green is a report they cannot read.
+ *
+ * `--ok` and `--warn` are not defined by the fleet base.css, so the literal
+ * fallbacks are load bearing rather than belt and braces.
+ */
+.metric-delta {
+  font-size: var(--text-sm);
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-delta--good { color: var(--ok, #34d399); }
+.metric-delta--bad { color: var(--danger-hover, #fb7185); }
+.metric-delta--flat { color: var(--text-muted); }
+
+.metric-delta__word { color: var(--text-muted); font-size: var(--text-xs); }
+
+/* Scorecard */
+.block-scorecard {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.block-scorecard td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.scorecard-label {
+  font-weight: 500;
+  width: 40%;
+}
+
+.scorecard-verdict {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  width: 20%;
+  text-align: center;
+}
+
+.verdict--pass {
+  color: rgb(34, 197, 94);
+}
+
+.verdict--fail {
+  color: rgb(239, 68, 68);
+}
+
+.verdict--partial {
+  color: rgb(234, 179, 8);
+}
+
+.verdict--skipped {
+  color: var(--text-secondary);
+}
+
+/* Tables */
+.table-wrapper {
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.block-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.block-table th,
+.block-table td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.block-table th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.block-table tr:hover {
+  background: var(--surface-2);
+}
+
+.block-table td[align="right"],
+.block-table th[align="right"] {
+  text-align: right;
+}
+
+.block-table td[align="center"],
+.block-table th[align="center"] {
+  text-align: center;
+}
+
+/* Code and logs */
+.block-code,
+.block-log {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  padding: var(--space-4);
+  font-family: ui-monospace, monospace;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.block-code code,
+.block-log code {
+  all: unset;
+}
+
+.block-code .line.hl {
+  background: rgba(255, 255, 0, 0.1);
+}
+
+/* Files, diff */
+.block-files {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.block-files th,
+.block-files td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.block-files th {
+  font-weight: 600;
+  background: var(--surface-2);
+}
+
+.block-diff {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+}
+
+.diff-patch {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  overflow-x: auto;
+  font-family: ui-monospace, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.diff-patch code {
+  all: unset;
+}
+
+/* Checklist */
+.block-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.block-checklist li {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.block-checklist li:last-child {
+  border-bottom: none;
+}
+
+.check-done::before {
+  content: '✓ ';
+  color: rgb(34, 197, 94);
+  font-weight: 700;
+}
+
+.check-todo::before {
+  content: '○ ';
+  color: var(--text-secondary);
+}
+
+.check-partial::before {
+  content: '◐ ';
+  color: rgb(234, 179, 8);
+}
+
+.check-skipped::before {
+  content: '- ';
+  color: var(--text-secondary);
+}
+
+.check-blocked::before {
+  content: '⊗ ';
+  color: rgb(239, 68, 68);
+}
+
+/* Timeline */
+.block-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.timeline-item {
+  padding: var(--space-4) 0 var(--space-4) var(--space-8);
+  position: relative;
+  border-left: 2px solid var(--border);
+  margin-left: var(--space-2);
+}
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: var(--space-4);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  border: 2px solid var(--bg);
+}
+
+.timeline-neutral::before {
+  background: var(--text-secondary);
+}
+
+.timeline-good::before {
+  background: rgb(34, 197, 94);
+}
+
+.timeline-bad::before {
+  background: rgb(239, 68, 68);
+}
+
+.timeline-warn::before {
+  background: rgb(234, 179, 8);
+}
+
+.timeline-info::before {
+  background: var(--accent);
+}
+
+.timeline-time {
+  font-weight: 600;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.timeline-label {
+  margin: var(--space-1) 0 0 0;
+  font-weight: 500;
+}
+
+.timeline-detail {
+  margin: var(--space-2) 0 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+/* Risks, actions, decision */
+.risk-item,
+.action-item {
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--border);
+  margin-bottom: var(--space-3);
+}
+
+.risk-severity--high {
+  border-left-color: rgb(239, 68, 68);
+}
+
+.risk-severity--medium {
+  border-left-color: rgb(234, 179, 8);
+}
+
+.risk-severity--low {
+  border-left-color: rgb(34, 197, 94);
+}
+
+.action-state--done {
+  opacity: 0.7;
+  border-left-color: rgb(34, 197, 94);
+}
+
+.action-state--todo {
+  border-left-color: var(--accent);
+}
+
+.action-state--in-progress {
+  border-left-color: rgb(59, 130, 246);
+}
+
+.action-state--dropped {
+  border-left-color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.block-decision {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.decision-section {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--space-4);
+}
+
+.decision-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.decision-section h4 {
+  font-weight: 600;
+  margin: 0 0 var(--space-2) 0;
+}
+
+/* Image, embed */
+.block-image {
+  text-align: center;
+  margin: 0;
+}
+
+.block-image img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.block-image figcaption {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-top: var(--space-2);
+}
+
+.block-embed,
+.block-embed-html {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* Evidence */
+.block-evidence {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.evidence-item {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+
+.evidence-item:last-child {
+  border-bottom: none;
+}
+
+.evidence-item a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.evidence-item a:hover {
+  text-decoration: underline;
+}
+
+.evidence-checked-by {
+  color: var(--text-secondary);
+  font-size: 0.9em;
+}
+
+.evidence-marker {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.evidence-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Note */
+.block-note {
+  margin: var(--space-4) 0 0 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Empty and error states */
+.block-empty,
+.block-error {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.block-error {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgb(239, 68, 68);
+  color: var(--text-primary);
+}
+
+.error-hint {
+  font-size: var(--text-sm);
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}
+
+/* Findings */
+.finding-item {
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--border);
+  margin-bottom: var(--space-3);
+}
+
+.finding-level--error {
+  border-left-color: rgb(239, 68, 68);
+}
+
+.finding-level--warning {
+  border-left-color: rgb(234, 179, 8);
+}
+
+.finding-level--note {
+  border-left-color: var(--border);
+}
+
+.finding-message {
+  margin: 0;
+  font-weight: 500;
+}
+
+.finding-path,
+.finding-rule {
+  margin: var(--space-2) 0 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.finding-path code {
+  background: var(--bg);
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+
+/* Tests */
+.test-item {
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--border);
+  margin-bottom: var(--space-2);
+}
+
+.test-state--passed {
+  border-left-color: rgb(34, 197, 94);
+}
+
+.test-state--failed {
+  border-left-color: rgb(239, 68, 68);
+}
+
+.test-state--skipped {
+  border-left-color: var(--text-secondary);
+}
+
+.test-name {
+  margin: 0;
+  font-weight: 500;
+  font-size: var(--text-sm);
+}
+
+.test-duration {
+  margin: var(--space-1) 0 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* Print-specific overrides */
+@media print {
+  .block {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .block-evidence,
+  .evidence-marker {
+    display: block;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  table {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
+
+/* ── Evidence ──────────────────────────────────────────────────────────── */
+
+/*
+ * The disclosure that answers "how do you know?". It is deliberately quiet
+ * when closed and complete when open: a reader skimming does not need it, and
+ * a reviewer checking a claim needs all of it.
+ *
+ * A block whose only source is a model's own assertion gets a different left
+ * edge, because that is the case this product exists to make visible rather
+ * than to smooth over.
+ */
+.evidence-marker {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  border-left: 2px solid var(--border-strong);
+  padding-left: var(--space-2);
+}
+
+.evidence-marker--weak { border-left-color: var(--warn, #fbbf24); }
+
+.evidence-marker > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  list-style: none;
+}
+
+.evidence-marker > summary::-webkit-details-marker { display: none; }
+.evidence-marker > summary::before { content: "+ "; font-variant-numeric: tabular-nums; }
+.evidence-marker[open] > summary::before { content: "- "; }
+.evidence-marker > summary:hover { color: var(--text-primary); }
+
+.evidence-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-2); }
+.evidence-item { display: grid; gap: 2px; }
+.evidence-name { color: var(--text-secondary); }
+.evidence-facts { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; }
+
+.evidence-who {
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  font-size: .68rem;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+/* A machine check either passed or it did not. A person looked. A model said
+ * so. Only the third is a claim, and it is the one that reads as a caution. */
+.evidence-who--code { color: var(--ok, #34d399); }
+.evidence-who--human { color: var(--accent-bright); }
+.evidence-who--llm { color: var(--warn, #fbbf24); }
+.evidence-who--none { color: var(--text-muted); }
+
+.evidence-kind,
+.evidence-confidence { color: var(--text-muted); }
+.evidence-hash { font-size: .68rem; color: var(--text-muted); }
+
+.evidence-excerpt {
+  margin: 4px 0 0;
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+/* ── Grid ──────────────────────────────────────────────────────────────── */
+
+/*
+ * The one container. `--grid-columns` comes from the block, and `width` on a
+ * child is honoured only in here, which is what the registry promises.
+ */
+.block-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-columns, 2), minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.grid-item { min-width: 0; }
+.grid-item--full { grid-column: 1 / -1; }
+.grid-item--half { grid-column: span 1; }
+.grid-item--third { grid-column: span 1; }
+.grid-item--two-thirds { grid-column: span 2; }
+
+@media (max-width: 760px) {
+  .block-grid { grid-template-columns: minmax(0, 1fr); }
+  .grid-item,
+  .grid-item--two-thirds { grid-column: 1 / -1; }
+}
