@@ -17,6 +17,12 @@ import { toDossier as lighthouseToDossier } from './lighthouse.js';
 
 export const ADAPTERS = [
   {
+    id: 'html',
+    label: 'HTML',
+    test: (src) => detectHtml(src),
+    toDossier: htmlToDossier,
+  },
+  {
     id: 'numstat',
     label: 'Git diff stats',
     test: (src) => detectNumstat(src),
@@ -58,20 +64,23 @@ export const ADAPTERS = [
     test: (src) => detectLighthouse(src),
     toDossier: lighthouseToDossier,
   },
-  {
-    id: 'html',
-    label: 'HTML',
-    test: (src) => detectHtml(src),
-    toDossier: htmlToDossier,
-  },
 ];
 
 export function detect(source) {
   if (!source || typeof source !== 'string') return null;
 
+  // Native documents may contain HTML or Markdown inside a block. Malformed
+  // JSON must also reach the document parser for a useful error.
+  if (/^\s*[\[{]/.test(source)) {
+    try {
+      const value = JSON.parse(source);
+      if (value?.dossier || Array.isArray(value?.pages)) return null;
+    } catch { return null; }
+  }
+
   for (const adapter of ADAPTERS) {
     if (adapter.test(source)) {
-      return adapter.id;
+      return adapter;
     }
   }
 
@@ -122,5 +131,6 @@ function detectLighthouse(src) {
 }
 
 function detectHtml(src) {
-  return /<(html|body|div|p|table|h[1-6])\b/i.test(src);
+  const start = src.trimStart().replace(/^(?:<!--[\s\S]*?-->\s*)+/, '');
+  return /^(?:<!doctype\s+html\b|<(?:html|head|body|main|section|article|div|p|table|h[1-6]|style|svg|script)\b)/i.test(start);
 }

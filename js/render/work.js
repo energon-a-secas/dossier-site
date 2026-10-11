@@ -102,6 +102,7 @@ function renderTimeline(block) {
     html += `<li class="timeline-item timeline-${item.tone || 'neutral'}">`;
     html += `<time class="timeline-time">${escHtml(item.at || '')}</time>`;
     html += `<p class="timeline-label">${escHtml(item.label || '')}</p>`;
+    if (item.detail) html += `<p class="timeline-detail">${escHtml(item.detail)}</p>`;
     html += '</li>';
   }
   html += '</ol>';

@@ -24,16 +24,18 @@ export const COMPARE_KINDS = Object.freeze(['text', 'code', 'image', 'metrics', 
 export const JUDGMENT = [
   {
     id: 'compare',
-    name: 'Before and after',
+    name: 'Side-by-side comparison',
     group: 'Comparison',
-    summary: 'Two sides of the same thing, read together or wiped between.',
-    when: 'Something was one way and is now another. The most useful block here.',
+    summary: 'Responses, execution results or a before-and-after change, read together.',
+    when: 'Compare outputs from two prompts or runs, or inspect a visual change.',
     fields: {
       mode: enom(COMPARE_MODES, { note: 'Defaults to side. slider and overlay need images.' }),
       kind: enom(COMPARE_KINDS, { required: true, note: 'Both sides are the same kind.' }),
+      prompt: text({ maxLen: 4000, note: 'Optional shared prompt or task, shown above both sides.' }),
       left: obj(
         {
           label: str({ maxLen: 40, note: 'Defaults to "Before".' }),
+          caption: str({ maxLen: 160, note: 'Run settings or context for this response.' }),
           value: text({ note: 'Text, code or a log. Use src for an image.' }),
           src: url({ note: 'Image only.' }),
           items: arr('any', { note: 'Metrics or table rows, matching the kind.' }),
@@ -44,6 +46,7 @@ export const JUDGMENT = [
       right: obj(
         {
           label: str({ maxLen: 40, note: 'Defaults to "After".' }),
+          caption: str({ maxLen: 160, note: 'Run settings or context for this response.' }),
           value: text(),
           src: url(),
           items: arr('any'),
@@ -246,12 +249,12 @@ export const JUDGMENT = [
     summary: 'Foreign HTML, rendered sandboxed in its own frame.',
     when: 'You already have an HTML artefact and will not rewrite it as blocks.',
     fields: {
-      html: text({ maxLen: 400000, note: 'Rendered in a sandboxed frame with no scripts and no network.' }),
+      html: text({ maxLen: 400000, note: 'Complete HTML, including styles and inline assets. Rendered in an isolated frame; external resources are blocked.' }),
       src: url({
         note: 'A remote URL is not framed: this page\'s policy refuses third-party frames, so the block renders a link and says why. Use "html" for content you want shown inline.',
       }),
-      height: int({ note: 'Pixels. Measured from the content when absent.' }),
-      scripts: bool({ note: 'Allow scripts in the frame. Off by default, and a decision the reader is told about.' }),
+      height: int({ note: 'Frame height in pixels. Defaults to 780; single-artifact reports fit the viewport.' }),
+      scripts: bool({ note: 'Allow inline controls inside the isolated frame. Off by default. External scripts and access to the workspace are blocked.' }),
     },
     sample: {
       type: 'embed',
@@ -267,7 +270,7 @@ export const JUDGMENT = [
           add('info', 'A remote embed URL is shown as a link, not a frame, because this page refuses third-party frames. Inline the HTML in "html" to render it.');
         }
         if (b.scripts === true) {
-          add('warn', 'This embed allows scripts. The frame is still sandboxed and same-origin access is refused, but the reader is shown a label saying the content is unverified.');
+          add('info', 'Inline controls run in an isolated preview. External resources and access to the workspace are blocked.');
         }
         if (typeof b.html === 'string' && /<script\b/i.test(b.html) && b.scripts !== true) {
           add('info', 'The embedded HTML contains a script tag, which will not run. Set "scripts": true if it is load bearing, or convert the output to blocks.');

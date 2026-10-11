@@ -97,6 +97,9 @@ export function rerender(state, els) {
   if (!stage) return;
 
   stage.setAttribute('aria-busy', 'true');
+  for (const control of document.querySelectorAll('[data-needs-report]')) control.disabled = !model;
+  const origin = document.getElementById('reportOrigin');
+  if (origin) origin.textContent = state.isExample ? 'Example report · illustrative data' : state.reportId ? 'Saved in this browser' : state.fromUrl ? 'Shared report' : 'Your report';
 
   if (!model) {
     stage.replaceChildren();
@@ -128,13 +131,13 @@ function renderOutline(state, host) {
   for (const page of pages) {
     const li = document.createElement('li');
     const link = document.createElement('a');
-    link.href = `#/${page.id}`;
+    link.href = `#/${encodeURIComponent(page.id)}`;
     link.textContent = page.title || 'Untitled page';
     link.className = 'ds-outline__page';
     if (page.id === state.page) link.setAttribute('aria-current', 'page');
     li.appendChild(link);
 
-    if (page.headings && page.headings.length) {
+    if (page.id === state.page && page.headings && page.headings.length) {
       const sub = document.createElement('ul');
       for (const heading of page.headings) {
         const subLi = document.createElement('li');

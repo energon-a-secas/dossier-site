@@ -74,7 +74,7 @@ A work report is a JSON document that renders as a dashboard in the browser. The
 
 ### Comparison
 
-**Before and after** (`compare`): Something was one way and is now another. The most useful block here.
+**Side-by-side comparison** (`compare`): Compare outputs from two prompts or runs, or inspect a visual change.
 
 ### Judgment
 

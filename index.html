@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-season="off">
 <head>
   <meta charset="UTF-8">
   <!-- Strict CSP. An inline script runs only if its sha256 is listed: the two hashes are the
@@ -23,6 +23,7 @@
        no session here, so there is no credential for a script injection to steal. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-na6phygP/tfoCIp4oBeQgGJJpQsZob/udrLum+20QTI=' 'sha256-gDRsS/PYkjbFDPVw+Hmsifzt2FnbMWzsp48fw8BxrHk=' https://gc.zgo.at https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://cdn.neorgon.org/v1.0.0/; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https:; manifest-src 'self'; frame-src 'self' data: blob:; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="js/appearance.js"></script>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
@@ -42,14 +43,13 @@
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://dossier.neorgon.com/">
   <meta property="og:locale" content="en_US">
-  <meta name="theme-color" content="#040714">
+  <meta name="theme-color" content="#f3f4f7">
   <meta property="og:image" content="https://dossier.neorgon.com/og-preview.jpg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Dossier: work reports, rendered from one file">
   <meta name="twitter:image" content="https://dossier.neorgon.com/og-preview.jpg">
-  <!-- Fleet design tokens: canonical, do not redeclare locally (docs/references/new-project-context.md, Design) -->
-  <link rel="stylesheet" href="https://cdn.neorgon.org/v1.0.0/styles/base.css">
+  <!-- Document foundations are local so reports do not depend on a CDN. -->
   <link rel="stylesheet" href="css/style.css">
   <!-- template:styles -->
   <!-- Viz Kit: every chart is a builder from js/viz.js. Canonical source is
@@ -65,6 +65,9 @@
   <link rel="stylesheet" href="css/report.css">
   <link rel="stylesheet" href="css/blocks.css">
   <link rel="stylesheet" href="css/authoring.css">
+  <link rel="stylesheet" href="css/comparison.css">
+  <link rel="stylesheet" href="css/workspace.css">
+  <link rel="stylesheet" href="css/tokens.css">
   <!-- /template:styles -->
   <!-- Neorgon Header Kit (vendored; ?header=live swaps CSS to CDN). Keep after style.css, the kit owns the header. -->
   <script>(function(){var m=location.search.match(/[?&]theme=([\w-]+)/)||document.cookie.match(/(?:^|;\s*)neo_theme=([\w-]+)/);if(m&&m[1]!=='default')document.documentElement.dataset.theme=decodeURIComponent(m[1]);})();</script>
@@ -88,6 +91,7 @@
   <meta name="neo-repo" content="energon-a-secas/dossier-site">
   <meta name="neo-updated" content="updated Oct 2026">
   <meta name="beacon-site" content="dossier-site">
+  <meta name="beacon" content="off">
   <link rel="stylesheet" href="css/neorgon-beacon.css">
   <script defer src="js/neorgon-beacon.js"></script>
   <script type="application/ld+json">
@@ -111,7 +115,7 @@
   <!-- Neorgon Header Kit contract (packages/neorgon-ui/header/README.md).
        data-header-mode: hub (glass) | content (sticky gradient) | app (slim, auto-hides on scroll).
        Pick content for learning/content sites, app for tool-dense sites. -->
-  <header class="header-bar" data-header-mode="app">
+  <header class="header-bar" data-header-mode="app" data-header-skin="ink">
     <div class="header-logo">
       <!-- PATTERN: one link: mark + name go to THIS site's home (root or #home)
            so clicking either resets the view. The hub icon in .header-right
@@ -127,81 +131,7 @@
 
     <!-- .header-right owns margin-left:auto; home icon is always last. -->
     <div class="header-right">
-      <!-- template:actions -->
-      <!-- Controls live inside .header-actions so the kit gives them one height
-           and folds the rest into its own overflow menu at narrow widths. Only
-           Open keeps its place at narrow widths: the shell contract allows one
-           primary action beside home, and bringing a report in is the one that
-           has to be reachable with nothing open. A labelled control wraps its
-           label in a span, which is how the kit tells it from an icon button. -->
-      <div class="header-actions">
-        <button type="button" id="openReport" data-action="open" data-keep-mobile
-                title="Open a report file, or paste one">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
-          </svg>
-          <span>Open</span>
-        </button>
-        <button type="button" id="shareReport" data-action="share"
-                title="Copy a link with the report inside it">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M8.6 13.5 15.4 17M15.4 7 8.6 10.5"/>
-            <circle cx="18" cy="5.5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="18.5" r="2.6"/>
-          </svg>
-          <span>Share</span>
-        </button>
-        <button type="button" id="openCatalog" data-action="catalog" title="Pick a block to add">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/>
-            <rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.2"/>
-          </svg>
-          <span>Blocks</span>
-        </button>
-        <button type="button" id="exportReport" data-action="export" title="Download a file that opens anywhere">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 21V9m0 12-4-4m4 4 4-4M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"/>
-          </svg>
-          <span>Export</span>
-        </button>
-        <button type="button" id="toggleFindings" data-action="findings"
-                aria-expanded="false" aria-controls="findingsPanel"
-                title="What the linter says about this report">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 9v4m0 3h.01M10.3 4.3 2.8 17.2A1.6 1.6 0 0 0 4.2 19.6h15.6a1.6 1.6 0 0 0 1.4-2.4L13.7 4.3a1.6 1.6 0 0 0-2.8 0Z"/>
-          </svg>
-          <span>Findings</span>
-          <span class="ds-count" id="findingsCount" hidden>0</span>
-        </button>
-        <button type="button" id="toggleMode" data-action="toggle-mode" aria-pressed="false"
-                title="Put the editor away, or bring it back (R)">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/>
-            <circle cx="12" cy="12" r="2.6"/>
-          </svg>
-          <span>Read</span>
-        </button>
-      </div>
-      <!-- /template:actions -->
 
-      <!-- Accounts (only for a site with sign-in): the Neorgon Auth Kit renders a "Sign in"
-           button in this slot, and Clerk's avatar menu once signed in. It also owns the
-           sign-in dialog, so there is no panel or modal to write. Vendor it with
-           packages/neorgon-ui/sync-auth.sh (its header shows how to adopt one site), then add
-             <meta name="clerk-publishable-key" content="pk_live_...">
-             a stylesheet link to css/neorgon-auth.css (named in prose here, because the
-             smoke ref checker reads comments and this file does not exist until you vendor it)
-           to <head>, and in js/events.js:
-             import { NeoAuth } from './neorgon-auth.js';
-             NeoAuth.onChange(({ signedIn, label }) => ...); NeoAuth.start({ convex });
-           Contract, CSP and gated actions: packages/neorgon-ui/auth/README.md
-      <div class="neo-auth" data-neo-auth data-keep-mobile hidden></div>
-      -->
 
       <a class="header-home" href="https://neorgon.com/" title="neorgon.com" aria-label="Neorgon home">
         <svg class="nh-hub-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -219,6 +149,39 @@
 
   <!-- template:main -->
   <main id="main" tabindex="-1">
+    <div class="ds-workbar" aria-label="Report tools">
+      <a class="ds-wordmark" href="./" aria-label="Dossier home"><span class="ds-logo" aria-hidden="true"></span>Dossier<span class="ds-tagline">Compare. Understand. Decide.</span></a>
+      <div class="ds-workbar__actions">
+        <button class="btn btn--quiet" type="button" id="toggleAppearance" aria-pressed="false">Dark mode</button>
+        <button class="btn btn--quiet" type="button" data-action="templates">Examples</button>
+        <button class="btn btn--quiet" type="button" id="openReport" data-action="open">Open report</button>
+        <button class="btn btn--quiet" type="button" id="shareReport" data-action="share" data-needs-report>Share</button>
+        <button class="btn btn--quiet" type="button" id="exportReport" data-action="export" data-needs-report>Export</button>
+        <button class="btn" type="button" id="toggleMode" data-action="toggle-mode" aria-pressed="false" data-needs-report><span>Edit report</span></button>
+        <button class="btn btn--primary" type="button" data-action="compose">Compare responses</button>
+      </div>
+    </div>
+    <div class="ds-contextbar" id="reportContext">
+      <span id="reportOrigin">Your workspace</span>
+      <span>Private to your browser. Share only when you choose.</span>
+    </div>
+    <section class="ds-composer" id="comparisonComposer" aria-labelledby="composerHeading" hidden>
+      <form id="comparisonForm">
+        <div class="ds-composer__head">
+          <p class="ds-eyebrow">New comparison</p>
+          <h2 id="composerHeading">Give two responses a closer look.</h2>
+          <p>Paste outputs from different prompts, models or runs. Dossier puts them side by side and marks the differences.</p>
+        </div>
+        <label class="ds-field">Report title<input name="title" value="Response comparison" maxlength="120" required></label>
+        <label class="ds-field">Shared prompt <span class="ds-optional">optional</span><textarea name="prompt" rows="2" maxlength="4000" placeholder="What were both responses asked to do?"></textarea></label>
+        <div class="ds-composer__sides">
+          <fieldset><legend>Response A</legend><label class="ds-field">Label<input name="leftLabel" value="Response A" maxlength="40" required></label><label class="ds-field">Response text<textarea name="left" rows="12" maxlength="50000" placeholder="Paste the first response…" required></textarea></label></fieldset>
+          <fieldset><legend>Response B</legend><label class="ds-field">Label<input name="rightLabel" value="Response B" maxlength="40" required></label><label class="ds-field">Response text<textarea name="right" rows="12" maxlength="50000" placeholder="Paste the second response…" required></textarea></label></fieldset>
+        </div>
+        <div class="ds-composer__actions"><button class="btn btn--primary" type="submit">Create comparison</button><button class="btn btn--quiet" type="button" data-action="compose-cancel">Cancel</button><p>Your text stays in this browser.</p></div>
+      </form>
+    </section>
+
 
     <!-- Three regions. Read mode hides the rail and the source pane and gives
          the whole window to the report, which is what a link recipient wants.
@@ -229,16 +192,10 @@
         <section class="ds-rail__group" aria-labelledby="libraryHeading">
           <div class="ds-rail__head">
             <h2 id="libraryHeading">Reports</h2>
-            <button type="button" data-action="new-report" title="Start an empty report">
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-                   stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
-                <path d="M12 5v14M5 12h14"/>
-              </svg>
-              <span class="visually-hidden">New report</span>
-            </button>
+            <button type="button" class="btn btn--quiet btn--sm" data-action="new-report">New report</button>
           </div>
-          <label class="visually-hidden" for="reportFilter">Filter reports and pages</label>
-          <input type="search" id="reportFilter" placeholder="Filter" autocomplete="off"
+          <label class="visually-hidden" for="reportFilter">Filter saved reports</label>
+          <input type="search" id="reportFilter" placeholder="Find a saved report" autocomplete="off"
                  enterkeyhint="search" maxlength="120">
           <ul class="ds-library" id="library"></ul>
         </section>
@@ -256,16 +213,17 @@
 
       <section class="ds-source" id="sourcePane" aria-labelledby="sourceHeading">
         <div class="ds-source__head">
-          <h2 id="sourceHeading">Source</h2>
+          <h2 id="sourceHeading">Edit report</h2>
           <div class="ds-source__tabs" role="tablist" aria-label="How to edit">
             <button type="button" role="tab" id="tabForm" aria-selected="true"
                     aria-controls="formPane" data-action="source-tab" data-pane="form">Form</button>
             <button type="button" role="tab" id="tabJson" aria-selected="false"
                     aria-controls="jsonPane" data-action="source-tab" data-pane="json">JSON</button>
           </div>
-          <button type="button" data-action="format-json" title="Tidy the document">Format</button>
+          <button type="button" class="btn btn--quiet btn--sm" data-action="format-json" title="Tidy the document">Format</button>
         </div>
 
+        <div class="ds-source__tools"><button type="button" class="btn btn--sm" id="openCatalog" data-action="catalog">Add block</button><button type="button" class="btn btn--quiet btn--sm" id="toggleFindings" data-action="findings" aria-expanded="false" aria-controls="findingsPanel">Check report <span class="ds-count" id="findingsCount" hidden>0</span></button></div>
         <div id="formPane" role="tabpanel" aria-labelledby="tabForm"></div>
 
         <!-- js/editor.js builds the textarea, its toolbar and the error banner,
@@ -276,12 +234,7 @@
       <section class="ds-findings" id="findingsPanel" aria-labelledby="findingsHeading" hidden>
         <div class="ds-findings__head">
           <h2 id="findingsHeading">Findings</h2>
-          <button type="button" data-action="findings" aria-label="Close findings">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-                 stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
-              <path d="M6 6l12 12M18 6 6 18"/>
-            </svg>
-          </button>
+          <button type="button" class="btn btn--quiet btn--sm" data-action="findings">Close</button>
         </div>
         <div id="findingsBody"></div>
       </section>
@@ -293,15 +246,16 @@
          states and never share a message. -->
     <div class="ds-welcome" id="welcome">
       <div class="ds-welcome__inner">
-        <h2>Paste a report, or start from one</h2>
+        <p class="ds-eyebrow">A clearer view of your work</p>
+        <h2>See what changed.<br>Decide what matters.</h2>
         <p>
-          Everything stays in this browser. There is no account and no server,
-          and a report you share travels inside its own link.
+          Compare responses, inspect execution results, and turn the evidence into a report worth sharing. Everything stays in your browser.
         </p>
         <div class="ds-welcome__actions">
-          <button type="button" class="btn btn--primary" data-action="open">Open a file or paste</button>
-          <button type="button" class="btn" data-action="templates">Start from a template</button>
-          <button type="button" class="btn" data-action="demo">See the example report</button>
+          <button type="button" class="btn btn--primary" data-action="compose">Compare responses</button>
+          <button type="button" class="btn" data-action="open">Open a report</button>
+
+          <button type="button" class="btn" data-action="demo">Explore an example</button>
         </div>
         <p class="ds-welcome__note">
           Writing one with an agent? Point it at
@@ -317,14 +271,15 @@
       <form method="dialog">
         <h2 id="importHeading">Open a report</h2>
         <p class="ds-dialog__lead">
-          A Dossier document, or something else a report can be built from:
-          a diff, a test run, a scan, a Lighthouse report, Markdown or HTML.
+          Choose a file or paste its contents. HTML reports keep their original
+          layout and interactive controls. You can also open JSON, YAML,
+          Markdown, test results and logs.
         </p>
         <label for="importFile">Choose a file</label>
         <input type="file" id="importFile"
                accept=".json,.yaml,.yml,.md,.html,.htm,.xml,.sarif,.txt">
         <label for="importText">Or paste it here</label>
-        <textarea id="importText" rows="10" spellcheck="false" data-text-surface
+        <textarea id="importText" rows="10" aria-describedby="importDetected" spellcheck="false" data-text-surface
                   placeholder='{"dossier": {"version": 1, "title": "...", "pages": []}}'></textarea>
         <p class="ds-dialog__detected" id="importDetected" role="status"></p>
         <div class="ds-dialog__actions">
@@ -358,6 +313,7 @@
   </footer>
 
   <div id="app-toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <noscript><p class="ds-noscript">Dossier needs JavaScript to open and compare reports. Exported HTML reports can be read without it.</p></noscript>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

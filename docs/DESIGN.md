@@ -3,6 +3,46 @@
 Written 2026-10-10, before any feature code. Records the decisions and the
 reasons, so a later reader can tell a deliberate choice from an accident.
 
+## Current interface
+
+The reader reviews two outputs during the workday with source material in
+another window. Light surfaces suit that scene; the same review in a dim room
+uses charcoal surfaces and brighter text. A visible Dark mode toggle follows
+the system initially and persists the reader's choice. Printing uses light
+paper in either mode. The palette lives in `css/tokens.css`: cool neutral surfaces, a violet action
+color, slate for series A, and teal for series B. Color does not determine a
+winner. Labels, values and textual change markers carry the meaning too.
+
+The report is the main surface. The app toolbar uses text labels, and the
+editor stays closed on first visit. Report sections have numbered navigation;
+text, metrics and charts use their own hierarchy instead of nesting cards.
+The first visit opens an illustrative response comparison. Examples are not
+saved until edited. Imports get their own record rather than overwriting the
+previous report.
+
+The toolbar includes the existing folder-and-chart logo. HTML artifacts keep
+their complete document rather than being flattened into inferred blocks.
+Inline controls run in `embed.html`, with an opaque sandboxed origin and a
+separate policy that blocks external resources. Only the matching frame can
+request its report content. Offline exports carry the same policy and HTML
+directly in a sandboxed `srcdoc`, so they need no hosted viewer.
+
+The response composer creates a normal typed document. It does not evaluate
+the content or invent scores. Comparison controls are shared between the app
+and the offline export. The bounded line diff and slope plot are separate
+modules. Multi-series bars compare values independently; stacking must be
+requested explicitly. Tables retain zero values and their formatting.
+
+Structural assessment of the changed paths: 6/10 before, 8/10 after. The main
+improvements are extracting comparison behavior and arithmetic, removing the
+unused duplicate workspace, removing unused template CSS, and fixing form
+updates that reused stale snapshots. A future extraction of the remaining
+import/export action dispatch from `events.js` would further narrow its role.
+
+Verification: `make check`, `make receipt`, and, with `make serve` running,
+`npm run test:browser`. Browser checks cover saving, imports, comparison
+controls, template selection, mobile widths and an export with no network.
+
 ## 1. The problem
 
 An agent finishes a piece of work and writes a report about it. Today it writes
@@ -98,8 +138,9 @@ most-travelled error path in a live-editing tool.
 
 **Chrome hiding belongs to the Keys Kit.** Hand-rolled bare-letter shortcuts
 with no remap panel are an accessibility failure, and the fleet already solved
-it. Dossier starts with chrome hidden when a report arrives in the URL, which
-is the "hidden by default while actively rendering" requirement.
+it. The global header stays hidden in both workspace modes, keeping the local
+toolbar in charge of report actions. H still reveals it through the Keys Kit;
+switching workspace modes never changes the fleet-wide chrome preference.
 
 **No inline `onclick`.** One delegated listener over `[data-action]`.
 

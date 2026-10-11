@@ -47,6 +47,12 @@ export opens with no account, no install and no network.
 
 ## Features
 
+- **Compare two responses** -- paste A and B with an optional shared prompt;
+  switch between side-by-side and single-response views, or highlight changes
+- **A report first** -- light and dark document surfaces, text controls, and an editor
+  that opens when needed. The first visit shows a clearly labeled example
+- **Compare runs and impact** -- paired bars use a shared scale, trends include
+  legends and data tables, and templates connect results to next steps
 - **One typed document** -- 27 block types described in a registry the
   validator, the renderer, the form, the schema and `llms.txt` all read, so
   they cannot disagree about the format
@@ -58,6 +64,11 @@ export opens with no account, no install and no network.
   or a toggle, with changed lines marked
 - **Reads other formats** -- a git diff, JUnit XML, SARIF, CTRF, a Lighthouse
   report, a Conventional Commits log, Markdown, or plain HTML
+- **HTML artifacts**: open a file, paste HTML, or drop it onto the workspace.
+  The complete document retains styles, SVGs and inline controls. External
+  assets must be embedded in the file; the preview has no network access.
+- **Appearance**: the logo and Dark mode control stay visible in both workspace
+  modes. The initial theme follows the system; your choice stays in this browser.
 - **A form, not HTML** -- the block catalog previews each type with the real
   renderer, and the editing form is generated from the same registry
 - **Share by link** -- the report is deflated into the URL fragment, with a
@@ -128,6 +139,7 @@ ES modules require an HTTP server (not `file://`):
 make serve      # http://localhost:8899
 make check      # registry audit, every test, the fixtures, the byte scan
 make receipt    # build the one-file export and check it in a browser
+npm run test:browser  # exercise the workspace while make serve is running
 make schema     # regenerate schema.json, llms.txt and SKILL.md
 ```
 
@@ -166,9 +178,9 @@ dossier-site/
 │   └── chrome.js           # read mode, and the NeoKeys registration
 ├── css/                    # shell, report, blocks, authoring (+ vendored kits)
 ├── fixtures/               # minimal, complete (every block type), messy
-├── reports/                # eight starter templates, all validating clean
+├── reports/                # eleven starter templates, all validating clean
 ├── bin/                    # validate, gen-schema, gen-llms
-└── tests/                  # 109 tests, plain node --test
+└── tests/                  # plain node --test, plus a browser flow check
 ```
 
 ---

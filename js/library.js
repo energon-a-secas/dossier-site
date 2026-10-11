@@ -6,7 +6,7 @@
  * js/store.js and nothing here knows about a click.
  */
 
-import { showToast } from './neorgon-dom.js';
+import { showToast, uid } from './neorgon-dom.js';
 import { applyDocument } from './pipeline.js';
 import { reportOf } from './render/index.js';
 import { setPreference } from './state.js';
@@ -15,9 +15,14 @@ import { listReports, readReport, writeReport, deleteReport, estimateUsage } fro
 // ── Storage ──────────────────────────────────────────────────────────────────
 
 export async function persistCurrent(state, els) {
+  if (state.fatal) return;
   const report = reportOf(state.model);
   if (!report) return;
-  const id = state.reportId || `r-${Date.now().toString(36)}`;
+  const isNew = !state.reportId;
+  const id = state.reportId || uid('r-');
+  // Reserve the identity before storage yields. A new document can open while
+  // this write is pending, and completion must not take over its identity.
+  state.reportId = id;
   const meta = {
     id,
     title: report.title || 'Untitled report',
@@ -27,15 +32,20 @@ export async function persistCurrent(state, els) {
     updated: new Date().toISOString(),
   };
   const ok = await writeReport(id, state.document, meta);
-  if (ok === false) {
+  if (!ok) {
+    if (isNew && state.reportId === id) state.reportId = null;
     const usage = await estimateUsage();
     showToast(usage && usage.pct
       ? `Could not save: storage is about ${Math.round(usage.pct)}% full. This session still works.`
       : 'Could not save this report. This session still works.');
     return;
   }
-  state.reportId = id;
-  setPreference(state, 'lastReportId', id);
+  if (state.reportId === id) {
+    state.isExample = false;
+    const origin = document.getElementById('reportOrigin');
+    if (origin) origin.textContent = 'Saved in this browser';
+    setPreference(state, 'lastReportId', id);
+  }
   refreshLibrary(state, els);
 }
 
@@ -102,6 +112,7 @@ export async function openStored(state, els, id, finishOpen) {
   }
   applyDocument(state, record.document);
   state.reportId = id;
+  state.isExample = false;
   setPreference(state, 'lastReportId', id);
   if (typeof finishOpen === "function") finishOpen(state, els);
 }

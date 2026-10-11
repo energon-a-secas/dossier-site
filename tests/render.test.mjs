@@ -84,7 +84,8 @@ test('markup in a title cannot escape into the page', () => {
     {},
   );
   assert.ok(!html.includes('<img src=x'), 'an img tag survived into the output');
-  assert.ok(!html.includes('onerror=alert'), 'an event handler survived into the output');
+  assert.ok(!/<[^>]+\sonerror\s*=/i.test(html), 'an event handler survived as an HTML attribute');
+  assert.ok(html.includes('&lt;img'), 'the title should appear as escaped text');
 });
 
 test('a quote character in a value cannot break out of an attribute', () => {

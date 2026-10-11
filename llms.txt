@@ -61,7 +61,7 @@
 | `timeline` | What happened when, in order, with a tone per entry. | items |
 | `findings` | Issues anchored to a file and a line, grouped by level. | items |
 | `tests` | A test run: counts, duration and the failures in full. | none |
-| `compare` | Two sides of the same thing, read together or wiped between. | kind, left, right |
+| `compare` | Responses, execution results or a before-and-after change, read together. | kind, left, right |
 | `risks` | What could still go wrong, how bad, and what is in place. | items |
 | `actions` | What happens next, who owns it, and whether it is done. | items |
 | `decision` | The context, the choice, and what it costs. An ADR in one block. | context, decision, consequences |

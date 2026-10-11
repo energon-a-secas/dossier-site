@@ -33,6 +33,8 @@ export const state = {
   fatal: null,
   /** True while the report came from the URL rather than from this browser. */
   fromUrl: false,
+  /** A bundled example is a preview until the visitor edits or saves it. */
+  isExample: false,
   preferences: {},
 };
 
@@ -47,7 +49,7 @@ export function loadSaved(s) {
     showFindings: src.showFindings === true,
     lastReportId: typeof src.lastReportId === 'string' ? src.lastReportId : null,
     seenWelcome: src.seenWelcome === true,
-    readMode: src.readMode === true,
+    readMode: src.readMode !== false,
   };
   return s.preferences;
 }

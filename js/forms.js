@@ -19,6 +19,7 @@ import { blockDef, derivedFields, META } from './registry/index.js';
  * @returns {HTMLElement} a fieldset containing the form controls
  */
 export function blockForm(type, value = {}, onChange = () => {}) {
+  let current = { ...value };
   const def = blockDef(type);
   if (!def) return createErrorFieldset('Unknown block type');
 
@@ -59,8 +60,8 @@ export function blockForm(type, value = {}, onChange = () => {}) {
       fieldDef,
       value[name],
       (newVal) => {
-        const updated = { ...value, [name]: newVal };
-        onChange(updated);
+        current = { ...current, [name]: newVal };
+        onChange(current);
       }
     );
     if (control) fs.appendChild(control);
@@ -88,7 +89,7 @@ export function metaForm(input = {}, onChange = () => {}) {
   // unwrapped report and this function looked for `.dossier` on it, so every
   // field rendered blank over a report that had a title all along.
   const wrapped = input && typeof input === 'object' && input.dossier && typeof input.dossier === 'object';
-  const meta = wrapped ? input.dossier : (input || {});
+  let meta = { ...(wrapped ? input.dossier : (input || {})) };
 
   // The field descriptors come from the registry rather than a copy kept here.
   // The copy had already drifted: it offered six fields while the format has
@@ -102,8 +103,8 @@ export function metaForm(input = {}, onChange = () => {}) {
       fieldDef,
       meta[name],
       (newVal) => {
-        const nextMeta = { ...meta, [name]: newVal };
-        onChange(wrapped ? { ...input, dossier: nextMeta } : nextMeta);
+        meta = { ...meta, [name]: newVal };
+        onChange(wrapped ? { ...input, dossier: meta } : meta);
       },
     );
     if (control) fs.appendChild(control);
@@ -118,6 +119,7 @@ export function metaForm(input = {}, onChange = () => {}) {
  * @private
  */
 function createControl(name, fieldDef, value, onChange) {
+  if (typeof fieldDef === 'string') fieldDef = { type: fieldDef };
   const { type, note, maxLen, required, values: enumValues, of, fields: objFields, min, max } = fieldDef;
 
   const container = document.createElement('div');
@@ -230,7 +232,7 @@ function createControl(name, fieldDef, value, onChange) {
     arrayContainer.className = 'array-field';
     control = arrayContainer;
 
-    const items = Array.isArray(value) ? value : [];
+    const items = Array.isArray(value) ? [...value] : [];
     const itemsContainer = document.createElement('div');
     itemsContainer.className = 'array-items';
 
@@ -261,6 +263,7 @@ function createControl(name, fieldDef, value, onChange) {
         removeBtn.textContent = 'Remove';
         removeBtn.addEventListener('click', () => {
           items.splice(idx, 1);
+          renderItems();
           updateArray([...items]);
         });
 
@@ -277,6 +280,7 @@ function createControl(name, fieldDef, value, onChange) {
     addBtn.addEventListener('click', () => {
       items.push(null);
       renderItems();
+      updateArray([...items]);
     });
 
     renderItems();
@@ -291,7 +295,7 @@ function createControl(name, fieldDef, value, onChange) {
     objLegend.textContent = humanLabel(name);
     objContainer.appendChild(objLegend);
 
-    const objValue = (typeof value === 'object' && value !== null) ? value : {};
+    const objValue = (typeof value === 'object' && value !== null) ? { ...value } : {};
     for (const [objFieldName, objFieldDef] of Object.entries(objFields || {})) {
       const objControl = createControl(
         objFieldName,
@@ -304,6 +308,21 @@ function createControl(name, fieldDef, value, onChange) {
       );
       if (objControl) objContainer.appendChild(objControl);
     }
+  } else if (['any', 'block', 'evidence-item'].includes(type)) {
+    control = document.createElement('textarea');
+    control.id = labelId;
+    control.value = JSON.stringify(value ?? null, null, 2);
+    control.spellcheck = false;
+    control.setAttribute('aria-label', `${humanLabel(name)} as JSON`);
+    control.addEventListener('input', () => {
+      try {
+        const next = JSON.parse(control.value);
+        control.setCustomValidity('');
+        onChange(next);
+      } catch {
+        control.setCustomValidity('Enter a valid JSON value.');
+      }
+    });
   } else {
     return null;
   }

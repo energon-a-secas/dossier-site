@@ -1,10 +1,8 @@
 /**
  * The bridge from a `chart` block to the fleet Viz Kit.
  *
- * Every form here is a builder in js/viz.js. Nothing in this file draws, and
- * the registry's form list is deliberately only as long as the kit's
- * capability: a form the kit cannot serve is a form this product does not
- * offer, which is cheaper than maintaining a second chart library.
+ * The Viz Kit supplies plot geometry. Paired bars, legends and data tables
+ * live in chart-data.js because readers need to compare individual series.
  *
  * The mapping to get right, and the one the first version had backwards: the
  * kit's `bars` takes one item per bar, `[{label, value}]`, and treats an array
@@ -16,6 +14,7 @@
 import { escHtml } from '../neorgon-dom.js';
 import { bars, line, donut, radar, heatmap, empty } from '../viz.js';
 import { emptyFrame } from './markdown.js';
+import { chartColor, chartLegend, chartValues, groupedBars } from './chart-data.js';
 
 /** The kit's right-aligned readout is where a unit belongs. */
 function scaleText(block) {
@@ -88,9 +87,7 @@ export function renderChartBlock(block, ctx = {}) {
 }
 
 /**
- * One bar per category. With more than one series the kit stacks them, which
- * is its only multi-series bar mode, so the readout says so rather than
- * letting a reader assume the bars are grouped.
+ * Bars compare independent values; only an explicit stacked chart adds them.
  */
 function barChart(block) {
   const series = seriesOf(block);
@@ -102,11 +99,13 @@ function barChart(block) {
   if (!length) return emptyFrame('Chart: the series carry no values.');
   const labels = categoriesOf(block, length);
 
+  if (block.form === 'bar') return groupedBars(block, series, labels);
+
   if (series.length === 1) {
     const data = labels.map((label, i) => ({
       label,
       value: Number(series[0].values[i]) || 0,
-      color: series[0].color,
+      color: chartColor(series[0], 0),
     }));
     return bars(data, baseOpts(block, { max: block.max }));
   }
@@ -115,9 +114,8 @@ function barChart(block) {
     label,
     value: series.map((s) => Number(Array.isArray(s.values) ? s.values[i] : 0) || 0),
   }));
-  const opts = baseOpts(block, { max: block.max, keys: series.map((s) => s.label || '') });
-  const stackNote = block.form === 'bar' ? 'stacked' : '';
-  if (stackNote) opts.scale = [opts.scale, stackNote].filter(Boolean).join(' · ');
+  const totalMax = Math.max(...data.map((d) => d.value.reduce((sum, value) => sum + value, 0)));
+  const opts = baseOpts(block, { max: Math.max(block.max || 0, totalMax), keys: series.map((s) => s.label || ''), colors: series.map(chartColor) });
   return bars(data, opts);
 }
 
@@ -128,11 +126,16 @@ function lineChart(block, area) {
   }
   const data = series.map((s) => ({
     name: s.label || '',
-    color: s.color,
+    color: chartColor(s, series.indexOf(s)),
     values: Array.isArray(s.values) ? s.values.map((v) => Number(v) || 0) : [],
   }));
   if (!data.some((s) => s.values.length)) return emptyFrame('Chart: the series carry no values.');
-  return line(data, baseOpts(block, { area, max: block.max }));
+  const labels = categoriesOf(block, Math.max(...data.map((s) => s.values.length)));
+  const colors = series.map(chartColor);
+  data.forEach((s, i) => { s.color = colors[i]; });
+  const plot = line(data, baseOpts(block, { area, max: block.max, frame: false }));
+  const ticks = `<div class="chart-x-labels">${labels.map((label) => `<span>${escHtml(label)}</span>`).join('')}</div>`;
+  return `<figure class="trend-chart"><figcaption><strong>${escHtml(block.title || 'Trend')}</strong><span>${escHtml(scaleText(block))}</span></figcaption>${chartLegend(series)}${plot}${ticks}${chartValues(block, series, labels)}</figure>`;
 }
 
 function donutChart(block) {
@@ -156,7 +159,7 @@ function radarChart(block) {
   if (!series.length) return emptyFrame('Chart: a radar needs at least one series.');
   const mapped = series.map((s) => ({
     name: s.label || '',
-    color: s.color,
+    color: chartColor(s, series.indexOf(s)),
     values: s.values,
   }));
   return radar(axes, mapped, baseOpts(block, { max: block.max }));

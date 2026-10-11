@@ -7,11 +7,11 @@
  * in the default branch and says so in the console rather than doing nothing.
  */
 
-import { showToast, downloadText } from './neorgon-dom.js';
+import { showToast } from './neorgon-dom.js';
 import { openDialog, bindDialog } from './dialogs.js';
-import { applyText, applyParsed, applyDocument, rerender, claims } from './pipeline.js';
+import { applyText, applyParsed, applyDocument, rerender } from './pipeline.js';
 import { reportOf } from './render/index.js';
-import { setPreference, save } from './state.js';
+import { setPreference } from './state.js';
 import { toggleMode, setMode, mode } from './chrome.js';
 import {
   persistCurrent, refreshLibrary, filterLibrary, openStored, removeStored,
@@ -23,8 +23,11 @@ import {
 import { createCatalogDialog, openCatalog } from './catalog.js';
 import { createEditor, formatJson } from './editor.js';
 import { createFindingsPanel, updateFindingsPanel } from './findings-panel.js';
-import { metaForm } from './forms.js';
+import { reportForm } from './authoring.js';
 import { detect } from './adapters/index.js';
+import { bindComparisons } from './comparison-controls.js';
+import { bindComposer, showComposer } from './compose.js';
+import { bindEmbeds } from './embeds.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -66,6 +69,18 @@ export function bindEvents(state, els) {
   mountEditor(state, els);
   mountFindings(state, els);
   mountCatalog(state, els);
+  bindComparisons(document);
+  bindEmbeds();
+  bindComposer((document) => {
+    applyDocument(state, document);
+    state.reportId = null;
+    state.isExample = false;
+    setMode('read');
+    finishOpen(state, els);
+  });
+  document.addEventListener('dossier-opened', () => {
+    if (editor) editor.setValue?.(state.sourceText || '');
+  });
 
   for (const dialog of [els.importDialog, els.exportDialog]) {
     if (dialog) bindDialog(dialog, els.stage);
@@ -73,7 +88,7 @@ export function bindEvents(state, els) {
 
   document.addEventListener('click', (event) => {
     const target = event.target.closest('[data-action]');
-    if (!target) return;
+    if (!target || target.dataset.action.startsWith('compare-')) return;
     const action = target.dataset.action;
     runAction(action, { state, els, target, event });
   });
@@ -92,24 +107,6 @@ export function bindEvents(state, els) {
 
   els.reportFilter?.addEventListener('input', () => {
     filterLibrary(els, els.reportFilter.value);
-  });
-
-  // The wipe and the fade are range inputs, so they report on `input` rather
-  // than on click. Both set one custom property and let CSS do the work: the
-  // wipe is a clip-path and the fade is an opacity, so dragging either costs
-  // no layout. A range input also means arrow keys work and the control
-  // announces itself, which a custom drag handle would not.
-  document.addEventListener('input', (event) => {
-    const control = event.target.closest('[data-action="compare-wipe"], [data-action="compare-opacity"]');
-    if (!control) return;
-    const block = control.closest('.compare');
-    if (!block) return;
-    const value = Number(control.value) || 0;
-    if (control.dataset.action === 'compare-wipe') {
-      block.style.setProperty('--wipe', `${value}%`);
-    } else {
-      block.style.setProperty('--fade', String(value / 100));
-    }
   });
 
   // A dropped file anywhere on the page opens it. The page is one surface and
@@ -135,7 +132,8 @@ export function bindEvents(state, els) {
     const reading = mode() === 'read';
     btn.setAttribute('aria-pressed', String(reading));
     const label = btn.querySelector('span');
-    if (label) label.textContent = reading ? 'Edit' : 'Read';
+    if (label) label.textContent = reading ? 'Edit report' : 'Read report';
+    if (!reading) showSourceTab(state, els, state.preferences.sourceTab);
   });
 }
 
@@ -146,22 +144,28 @@ function runAction(action, ctx) {
       openDialog(els.importDialog, target);
       break;
     case 'import-confirm':
-      openText(state, els, els.importText?.value || '', 'pasted');
-      els.importDialog?.close();
+      if (openText(state, els, els.importText?.value || '', 'Pasted text')) els.importDialog?.close();
+      break;
+    case 'compose':
+      showComposer(true);
+      break;
+    case 'compose-cancel':
+      showComposer(false);
       break;
     case 'new-report':
       applyDocument(state, blankReport());
       state.reportId = null;
-      rerender(state, els);
+      state.isExample = false;
+      finishOpen(state, els);
       setMode('build');
       break;
     case 'templates':
       els.importDialog?.close();
-      openCatalog(target);
+      openCatalog(target, 'templates');
       break;
     case 'demo':
       els.importDialog?.close();
-      loadFixture(state, els, 'fixtures/complete.json');
+      loadFixture(state, els, 'reports/responses.json');
       break;
     case 'catalog':
       openCatalog(target);
@@ -211,9 +215,6 @@ function runAction(action, ctx) {
       state.page = target.dataset.page;
       rerender(state, els);
       break;
-    case 'compare-toggle':
-      compareToggle(target);
-      break;
     default:
       // A control with an action nobody handles is a dead button, which is a
       // defect worth seeing rather than a silent no-op.
@@ -227,33 +228,50 @@ function runAction(action, ctx) {
 function openText(state, els, text, label) {
   if (!text || !text.trim()) {
     showToast('There was nothing to read in that.');
-    return;
+    return false;
   }
 
   const adapter = detect(text);
   if (adapter && adapter.toDossier) {
     const converted = adapter.toDossier(text);
     if (converted && converted.document) {
-      applyDocument(state, converted.document);
+      const candidate = { ...state };
+      const result = applyDocument(candidate, converted.document);
+      if (!result.ok) {
+        if (els.importDetected) els.importDetected.textContent = result.fatal.message;
+        return false;
+      }
+      Object.assign(state, candidate);
       state.findings = [...state.findings, ...(converted.findings || [])];
-      showToast(`Read as ${adapter.label}. Check the findings before sharing it.`);
+      state.reportId = null;
+      state.isExample = false;
+      showToast(`Opened ${adapter.label} report.`);
+      showComposer(false);
+      setMode('read');
       finishOpen(state, els);
-      return;
+      return true;
     }
   }
 
-  const result = applyText(state, text);
+  // Do not replace a saved report or its source with a failed import.
+  const candidate = { ...state };
+  const result = applyText(candidate, text);
   if (!result.ok) {
     showToast(`${label} could not be read: ${result.fatal.message}`);
-    showSourceTab(state, els, 'json');
-    setMode('build');
+    if (els.importDetected) els.importDetected.textContent = result.fatal.message;
+    return false;
   }
+  Object.assign(state, candidate, { reportId: null, isExample: false });
+  showComposer(false);
+  setMode('read');
   finishOpen(state, els);
+  return true;
 }
 
 function finishOpen(state, els) {
   if (editor && state.sourceText) editor.setValue?.(state.sourceText);
   rerender(state, els);
+  showSourceTab(state, els, state.preferences.sourceTab);
   persistCurrent(state, els);
   if (state.findings.some((f) => f.level === 'error')) showFindings(state, els, true);
 }
@@ -262,7 +280,14 @@ async function loadFixture(state, els, path) {
   try {
     const res = await fetch(path, { cache: 'no-cache' });
     if (!res.ok) throw new Error(String(res.status));
-    openText(state, els, await res.text(), path);
+    applyText(state, await res.text());
+    state.reportId = null;
+    state.isExample = true;
+    showComposer(false);
+    setMode('read');
+    if (editor) editor.setValue?.(state.sourceText);
+    rerender(state, els);
+    showSourceTab(state, els, state.preferences.sourceTab);
   } catch {
     // A failed fetch is not an empty report, and must not look like one.
     showToast(`Could not load ${path}. The example is missing, not empty.`);
@@ -369,7 +394,10 @@ function refreshFindings(state, els) {
 }
 
 function mountCatalog(state, els) {
-  catalogDialog = createCatalogDialog((block) => insertBlock(state, els, block));
+  catalogDialog = createCatalogDialog((block, type, template) => {
+    if (template) loadFixture(state, els, `reports/${template}`);
+    else if (block) insertBlock(state, els, structuredClone(block));
+  });
   if (catalogDialog && !catalogDialog.isConnected) document.body.appendChild(catalogDialog);
 }
 
@@ -386,6 +414,8 @@ function insertBlock(state, els, block) {
   if (editor && state.sourceText) editor.setValue?.(state.sourceText);
   rerender(state, els);
   refreshFindings(state, els);
+  showSourceTab(state, els, state.preferences.sourceTab);
+  persistCurrent(state, els);
   showToast(`Added a ${block.type} block to "${page.title || 'this page'}".`);
 }
 
@@ -418,11 +448,12 @@ export function showSourceTab(state, els, pane) {
   if (which === 'form' && els.formPane) {
     if (state.model) {
       // The wrapped document goes in, and a wrapped document comes back.
-      const form = metaForm(state.model, (next) => {
+      const form = reportForm(state, (next) => {
         applyDocument(state, next);
         if (editor) editor.setValue?.(state.sourceText);
         rerender(state, els);
         refreshFindings(state, els);
+        persistCurrent(state, els);
       });
       if (form) els.formPane.replaceChildren(form);
     } else {
@@ -440,19 +471,6 @@ function formatCurrent(state, els) {
   showToast('Formatted.');
 }
 
-/** Flip a comparison between its two faces, keeping aria-pressed honest. */
-function compareToggle(target) {
-  const block = target.closest('.compare--toggle');
-  if (!block) return;
-  const wanted = target.dataset.side === 'right' ? 'right' : 'left';
-  for (const face of block.querySelectorAll('.compare__face')) {
-    face.hidden = face.dataset.side !== wanted;
-  }
-  for (const button of block.querySelectorAll('[data-action="compare-toggle"]')) {
-    button.setAttribute('aria-pressed', String(button.dataset.side === wanted));
-  }
-}
-
 function describeDetected(els, text) {
   if (!els.importDetected) return;
   if (!text || !text.trim()) {
@@ -460,9 +478,10 @@ function describeDetected(els, text) {
     return;
   }
   const adapter = detect(text);
-  els.importDetected.textContent = adapter
-    ? `Looks like ${adapter.label}. It will be turned into a report.`
-    : 'Looks like a Dossier document.';
+  els.importDetected.textContent = adapter?.id === 'html'
+    ? 'HTML report. Opens in its original layout, with inline controls enabled.'
+    : adapter ? `Looks like ${adapter.label}. It will be turned into a report.`
+      : 'Looks like a Dossier document.';
 }
 
 function blankReport() {

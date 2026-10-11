@@ -1,0 +1,151 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "A faster run, with the checks intact.",
+    "subtitle": "Compare two executions of the same task using duration, checks and output changes. Illustrative data.",
+    "kind": "comparison",
+    "status": "in-review",
+    "owner": "Example workspace",
+    "tags": [
+      "illustrative-data"
+    ],
+    "pages": [
+      {
+        "title": "Execution results",
+        "summary": "Run 02 is faster in this example. Confirm that the same work was completed.",
+        "blocks": [
+          {
+            "type": "metrics",
+            "items": [
+              {
+                "label": "Duration \u00b7 Run 02",
+                "value": 38,
+                "baseline": 62,
+                "unit": "s",
+                "better": "lower"
+              },
+              {
+                "label": "Checks passed \u00b7 Run 02",
+                "value": 24,
+                "baseline": 24,
+                "unit": "checks",
+                "better": "higher"
+              },
+              {
+                "label": "Warnings \u00b7 Run 02",
+                "value": 0,
+                "baseline": 3,
+                "unit": "count",
+                "better": "lower"
+              }
+            ]
+          },
+          {
+            "type": "chart",
+            "title": "Where execution time went",
+            "form": "bar",
+            "unit": "seconds",
+            "categories": [
+              "Read inputs",
+              "Process records",
+              "Verify output"
+            ],
+            "series": [
+              {
+                "label": "Run 01",
+                "values": [
+                  12,
+                  34,
+                  16
+                ]
+              },
+              {
+                "label": "Run 02",
+                "values": [
+                  8,
+                  18,
+                  12
+                ]
+              }
+            ],
+            "evidence": [
+              {
+                "label": "Illustrative dataset",
+                "kind": "other",
+                "checkedBy": "none",
+                "excerpt": "These values and responses are invented to demonstrate the report format. They are not benchmark results."
+              }
+            ]
+          },
+          {
+            "type": "compare",
+            "title": "Execution output",
+            "kind": "log",
+            "language": "text",
+            "left": {
+              "label": "Run 01",
+              "caption": "Baseline execution",
+              "value": "Loaded 240 records\nProcessed in 62 seconds\n24 checks passed\n3 warnings: duplicate lookup\nOutput: results.json"
+            },
+            "right": {
+              "label": "Run 02",
+              "caption": "Cached lookups",
+              "value": "Loaded 240 records\nProcessed in 38 seconds\n24 checks passed\n0 warnings\nOutput: results.json"
+            }
+          }
+        ]
+      },
+      {
+        "title": "Verification",
+        "summary": "Compare outputs as well as speed. A faster run with missing records would be a regression.",
+        "blocks": [
+          {
+            "type": "table",
+            "title": "Output parity",
+            "columns": [
+              {
+                "label": "Check"
+              },
+              {
+                "label": "Run 01",
+                "align": "right"
+              },
+              {
+                "label": "Run 02",
+                "align": "right"
+              }
+            ],
+            "rows": [
+              [
+                "Records read",
+                240,
+                240
+              ],
+              [
+                "Records written",
+                240,
+                240
+              ],
+              [
+                "Failed checks",
+                0,
+                0
+              ],
+              [
+                "Warnings",
+                3,
+                0
+              ]
+            ]
+          },
+          {
+            "type": "callout",
+            "tone": "neutral",
+            "label": "Next check",
+            "text": "Repeat on larger inputs and compare output hashes. The example timings and checks are invented; they are not evidence of a measured improvement."
+          }
+        ]
+      }
+    ]
+  }
+}

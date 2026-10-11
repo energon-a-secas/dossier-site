@@ -1,0 +1,243 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "Two responses. A clearer decision.",
+    "subtitle": "Compare the answer, understand the tradeoffs, and decide what to try next. An example with illustrative data.",
+    "kind": "comparison",
+    "status": "in-review",
+    "owner": "Example workspace",
+    "tags": [
+      "illustrative-data"
+    ],
+    "pages": [
+      {
+        "title": "Responses",
+        "summary": "Same task, two approaches. Compare how each response answers the brief.",
+        "blocks": [
+          {
+            "type": "compare",
+            "kind": "text",
+            "mode": "side",
+            "highlightChanges": false,
+            "prompt": "Turn release notes about saved views, CSV export and faster search into a brief for a product manager. Explain what changed, who benefits, and one next step.",
+            "left": {
+              "label": "Response A",
+              "caption": "Baseline prompt \u00b7 broad summary",
+              "value": "The latest release includes several improvements to help users work more efficiently. Saved views make the experience more flexible, CSV export helps with reporting, and search is now faster.\n\nThese changes should benefit teams across the organization by improving productivity and making information easier to access.\n\nWe recommend exploring the new features and gathering feedback to understand their impact."
+            },
+            "right": {
+              "label": "Response B",
+              "caption": "Revised prompt \u00b7 explicit structure",
+              "value": "What changed\nTeams can save a filtered view, export its results to CSV, and search the same workspace more quickly.\n\nWho benefits\nOperations teams can reuse their weekly review view. Analysts can take a result set into a spreadsheet without copying rows by hand.\n\nNext step\nAsk one operations team to use a saved view for its next weekly review. Record setup time and any missing filters before expanding the rollout."
+            },
+            "note": "B gives the reviewer a concrete audience and a testable next step. Highlighting shows wording changes; it does not determine which answer is better."
+          }
+        ]
+      },
+      {
+        "title": "Scores & runs",
+        "summary": "Compare each criterion on the same scale, then check whether the speed difference repeats.",
+        "blocks": [
+          {
+            "type": "metrics",
+            "items": [
+              {
+                "label": "Rubric score \u00b7 B",
+                "value": 89,
+                "baseline": 74,
+                "unit": "/ 100",
+                "better": "higher"
+              },
+              {
+                "label": "Response time \u00b7 B",
+                "value": 1.8,
+                "baseline": 2.6,
+                "unit": "s",
+                "better": "lower",
+                "precision": 1
+              },
+              {
+                "label": "Output tokens \u00b7 B",
+                "value": 286,
+                "baseline": 410,
+                "unit": "tokens",
+                "better": "lower"
+              }
+            ],
+            "note": "Illustrative measurements for A and B. Rubric scores are supplied by the author; Dossier calculates only the changes."
+          },
+          {
+            "type": "chart",
+            "title": "Where the responses differ",
+            "form": "bar",
+            "unit": "points",
+            "max": 100,
+            "categories": [
+              "Factual accuracy",
+              "Completeness",
+              "Clarity",
+              "Actionability"
+            ],
+            "series": [
+              {
+                "label": "Response A",
+                "values": [
+                  84,
+                  72,
+                  78,
+                  62
+                ]
+              },
+              {
+                "label": "Response B",
+                "values": [
+                  88,
+                  86,
+                  92,
+                  90
+                ]
+              }
+            ],
+            "note": "Illustrative rubric: equal weight across four criteria. Overall score is the mean, rounded to a whole number.",
+            "evidence": [
+              {
+                "label": "Illustrative dataset",
+                "kind": "other",
+                "checkedBy": "none",
+                "excerpt": "These values and responses are invented to demonstrate the report format. They are not benchmark results."
+              }
+            ]
+          },
+          {
+            "type": "chart",
+            "title": "Response time across five executions",
+            "form": "line",
+            "unit": "seconds",
+            "categories": [
+              "Run 1",
+              "Run 2",
+              "Run 3",
+              "Run 4",
+              "Run 5"
+            ],
+            "series": [
+              {
+                "label": "Response A",
+                "values": [
+                  2.6,
+                  2.8,
+                  2.5,
+                  2.7,
+                  2.4
+                ]
+              },
+              {
+                "label": "Response B",
+                "values": [
+                  1.8,
+                  1.9,
+                  1.7,
+                  1.8,
+                  1.8
+                ]
+              }
+            ],
+            "note": "Synthetic runs demonstrate a trend comparison. Five runs would not establish production performance.",
+            "max": 3
+          },
+          {
+            "type": "table",
+            "title": "The measurements behind the summary",
+            "columns": [
+              {
+                "label": "Measure"
+              },
+              {
+                "label": "Response A",
+                "align": "right"
+              },
+              {
+                "label": "Response B",
+                "align": "right"
+              },
+              {
+                "label": "How to interpret it"
+              }
+            ],
+            "rows": [
+              [
+                "Overall rubric score",
+                "74 / 100",
+                "89 / 100",
+                "Higher is better on this rubric"
+              ],
+              [
+                "Mean response time",
+                "2.6 s",
+                "1.8 s",
+                "Lower is faster"
+              ],
+              [
+                "Output tokens",
+                410,
+                286,
+                "Shorter alone does not mean better"
+              ],
+              [
+                "Unanswered requested sections",
+                1,
+                0,
+                "Check the response against the prompt"
+              ]
+            ],
+            "note": "Values are illustrative, including the unanswered-section counts."
+          }
+        ]
+      },
+      {
+        "title": "Decision & next steps",
+        "summary": "A useful report ends with a choice, its limitations, and the next piece of evidence to collect.",
+        "blocks": [
+          {
+            "type": "decision",
+            "title": "Test the revised prompt on a broader sample",
+            "status": "proposed",
+            "context": "The example favors the structured response, especially for clarity and actionability. One task cannot show how either approach handles other inputs.",
+            "decision": "Use B as the candidate for the next evaluation, keeping A as the baseline.",
+            "consequences": "This adds review time and a risk of overfitting the prompt to a narrow task. Keep the same rubric and include cases where a longer answer is necessary."
+          },
+          {
+            "type": "timeline",
+            "title": "A small evaluation roadmap",
+            "items": [
+              {
+                "at": "2026-10-12",
+                "label": "Set the baseline",
+                "detail": "Choose 20 representative prompts and freeze the rubric.",
+                "tone": "neutral"
+              },
+              {
+                "at": "2026-10-15",
+                "label": "Run both variants",
+                "detail": "Keep model settings and input context identical. Record latency, tokens and failures.",
+                "tone": "info"
+              },
+              {
+                "at": "2026-10-19",
+                "label": "Review and decide",
+                "detail": "Score responses without showing the variant label. Record disagreements and repeat uncertain cases.",
+                "tone": "good"
+              }
+            ]
+          },
+          {
+            "type": "callout",
+            "label": "Example only",
+            "tone": "neutral",
+            "text": "All responses, scores and dates in this report are illustrative. Replace them with your own runs before using the report to make a decision."
+          }
+        ]
+      }
+    ]
+  }
+}

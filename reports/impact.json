@@ -1,0 +1,136 @@
+{
+  "dossier": {
+    "version": 1,
+    "title": "From a proposed change to a measurable impact.",
+    "subtitle": "Connect planned work to expected outcomes, then name the evidence needed to validate it. Illustrative estimates.",
+    "kind": "summary",
+    "status": "in-review",
+    "owner": "Example workspace",
+    "tags": [
+      "illustrative-data"
+    ],
+    "pages": [
+      {
+        "title": "Potential impact",
+        "summary": "Make the baseline, target and assumptions visible before discussing the roadmap.",
+        "blocks": [
+          {
+            "type": "chart",
+            "title": "Expected weekly review time",
+            "form": "bar",
+            "unit": "hours",
+            "categories": [
+              "Collect inputs",
+              "Compare outputs",
+              "Prepare the report"
+            ],
+            "series": [
+              {
+                "label": "Baseline",
+                "values": [
+                  4,
+                  6,
+                  3
+                ]
+              },
+              {
+                "label": "Target",
+                "values": [
+                  2,
+                  3,
+                  1
+                ]
+              }
+            ],
+            "note": "Illustrative planning estimates, not measured savings. Validate each target in a small pilot.",
+            "evidence": [
+              {
+                "label": "Illustrative dataset",
+                "kind": "other",
+                "checkedBy": "none",
+                "excerpt": "These values and responses are invented to demonstrate the report format. They are not benchmark results."
+              }
+            ]
+          },
+          {
+            "type": "prose",
+            "text": "The proposed workflow captures both outputs, reuses the evaluation rubric, and prepares one report. The potential gain is less time assembling evidence, with the same review checks kept in place."
+          },
+          {
+            "type": "table",
+            "title": "What would make the estimate credible",
+            "columns": [
+              {
+                "label": "Assumption"
+              },
+              {
+                "label": "How to verify it"
+              }
+            ],
+            "rows": [
+              [
+                "Inputs arrive in a consistent format",
+                "Try real samples from three workflows"
+              ],
+              [
+                "Review quality stays stable",
+                "Blind-score the current and proposed reports"
+              ],
+              [
+                "Time savings repeat",
+                "Measure at least four weekly reviews"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Roadmap",
+        "summary": "Each phase has a concrete deliverable and a reason to continue.",
+        "blocks": [
+          {
+            "type": "timeline",
+            "items": [
+              {
+                "at": "2026-10-12",
+                "label": "Measure the baseline",
+                "detail": "Record time spent collecting inputs, comparing results and preparing the report.",
+                "tone": "neutral"
+              },
+              {
+                "at": "2026-10-26",
+                "label": "Pilot one workflow",
+                "detail": "Use the same input set and ask reviewers to check both versions.",
+                "tone": "info"
+              },
+              {
+                "at": "2026-11-09",
+                "label": "Evaluate the result",
+                "detail": "Compare measured time and review quality. Expand only if both are acceptable.",
+                "tone": "good"
+              }
+            ]
+          },
+          {
+            "type": "risks",
+            "items": [
+              {
+                "title": "A shorter review can miss important context",
+                "severity": "medium",
+                "likelihood": "possible",
+                "mitigation": "Retain source excerpts, record reviewer disagreements, and check output completeness.",
+                "owner": "Review team"
+              }
+            ]
+          },
+          {
+            "type": "callout",
+            "tone": "neutral",
+            "label": "Planning example",
+            "text": "The dates and targets are illustrative. They describe what to measure rather than a promised outcome."
+          }
+        ]
+      }
+    ]
+  }
+}

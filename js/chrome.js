@@ -1,5 +1,5 @@
 /**
- * Chrome and keyboard: read mode, and the shortcuts this page claims.
+ * Workspace mode and keyboard shortcuts. NeoKeys owns the optional global header.
  *
  * NeoKeys owns `H`, the `?` sheet, the `G` switcher and the WCAG 2.1.4 remap
  * panel. We register through it and never write `if (e.key === 'h')`: a bare
@@ -7,23 +7,9 @@
  * failure, and the kit's disable switch and rebind panel are the whole reason
  * the fleet is allowed single-key shortcuts at all.
  *
- * ── Why read mode is a separate attribute from the kit's ────────────────────
- *
- * The requirement is that the header starts hidden when a report is being
- * read, rather than authored. The obvious implementation is wrong twice:
- *
- *   - Setting `html[data-chrome="off"]` ourselves does not survive. The kit
- *     calls `chrome.restore()` at init, which paints `data-chrome` from the
- *     fleet-wide `neo_chrome` cookie, so our value is overwritten on every
- *     load where that cookie is absent or `on`.
- *   - Calling `NeoKeys.chrome.hide()` does survive, and writes the cookie,
- *     which is scoped to `.neorgon.com`. Opening one report here would hide
- *     the header on every other Neorgon site the visitor has open. A
- *     per-document view state must not become a fleet-wide preference.
- *
- * So read mode is ours: `html[data-dossier-mode="read"]`, set and cleared by
- * this module, never persisted to the kit's cookie. `H` keeps working as the
- * visitor's own preference and as the escape hatch out of either state.
+ * The workspace has its own toolbar in both modes. Keep the global header
+ * hidden by default with a local attribute, without writing the fleet-wide
+ * cookie. H reveals it and hands visibility back to the visitor.
  */
 
 import { showToast } from './neorgon-dom.js';
@@ -32,8 +18,8 @@ const MODE_ATTR = 'dossierMode';
 const CHROME_ATTR = 'dossierChrome';
 
 /**
- * True while read mode, rather than the visitor, is the reason the header is
- * not on screen. Once the visitor presses H we stop deciding for them.
+ * True while the workspace is hiding the header. Once the visitor presses H
+ * we stop deciding for them.
  */
 let weHidTheHeader = false;
 
@@ -44,12 +30,9 @@ export function setMode(mode) {
   root.dataset[MODE_ATTR] = next;
 
   // Hide the header only while the visitor has not taken that decision over.
-  if (next === 'read' && !hasVisitorOpinion()) {
+  if (!hasVisitorOpinion() && root.dataset[CHROME_ATTR] !== 'shown') {
     root.dataset[CHROME_ATTR] = 'hidden';
     weHidTheHeader = true;
-  } else if (next === 'build' && weHidTheHeader) {
-    delete root.dataset[CHROME_ATTR];
-    weHidTheHeader = false;
   }
 
   document.dispatchEvent(new CustomEvent('dossier-mode', { detail: { mode: next } }));
@@ -64,7 +47,7 @@ function hasVisitorOpinion() {
 /**
  * Hand the header back the moment the visitor asks for it.
  *
- * The awkward case this solves: read mode has hidden the header with our own
+ * The awkward case this solves: the workspace has hidden the header with our own
  * attribute while the kit still believes chrome is on. A press of H would
  * move the kit from on to off and fire `hidden: true`, so the header would
  * stay exactly as invisible as before and the key would feel broken. Two
@@ -121,6 +104,10 @@ export function toggleMode() {
  * its own `chrome` field.
  */
 export function initialMode({ fromUrl = false, documentChrome = 'auto' } = {}) {
+  if (!hasVisitorOpinion() && documentChrome === 'shown') {
+    document.documentElement.dataset[CHROME_ATTR] = 'shown';
+    weHidTheHeader = false;
+  }
   if (documentChrome === 'hidden') return setMode('read');
   if (documentChrome === 'shown') return setMode('build');
   return setMode(fromUrl ? 'read' : 'build');

@@ -1,11 +1,35 @@
 [
   {
+    "file": "responses.json",
+    "title": "Two responses. A clearer decision.",
+    "kind": "comparison",
+    "summary": "Compare the answer, understand the tradeoffs, and decide what to try next. An example with illustrative data.",
+    "pages": 3,
+    "blocks": 8
+  },
+  {
+    "file": "executions.json",
+    "title": "A faster run, with the checks intact.",
+    "kind": "comparison",
+    "summary": "Compare two executions of the same task using duration, checks and output changes. Illustrative data.",
+    "pages": 2,
+    "blocks": 5
+  },
+  {
+    "file": "impact.json",
+    "title": "From a proposed change to a measurable impact.",
+    "kind": "summary",
+    "summary": "Connect planned work to expected outcomes, then name the evidence needed to validate it. Illustrative estimates.",
+    "pages": 2,
+    "blocks": 6
+  },
+  {
     "file": "fix.json",
     "title": "Fixed limiter race condition",
     "kind": "fix",
     "summary": "Request counter was not shared across worker processes, allowing 4x the configured rate.",
     "pages": 2,
-    "blocks": 7
+    "blocks": 10
   },
   {
     "file": "audit.json",
@@ -13,7 +37,7 @@
     "kind": "audit",
     "summary": "Reviewed slow queries in production. Found three candidates for indexing.",
     "pages": 2,
-    "blocks": 10
+    "blocks": 12
   },
   {
     "file": "migration.json",
@@ -21,7 +45,7 @@
     "kind": "migration",
     "summary": "Replaced Okta SAML with Clerk OAuth for 40% cost savings and faster login.",
     "pages": 4,
-    "blocks": 11
+    "blocks": 8
   },
   {
     "file": "performance.json",
@@ -29,7 +53,7 @@
     "kind": "performance",
     "summary": "Measured against the SLA. All metrics in green.",
     "pages": 3,
-    "blocks": 9
+    "blocks": 7
   },
   {
     "file": "incident.json",
@@ -37,7 +61,7 @@
     "kind": "incident",
     "summary": "Primary became unavailable. Failover to replica succeeded. RCA identified replication lag detection failure.",
     "pages": 4,
-    "blocks": 10
+    "blocks": 7
   },
   {
     "file": "release.json",
@@ -45,15 +69,15 @@
     "kind": "release",
     "summary": "Full-text search across document fields, saved filters, and 30% speedup on large datasets.",
     "pages": 3,
-    "blocks": 9
+    "blocks": 5
   },
   {
     "file": "comparison.json",
     "title": "Architecture decision: Monolith or microservices",
     "kind": "comparison",
     "summary": "Evaluated both paths. Chose monolith for now because we lack operational maturity for services.",
-    "pages": 4,
-    "blocks": 9
+    "pages": 3,
+    "blocks": 5
   },
   {
     "file": "sprint.json",
@@ -61,6 +85,6 @@
     "kind": "summary",
     "summary": "Built text search and saved filters. Resolved five tech debt items. Dropped streaming due to missing spec.",
     "pages": 4,
-    "blocks": 10
+    "blocks": 7
   }
 ]

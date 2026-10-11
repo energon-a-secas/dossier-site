@@ -121,7 +121,7 @@ export const META = Object.freeze({
   }),
   tags: arr(str(), { max: 12 }),
   chrome: enom(['auto', 'hidden', 'shown'], {
-    note: 'auto hides the header when the report arrived in the URL.',
+    note: 'auto keeps the global header hidden; the workspace toolbar remains available.',
   }),
   pages: arr('page', { required: true, min: 1, max: 40 }),
 });

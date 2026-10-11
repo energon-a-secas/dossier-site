@@ -35,7 +35,9 @@ export function createCatalogDialog(onInsert = () => {}) {
   inner.appendChild(header);
 
   const title = document.createElement('h2');
+  title.id = 'catalogHeading';
   title.textContent = 'Insert block';
+  dialog.setAttribute('aria-labelledby', title.id);
   header.appendChild(title);
 
   const closeBtn = document.createElement('button');
@@ -70,6 +72,7 @@ export function createCatalogDialog(onInsert = () => {}) {
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.placeholder = 'Search blocks...';
+  searchInput.setAttribute('aria-label', 'Search blocks');
   searchInput.className = 'catalog-search-input';
   searchContainer.appendChild(searchInput);
 
@@ -145,8 +148,15 @@ export function createCatalogDialog(onInsert = () => {}) {
         if (blockDef.sample) {
           const preview = document.createElement('div');
           preview.className = 'catalog-card-preview';
-          const ctx = {};
+          preview.inert = true;
+          preview.setAttribute('aria-hidden', 'true');
+          const ctx = { interactive: false };
           preview.innerHTML = blockHtml(blockDef.sample, ctx);
+          for (const img of preview.querySelectorAll('img')) {
+            const caption = document.createElement('span');
+            caption.textContent = img.alt || 'Image preview';
+            img.replaceWith(caption);
+          }
           card.appendChild(preview);
         }
 
@@ -228,6 +238,7 @@ export function createCatalogDialog(onInsert = () => {}) {
   );
 
   blockTabBtn.addEventListener('click', () => {
+    renderBlocks(searchInput.value);
     blockTabBtn.classList.add('active');
     templatesTabBtn.classList.remove('active');
     blockContent.classList.add('active');
@@ -245,7 +256,7 @@ export function createCatalogDialog(onInsert = () => {}) {
     renderTemplates();
   });
 
-  renderBlocks();
+  // Previews are built when requested, keeping the report's first load small.
 
   dialog.appendChild(inner);
   bindDialog(dialog);
@@ -259,9 +270,10 @@ export function createCatalogDialog(onInsert = () => {}) {
  *
  * @param {HTMLElement} [opener] the element that opened the dialog
  */
-export function openCatalog(opener) {
+export function openCatalog(opener, tab = 'blocks') {
   if (!catalogDialog) {
     throw new Error('Catalog not initialized');
   }
   openDialog(catalogDialog, opener);
+  catalogDialog.querySelector(`.catalog-tab-btn[data-tab="${tab === 'templates' ? 'templates' : 'blocks'}"]`)?.click();
 }

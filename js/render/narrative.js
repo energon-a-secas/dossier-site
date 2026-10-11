@@ -50,7 +50,7 @@ function renderHeading(block) {
   if (!block.text) return emptyFrame('Heading: add "text" to name this section.');
   const level = block.level || 2;
   const tag = `h${Math.max(2, Math.min(3, level))}`;
-  return `<${tag} class="block-heading" id="${escHtml(block.id || '')}">${escHtml(block.text || '')}</${tag}>`;
+  return `<${tag} class="block-heading">${escHtml(block.text || '')}</${tag}>`;
 }
 
 function renderProse(block) {

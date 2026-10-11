@@ -36,7 +36,6 @@ Then open http://localhost:8899. It must be served over HTTP: the app is ES modu
 | `js/adapters/html.js` | 258 | `toDossier` |
 | `js/registry/work.js` | 248 | `FILE_STATES`, `CHECK_STATES`, `WORK` |
 | `js/editor.js` | 212 | `createEditor`, `formatJson` |
-| `js/workspace.js` | 205 | `Workspace` |
 | `js/render/judgment.js` | 198 | `JUDGMENT_TYPES`, `renderJudgmentBlock` |
 | `js/registry/narrative.js` | 193 | `NARRATIVE` |
 | `js/adapters/markdown.js` | 190 | `toDossier` |
@@ -133,12 +132,11 @@ nothing serialises it. `validate()` only complains about a derived field the
 *author* supplied. Without the marker, every rendered model reported that its
 own computed delta should be removed. If you add a derivation, mark it.
 
-**Print needs the only colour override in the project.** The fleet tokens are a
-dark theme: text is `#f9f9f9` and surfaces are white at 3% alpha. Printing that
-on white paper produces a blank-looking page while the screen looks perfect.
-`css/shell.css`'s `@media print` block declares a light palette because
-`base.css` has no print palette to inherit. That is the one sanctioned place
-this project declares a colour.
+**The document palette is local.** `css/tokens.css` supplies light and dark surfaces,
+semantic text and chart colors, type and spacing. Reports remain readable
+when the CDN is unavailable. Shared header, footer and keyboard kits stay
+vendored; their geometry is not overridden locally. `js/appearance.js` applies
+the system or saved preference before paint. Print always uses light paper.
 
 **Read mode is ours; `H` is the kit's.** NeoKeys paints `html[data-chrome]`
 from a cookie scoped to `.neorgon.com`, so setting that attribute ourselves is
@@ -167,6 +165,12 @@ frame inherits this page's origin, so `sandbox="allow-scripts allow-same-origin"
 is not a sandbox: the frame can reach `parent.document`, read every stored
 report and rewrite the page. Omit `allow-same-origin`. With scripts off,
 `sandbox=""` is correct rather than a list.
+
+**Interactive HTML uses a separate preview document.** `embed.html` has a
+restricted policy allowing inline scripts and styles but no external assets.
+`js/embeds.js` sends the source only to the matching frame's WindowProxy. Do
+not relax the workspace CSP for imported scripts. Standalone exports inline
+the policy and markup into `srcdoc`, avoiding a dependency on the hosted viewer.
 
 **`make check` runs the whole `tests/` directory on purpose.** The first
 version named each file, so a test added later was silently never run.

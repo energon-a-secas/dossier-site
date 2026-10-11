@@ -3,6 +3,15 @@
 **What it is:** Render AI-written work reports from one JSON file: metric tiles,
 charts and before-and-after comparisons, kept in your browser and shared by link.
 
+Readers can also paste two responses directly, compare their wording, and
+share the resulting report. Execution results and proposed impact use the
+same report format. Built-in examples explicitly label illustrative data;
+the tool never assigns a quality score to pasted text.
+
+Existing HTML artifacts open with their styling, inline graphics and controls
+preserved in an isolated preview. The workspace offers light and dark modes,
+following the system initially and remembering an explicit choice locally.
+
 **Who it is for:** the engineer who has to review what an agent just did. They
 have a diff, a pile of logs, and a summary they cannot check. They need the work
 presented the same way every time, so that reading the tenth report is faster

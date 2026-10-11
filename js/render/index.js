@@ -10,7 +10,8 @@ import { escHtml } from '../neorgon-dom.js';
 import { blockDef, blockTypes } from '../registry/index.js';
 import { renderBlock } from './dispatch.js';
 import { reportOf } from './model.js';
-import { inlineMarkdown as markdownToHtml, emptyFrame, safeLink } from './markdown.js';
+import { inlineMarkdown as markdownToHtml, safeLink } from './markdown.js';
+import { safeHref } from './url.js';
 
 // One implementation of each thing. outline lives in outline.js and is
 // re-exported here so callers have one import site, not two answers.
@@ -26,7 +27,7 @@ export function renderReport(input, container, opts = {}) {
   const model = reportOf(input);
   if (!model || !container) return;
 
-  const { page, print = false } = opts;
+  const { page, print = false, allPages = print } = opts;
 
   container.replaceChildren();
 
@@ -37,11 +38,13 @@ export function renderReport(input, container, opts = {}) {
 
   const shell = document.createElement('div');
   shell.className = 'report-shell';
+  if (model.pages.length === 1 && model.pages[0].blocks?.length === 1
+      && model.pages[0].blocks[0].type === 'embed') shell.classList.add('report-shell--artifact');
 
   const header = renderHeader(model);
   shell.appendChild(header);
 
-  if (!print) {
+  if (!allPages) {
     const tabs = renderTabs(model, page);
     if (tabs) shell.appendChild(tabs);
   }
@@ -49,15 +52,15 @@ export function renderReport(input, container, opts = {}) {
   const content = document.createElement('div');
   content.className = 'report-content';
 
-  if (print) {
+  if (allPages) {
     for (const p of model.pages) {
-      const pageEl = renderPage(p, model);
+      const pageEl = renderPage(p, model, opts);
       content.appendChild(pageEl);
     }
   } else {
     const pageId = page || model.pages[0].id;
     const pageObj = model.pages.find((p) => p.id === pageId) || model.pages[0];
-    const pageEl = renderPage(pageObj, model);
+    const pageEl = renderPage(pageObj, model, opts);
     content.appendChild(pageEl);
   }
 
@@ -97,7 +100,7 @@ function renderHeader(model) {
   if (model.status) {
     const statusEl = document.createElement('span');
     statusEl.className = `meta-status meta-status--${model.status}`;
-    statusEl.textContent = model.status;
+    statusEl.textContent = model.status.replaceAll('-', ' ');
     meta.appendChild(statusEl);
   }
   if (model.owner) {
@@ -112,11 +115,12 @@ function renderHeader(model) {
     periodEl.textContent = `${model.period.from || '?'} to ${model.period.to || '?'}`;
     meta.appendChild(periodEl);
   }
-  if (model.source && model.source.href) {
+  const sourceHref = safeHref(model.source?.href);
+  if (sourceHref) {
     const sourceEl = document.createElement('a');
     sourceEl.className = 'meta-source';
-    sourceEl.href = model.source.href;
-    sourceEl.textContent = 'source';
+    sourceEl.href = sourceHref;
+    sourceEl.textContent = 'View source';
     sourceEl.target = '_blank';
     sourceEl.rel = 'noopener noreferrer';
     meta.appendChild(sourceEl);
@@ -130,8 +134,9 @@ function renderHeader(model) {
 function renderTabs(model, activePage) {
   if (!model.pages || model.pages.length <= 1) return null;
 
-  const tabs = document.createElement('div');
+  const tabs = document.createElement('nav');
   tabs.className = 'report-tabs';
+  tabs.setAttribute('aria-label', 'Report sections');
 
   for (const page of model.pages) {
     const tab = document.createElement('a');
@@ -145,7 +150,11 @@ function renderTabs(model, activePage) {
     // matched the id, so neither a tab nor a shared page link opened the page
     // it named. One scheme: `#/<page id>`.
     tab.href = `#/${encodeURIComponent(page.id)}`;
-    tab.textContent = page.title;
+    const number = document.createElement('span');
+    number.className = 'report-tab__number';
+    number.setAttribute('aria-hidden', 'true');
+    number.textContent = String(model.pages.indexOf(page) + 1).padStart(2, '0');
+    tab.append(number, document.createTextNode(page.title));
     if (page.summary) {
       tab.title = page.summary;
     }
@@ -155,13 +164,22 @@ function renderTabs(model, activePage) {
   return tabs;
 }
 
-function renderPage(page, model) {
+function renderPage(page, model, opts = {}) {
   const pageEl = document.createElement('div');
   pageEl.className = 'report-page';
 
-  const outline = renderOutline(page);
-  if (outline) {
-    pageEl.appendChild(outline);
+  if (page.title) {
+    const head = document.createElement('header');
+    head.className = 'report-page__head';
+    const title = document.createElement('h2');
+    title.textContent = page.title;
+    head.appendChild(title);
+    if (page.summary) {
+      const summary = document.createElement('p');
+      summary.textContent = page.summary;
+      head.appendChild(summary);
+    }
+    pageEl.appendChild(head);
   }
 
   const blocks = document.createElement('div');
@@ -170,40 +188,13 @@ function renderPage(page, model) {
   if (page.blocks && Array.isArray(page.blocks)) {
     for (const block of page.blocks) {
       const blockEl = document.createElement('div');
-      blockEl.innerHTML = blockHtml(block, { page, model });
+      blockEl.innerHTML = blockHtml(block, { page, model, ...opts });
       blocks.appendChild(blockEl);
     }
   }
 
   pageEl.appendChild(blocks);
   return pageEl;
-}
-
-function renderOutline(page) {
-  const headings = page.blocks ? page.blocks.filter((b) => b.type === 'heading') : [];
-  if (headings.length === 0) return null;
-
-  const nav = document.createElement('nav');
-  nav.className = 'report-outline';
-  nav.setAttribute('aria-label', 'Page outline');
-
-  const list = document.createElement('ul');
-  list.className = 'outline-list';
-
-  for (const heading of headings) {
-    const li = document.createElement('li');
-    li.className = `outline-item outline-level-${heading.level || 2}`;
-
-    const link = document.createElement('a');
-    link.href = `#${heading.id}`;
-    link.textContent = heading.text;
-    li.appendChild(link);
-
-    list.appendChild(li);
-  }
-
-  nav.appendChild(list);
-  return nav;
 }
 
 /**
@@ -242,8 +233,13 @@ function wrapBlock(html, block, ctx) {
   const tone = block.tone ? ` block--${block.tone}` : '';
   const width = block.width ? ` block--${block.width}` : '';
   const collapsed = block.collapsed ? ' block--collapsed' : '';
-
-  let wrapper = `<div class="block${tone}${width}${collapsed}"${id}>`;
+  const tag = block.collapsed ? 'details' : 'section';
+  let wrapper = `<${tag} class="block${tone}${width}${collapsed}"${id} data-block-type="${escHtml(block.type)}">`;
+  if (block.collapsed) {
+    wrapper += `<summary>${escHtml(block.title || blockDef(block.type)?.name || 'Details')}</summary>`;
+  } else if (block.title && !['heading', 'chart', 'gauge'].includes(block.type)) {
+    wrapper += `<h3 class="block-title">${escHtml(block.title)}</h3>`;
+  }
   wrapper += html;
 
   if (block.note) {
@@ -254,7 +250,7 @@ function wrapBlock(html, block, ctx) {
     wrapper += renderEvidenceMarker(block.evidence);
   }
 
-  wrapper += '</div>';
+  wrapper += `</${tag}>`;
   return wrapper;
 }
 

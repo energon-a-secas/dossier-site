@@ -9,7 +9,7 @@ import { emptyFrame } from './markdown.js';
 // One formatter. This module carried its own copy of formatNumber, so fixing
 // the one in format.js changed nothing on screen: an error rate of 0.3 still
 // rendered as 0 and 1420000 requests still rendered as seven loose digits.
-import { formatNumber } from './format.js';
+import { formatNumber, formatCell } from './format.js';
 
 /** The types this module renders. js/render/dispatch.js builds its
  *  table from these declarations, so a type cannot be routed to a module
@@ -85,7 +85,7 @@ function renderMetricTile(metric) {
       `<span class="metric-delta metric-delta--${tone}">`
       + `<span aria-hidden="true">${arrow}</span> `
       + `${formatNumber(Math.abs(d), metric.precision)}${pct}`
-      + `<span class="metric-delta__word"> ${moved}${tone === 'flat' ? '' : `, ${tone}`}</span>`
+      + `<span class="metric-delta__word"> ${moved}${tone === 'flat' ? '' : tone === 'good' ? ', improved' : ', regressed'}</span>`
       + '</span>',
     );
   }
@@ -164,16 +164,18 @@ function renderTable(block) {
   const columns = Array.isArray(block.columns) ? block.columns : [];
   const rows = Array.isArray(block.rows) ? block.rows : [];
   if (columns.length === 0 || rows.length === 0) return '';
-  let html = '<div class="table-wrapper"><table class="block-table"><thead><tr>';
+  let html = `<div class="table-wrapper" tabindex="0" role="region" aria-label="${escHtml(block.title || 'Report table')}"><table class="block-table"><thead><tr>`;
   for (const col of columns) {
-    html += `<th align="${col.align || 'left'}">${escHtml(col.label || '')}</th>`;
+    const align = ['left', 'right', 'center'].includes(col.align) ? col.align : 'left';
+    html += `<th scope="col" align="${align}">${escHtml(col.label || '')}</th>`;
   }
   html += '</tr></thead><tbody>';
   for (const row of rows) {
     html += '<tr>';
     if (Array.isArray(row)) {
-      for (let i = 0; i < Math.min(columns.length, row.length); i++) {
-        html += `<td>${escHtml(String(row[i] || ''))}</td>`;
+      for (let i = 0; i < columns.length; i++) {
+        const align = ['left', 'right', 'center'].includes(columns[i].align) ? columns[i].align : 'left';
+        html += `<td align="${align}">${escHtml(formatCell(row[i], columns[i].format))}</td>`;
       }
     }
     html += '</tr>';

@@ -4,6 +4,8 @@
 
 import { downloadText, downloadBlob, showToast } from './neorgon-dom.js';
 import { renderReport } from './render/index.js';
+import { reportOf } from './render/model.js';
+import { bindComparisons } from './comparison-controls.js';
 
 /**
  * Export the model as JSON.
@@ -20,50 +22,9 @@ export function exportJson(model) {
  *
  * @param {object} model
  */
-export function exportYaml(model) {
-  const yaml = modelToYaml(model);
-  downloadText(yaml, 'report.yaml', 'text/yaml');
-}
-
-function modelToYaml(obj, indent = 0) {
-  const spaces = ' '.repeat(indent);
-  if (obj === null || obj === undefined) {
-    return 'null';
-  }
-  if (typeof obj === 'boolean') {
-    return obj ? 'true' : 'false';
-  }
-  if (typeof obj === 'number') {
-    return String(obj);
-  }
-  if (typeof obj === 'string') {
-    if (obj.includes('\n') || obj.includes(':') || obj.includes('#')) {
-      return '|\n' + spaces + '  ' + obj.split('\n').join('\n' + spaces + '  ');
-    }
-    return `"${obj.replace(/"/g, '\\"')}"`;
-  }
-  if (Array.isArray(obj)) {
-    if (obj.length === 0) return '[]';
-    const items = obj.map((item) => {
-      const itemYaml = modelToYaml(item, indent + 2);
-      return `${spaces}- ${itemYaml.slice(indent + 2)}`;
-    });
-    return items.join('\n');
-  }
-  if (typeof obj === 'object') {
-    const keys = Object.keys(obj);
-    if (keys.length === 0) return '{}';
-    const items = keys.map((key) => {
-      const valueYaml = modelToYaml(obj[key], indent + 2);
-      const valueLines = valueYaml.split('\n');
-      const first = valueLines[0];
-      const rest = valueLines.slice(1).join('\n');
-      const result = `${spaces}${key}: ${first}`;
-      return rest ? result + '\n' + rest : result;
-    });
-    return items.join('\n');
-  }
-  return String(obj);
+export async function exportYaml(model) {
+  const { dump } = await import('./vendor/js-yaml.mjs');
+  downloadText(dump(model, { noRefs: true, lineWidth: 100 }), 'report.yaml', 'text/yaml');
 }
 
 /**
@@ -78,7 +39,7 @@ export async function exportStandaloneHtml(model) {
   try {
     const container = document.createElement('div');
     container.id = 'export-container';
-    renderReport(model, container, { print: true, interactive: true });
+    renderReport(model, container, { allPages: true, interactive: true, standalone: true });
     const html = container.innerHTML;
     const css = collectStylesheets();
     if (!css) {
@@ -88,24 +49,27 @@ export async function exportStandaloneHtml(model) {
     const tokensCss = extractTokens();
     const inlineScript = generateInlineScript();
     const doc = `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-appearance="${document.documentElement.dataset.appearance === 'dark' ? 'dark' : 'light'}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escHtmlAttr(model.dossier?.title || 'Report')}</title>
+  <title>${escHtmlAttr(reportOf(model)?.title || 'Report')}</title>
   <style>
-${css}
 ${tokensCss}
+${css}
   </style>
+  <noscript><style>.compare__tools,.compare__switch,.compare__control{display:none}.compare__face[hidden]{display:block!important}.compare--slider .compare__img--before{position:relative;clip-path:none}.compare--overlay .compare__img--fade{position:relative;opacity:1}</style></noscript>
 </head>
-<body>
+<body class="ds-export">
 ${html}
 ${inlineScript}
 </body>
 </html>`;
     downloadText(doc, 'report.html', 'text/html');
+    return true;
   } catch {
     showToast('Could not export as HTML');
+    return false;
   }
 }
 
@@ -186,18 +150,9 @@ function extractTokens() {
     + `:root {\n${lines.join('\n')}\n}\n`;
 }
 
-/**
- * No script. The export renders every page in sequence and every disclosure is
- * a native `<details>`, so there is nothing for script to do.
- *
- * The version this replaces bound click handlers to `[data-page-tab]` and
- * `[data-page-id]`, attributes the renderer does not emit, so it was dead code
- * pretending to be a feature. A file with no script also opens with scripting
- * disabled, which is the right property for something meant to survive in a
- * ticket attachment for a year.
- */
+/** Native disclosures and the shared comparison controls work offline. */
 function generateInlineScript() {
-  return '';
+  return `<script>(${bindComparisons.toString()})(document);</script>`;
 }
 
 

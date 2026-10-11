@@ -6,6 +6,7 @@ import { escHtml } from '../neorgon-dom.js';
 import { inlineMarkdown as markdownToHtml, emptyFrame, safeLink } from './markdown.js';
 import { safeImageSrc } from './url.js';
 import { compareHtml } from './compare.js';
+import { embedDocument } from '../embed-policy.js';
 
 /** The types this module renders. js/render/dispatch.js builds its
  *  table from these declarations, so a type cannot be routed to a module
@@ -26,7 +27,7 @@ export function renderJudgmentBlock(block, ctx) {
     case 'image':
       return renderImage(block);
     case 'embed':
-      return renderEmbed(block);
+      return renderEmbed(block, ctx);
     case 'evidence':
       return renderEvidence(block);
     default:
@@ -147,12 +148,12 @@ function renderImage(block) {
  * A remote src is not framed. This page's policy refuses third party frames,
  * so framing one shows an empty box with no explanation. A link says more.
  */
-function renderEmbed(block) {
+function renderEmbed(block, ctx = {}) {
   if (!block.src && !block.html) {
     return emptyFrame('Embed: add "html" with the markup to show.');
   }
 
-  const height = Number.isFinite(Number(block.height)) ? Number(block.height) : 400;
+  const height = Number.isFinite(Number(block.height)) ? Math.max(160, Math.min(10000, Number(block.height))) : 780;
 
   if (!block.html && block.src) {
     return `<div class="block-embed block-embed--external">
@@ -163,16 +164,16 @@ function renderEmbed(block) {
   }
 
   const sandbox = block.scripts === true ? 'allow-scripts' : '';
-  const label = block.scripts === true
-    ? '<p class="block-embed__warn">Scripts run inside this frame. The content is user generated and unverified, and the frame cannot reach this page.</p>'
-    : '<p class="block-embed__warn">Shown as given. Nothing in it runs.</p>';
+  const content = embedDocument(block.html, block.scripts === true);
+  const source = block.scripts === true && !ctx.standalone
+    ? `src="embed.html" data-embed-html="${escHtml(content)}"`
+    : `srcdoc="${escHtml(content)}"`;
 
   return `<div class="block-embed-html">
-    ${label}
+    <p class="block-embed__caption">Original HTML${block.scripts === true ? ' · interactive' : ''}</p>
     <iframe class="block-embed" sandbox="${sandbox}" referrerpolicy="no-referrer"
-            loading="lazy" title="Embedded content, unverified"
-            srcdoc="${escHtml(block.html)}"
-            style="width: 100%; height: ${height}px;"></iframe>
+            loading="lazy" title="HTML report preview"
+            ${source} style="--embed-height: ${height}px;"></iframe>
   </div>`;
 }
 

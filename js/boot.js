@@ -15,11 +15,12 @@ import { loadFromUrl, loadFromUrlAsync } from './share.js';
 import { readReport, onExternalChange } from './store.js';
 import {
   initialMode, registerShortcuts, guardTypingSurfaces,
-  followVisitorChromeChoice, setMode, toggleMode, mode,
+  followVisitorChromeChoice, toggleMode, mode,
 } from './chrome.js';
 import { bindEvents, elements, refreshLibrary, showFindings, showSourceTab } from './events.js';
 import { showToast } from './neorgon-dom.js';
 import { init as initKeys } from './neokeys/index.js';
+import { initYaml } from './parse.js';
 
 export async function boot(state) {
   loadSaved(state);
@@ -50,7 +51,7 @@ export async function boot(state) {
   }
 
   initialMode({
-    fromUrl: claimed === 'url',
+    fromUrl: claimed === 'url' || claimed === 'example' || state.preferences.readMode,
     documentChrome: reportOf(state.model)?.chrome || 'auto',
   });
 
@@ -59,6 +60,9 @@ export async function boot(state) {
   // The source pane starts on whichever tab the visitor last used, and the
   // Form tab has to be built rather than merely shown.
   showSourceTab(state, els, state.preferences.sourceTab || 'form');
+  document.dispatchEvent(new CustomEvent('dossier-opened'));
+  // Warm the local parser for a later paste or source edit without blocking JSON.
+  initYaml();
 
   if (state.findings.length && state.preferences.showFindings) {
     showFindings(state, els, true);
@@ -96,6 +100,7 @@ export async function boot(state) {
     if (id && id !== state.page) {
       state.page = id;
       rerender(state, els);
+      showSourceTab(state, els, state.preferences.sourceTab);
     }
   });
 }
@@ -132,7 +137,8 @@ async function loadInitialReport(state, els) {
     if (claimed) return 'url';
     // Say which failure it was. A link that did not work and a page with
     // nothing open are different situations and never share a message.
-    showToast('That link carried no readable report. Nothing was opened.');
+    showToast('That link carried no readable report. Open a file to try again.');
+    return 'none';
   }
 
   const lastId = state.preferences.lastReportId;
@@ -145,12 +151,21 @@ async function loadInitialReport(state, els) {
     }
   }
 
-  return 'none';
+  try {
+    const response = await fetch('reports/responses.json');
+    if (!response.ok) throw new Error('Example unavailable');
+    const result = applyDocument(state, await response.json());
+    if (!result.ok) return 'none';
+    state.isExample = true;
+    return 'example';
+  } catch {
+    return 'none';
+  }
 }
 
 function pageFromHash() {
   const m = /^#\/(.+)$/.exec(location.hash || '');
-  return m ? decodeURIComponent(m[1]) : null;
+  try { return m ? decodeURIComponent(m[1]) : null; } catch { return null; }
 }
 
 function stepPage(state, els, by) {
@@ -162,6 +177,7 @@ function stepPage(state, els, by) {
   state.page = next.id;
   history.replaceState(null, '', `#/${encodeURIComponent(next.id)}`);
   rerender(state, els);
+  showSourceTab(state, els, state.preferences.sourceTab);
   return true;
 }
 

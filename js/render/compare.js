@@ -1,32 +1,18 @@
-/**
- * Before and after: the one visual primitive the fleet does not already own.
- *
- * The Viz Kit has thirteen builders and not one of them renders two things
- * next to each other, which is the most common shape in a report about a fix:
- * it was like this, now it is like that. So this module is the reason the site
- * exists, and `slopeSvg` is written to the kit's conventions so it can be
- * contributed upstream once its shape has survived real use.
- *
- * Four modes, and the choice is about what the reader has to do:
- *   side     read both at once, which is right for text, code and numbers
- *   slider   wipe between two images, for a visual change in one place
- *   overlay  fade between two images, for alignment and drift
- *   toggle   flip between them, which beats side by side when each is wide
- *
- * For text, code and logs the differing lines are marked. A diff the reader
- * has to find themselves is two blocks of text, not a comparison.
- */
+/** Render comparisons of responses, code, images and measurements. */
 
 import { escHtml } from '../neorgon-dom.js';
 import { safeImageSrc } from './url.js';
 import { emptyFrame } from './markdown.js';
 import { formatNumber } from './format.js';
+import { lineDiff } from './line-diff.js';
+export { lineDiff } from './line-diff.js';
+export { slopeSvg } from './slope.js';
 
 const TEXTUAL = new Set(['text', 'code', 'log']);
 
 export function compareHtml(block, ctx = {}) {
   const kind = block.kind || 'text';
-  const mode = block.mode || 'side';
+  const mode = ctx.print && ['toggle', 'slider', 'overlay'].includes(block.mode) ? 'side' : block.mode || 'side';
 
   if (!block.left || !block.right) {
     return emptyFrame('Comparison: it needs a "left" and a "right" side.');
@@ -39,40 +25,39 @@ export function compareHtml(block, ctx = {}) {
   switch (mode) {
     case 'slider': return slider(block);
     case 'overlay': return overlay(block);
-    case 'toggle': return toggle(block, kind);
+    case 'toggle': return paired(block, kind, 'toggle', ctx);
     case 'side':
-    default: return side(block, kind);
+    default: return paired(block, kind, 'side', ctx);
   }
 }
 
 /* ── Modes ──────────────────────────────────────────────────────────────── */
 
-function side(block, kind) {
-  const marked = TEXTUAL.has(kind) && block.highlightChanges !== false
-    ? lineDiff(String(block.left.value || ''), String(block.right.value || ''))
+function paired(block, kind, mode, ctx) {
+  const textual = TEXTUAL.has(kind);
+  const marked = textual
+    ? lineDiff(String(block.left.value ?? ''), String(block.right.value ?? ''))
     : null;
-
-  const left = panel(block.left, 'Before', kind, block, marked && marked.left);
-  const right = panel(block.right, 'After', kind, block, marked && marked.right);
-  const summary = marked ? diffSummary(marked) : '';
-
-  return `<div class="compare compare--side" data-kind="${escHtml(kind)}">${left}${right}</div>${summary}`;
-}
-
-function toggle(block, kind) {
-  const leftLabel = block.left.label || 'Before';
-  const rightLabel = block.right.label || 'After';
-  const marked = TEXTUAL.has(kind) && block.highlightChanges !== false
-    ? lineDiff(String(block.left.value || ''), String(block.right.value || ''))
-    : null;
-
-  return `<div class="compare compare--toggle" data-kind="${escHtml(kind)}">
-    <div class="compare__switch" role="group" aria-label="Which side to show">
-      <button type="button" data-action="compare-toggle" data-side="left" aria-pressed="true">${escHtml(leftLabel)}</button>
-      <button type="button" data-action="compare-toggle" data-side="right" aria-pressed="false">${escHtml(rightLabel)}</button>
+  const interactive = ctx.interactive !== false && !ctx.print;
+  const labels = [block.left.label || 'Before', block.right.label || 'After'];
+  const highlight = block.highlightChanges !== false;
+  const prompt = block.prompt
+    ? `<div class="compare__prompt"><span>Shared prompt</span><p>${escHtml(block.prompt)}</p></div>`
+    : '';
+  const tools = interactive ? `<div class="compare__tools">
+    <div class="compare__layouts" role="group" aria-label="Comparison layout">
+      <button type="button" data-compare-view="side" aria-pressed="${mode === 'side'}">Side by side</button>
+      <button type="button" data-compare-view="toggle" aria-pressed="${mode === 'toggle'}">One at a time</button>
     </div>
-    <div class="compare__face" data-side="left">${body(block.left, kind, block, marked && marked.left)}</div>
-    <div class="compare__face" data-side="right" hidden>${body(block.right, kind, block, marked && marked.right)}</div>
+    ${textual ? `<button type="button" class="compare__highlight" data-compare-highlight aria-pressed="${highlight}">Highlight changes</button>` : ''}
+  </div>` : '';
+  const switcher = interactive ? `<div class="compare__switch" role="group" aria-label="Response to show"${mode === 'side' ? ' hidden' : ''}>
+    ${labels.map((label, i) => `<button type="button" data-action="compare-toggle" data-side="${i ? 'right' : 'left'}" aria-pressed="${i === 0}">${escHtml(label)}</button>`).join('')}
+  </div>` : '';
+  return `<div class="compare compare--${mode}" data-kind="${escHtml(kind)}" data-layout="${mode}" data-highlight="${highlight ? 'on' : 'off'}">
+    ${prompt}${tools}${switcher}
+    <div class="compare__panels">${panel(block.left, labels[0], kind, block, marked?.left, 'left')}${panel(block.right, labels[1], kind, block, marked?.right, 'right', mode === 'toggle')}</div>
+    ${marked ? diffSummary(marked) : ''}
   </div>`;
 }
 
@@ -133,11 +118,13 @@ function overlay(block) {
 
 /* ── Sides ──────────────────────────────────────────────────────────────── */
 
-function panel(sideData, fallbackLabel, kind, block, marks) {
-  const label = sideData.label || fallbackLabel;
-  return `<section class="compare__panel">
-    <h4 class="compare__label">${escHtml(label)}</h4>
-    ${body(sideData, kind, block, marks)}
+function panel(sideData, label, kind, block, marks, side, hidden = false) {
+  const caption = sideData.caption ? `<p class="compare__caption">${escHtml(sideData.caption)}</p>` : '';
+  const text = String(sideData.value ?? '').trim();
+  const count = TEXTUAL.has(kind) ? `<span class="compare__length">${text ? text.split(/\s+/u).length : 0} words</span>` : '';
+  return `<section class="compare__panel compare__face" data-side="${side}" data-label="${escHtml(label)}"${hidden ? ' hidden' : ''}>
+    <div class="compare__panel-head"><h4 class="compare__label"><span class="compare__letter" aria-hidden="true">${side === 'left' ? 'A' : 'B'}</span>${escHtml(label)}</h4>${count}</div>
+    ${caption}${body(sideData, kind, block, marks)}
   </section>`;
 }
 
@@ -165,34 +152,30 @@ function body(sideData, kind, block, marks) {
 }
 
 function markedPre(value, marks, language) {
-  const lines = String(value || '').split('\n');
+  const lines = String(value ?? '').split('\n');
   if (!lines.length || (lines.length === 1 && !lines[0])) {
     return emptyFrame('Comparison: this side has no content.');
   }
   const rows = lines.map((line, i) => {
     const state = marks ? marks[i] || 'same' : 'same';
-    return `<span class="compare__line compare__line--${state}">${escHtml(line) || '&nbsp;'}</span>`;
+    return `<span class="compare__line compare__line--${state}">${changeLabel(state)}${escHtml(line) || '&nbsp;'}</span>`;
   }).join('\n');
   const lang = language ? ` data-language="${escHtml(language)}"` : '';
   return `<pre class="compare__code"${lang}><code>${rows}</code></pre>`;
 }
 
 function markedProse(value, marks) {
-  const lines = String(value || '').split('\n');
+  const lines = String(value ?? '').split('\n');
   if (!lines.length || (lines.length === 1 && !lines[0])) {
     return emptyFrame('Comparison: this side has no content.');
   }
   return `<div class="compare__prose">${lines.map((line, i) => {
     const state = marks ? marks[i] || 'same' : 'same';
-    return `<p class="compare__line compare__line--${state}">${escHtml(line) || '&nbsp;'}</p>`;
+    return `<p class="compare__line compare__line--${state}">${changeLabel(state)}${escHtml(line) || '&nbsp;'}</p>`;
   }).join('')}</div>`;
 }
 
-/**
- * Metric tiles on both sides, with the change between them derived here
- * rather than asked for. `better` is honoured, so a latency drop reads as an
- * improvement and a throughput drop does not.
- */
+/** Raw measurements on each side; headline deltas use the metrics block. */
 function metricsSide(sideData) {
   const items = Array.isArray(sideData.items) ? sideData.items : [];
   if (!items.length) return emptyFrame('Comparison: this side has no metric items.');
@@ -234,125 +217,22 @@ function tableSide(sideData) {
  * marks nothing rather than stalling the render, because a comparison that
  * large is a diff block, not a comparison.
  */
-export function lineDiff(before, after) {
-  const a = before.split('\n');
-  const b = after.split('\n');
-  const LIMIT = 400;
-  if (a.length > LIMIT || b.length > LIMIT) {
-    return { left: null, right: null, added: 0, removed: 0, gaveUp: true };
-  }
-
-  const table = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1));
-  for (let i = a.length - 1; i >= 0; i -= 1) {
-    for (let j = b.length - 1; j >= 0; j -= 1) {
-      table[i][j] = a[i] === b[j]
-        ? table[i + 1][j + 1] + 1
-        : Math.max(table[i + 1][j], table[i][j + 1]);
-    }
-  }
-
-  const left = new Array(a.length).fill('same');
-  const right = new Array(b.length).fill('same');
-  let i = 0;
-  let j = 0;
-  let added = 0;
-  let removed = 0;
-
-  while (i < a.length && j < b.length) {
-    if (a[i] === b[j]) { i += 1; j += 1; continue; }
-    if (table[i + 1][j] >= table[i][j + 1]) {
-      left[i] = 'removed'; removed += 1; i += 1;
-    } else {
-      right[j] = 'added'; added += 1; j += 1;
-    }
-  }
-  while (i < a.length) { left[i] = 'removed'; removed += 1; i += 1; }
-  while (j < b.length) { right[j] = 'added'; added += 1; j += 1; }
-
-  return { left, right, added, removed, gaveUp: false };
-}
 
 function diffSummary(marked) {
   if (marked.gaveUp) {
     return '<p class="compare__summary">Too many lines to mark the differences. Use a diff block for a change this size.</p>';
   }
   if (!marked.added && !marked.removed) {
-    return '<p class="compare__summary">Both sides are identical, so this block shows a change that did not happen.</p>';
+    return '<p class="compare__summary">Both responses are identical. No differences to highlight.</p>';
   }
   const bits = [];
   if (marked.removed) bits.push(`${marked.removed} line${marked.removed === 1 ? '' : 's'} gone`);
   if (marked.added) bits.push(`${marked.added} new`);
-  return `<p class="compare__summary">${bits.join(', ')}</p>`;
+  return `<p class="compare__summary">${bits.join(', ')}. Highlights show differences, not quality.</p>`;
 }
 
-/* ── The slope chart ────────────────────────────────────────────────────── */
 
-/**
- * A before and after dumbbell, one row per label.
- *
- * Written to the Viz Kit's conventions so moving it into
- * packages/neorgon-ui/js/viz.js is a copy: a string in, a string out, a stable
- * `uid`, a `<title>` on every point, `--viz-*` tokens only, and nothing
- * animated unless asked.
- *
- * The first version divided every value by 100, so any measurement that was
- * not a percentage drew off the end of the plot.
- */
-export function slopeSvg(pairs, opts = {}) {
-  const rows = (Array.isArray(pairs) ? pairs : []).filter(
-    (p) => p && Number.isFinite(Number(p.before)) && Number.isFinite(Number(p.after)),
-  );
-  const width = opts.width || 520;
-  const rowHeight = 34;
-  const height = opts.height || Math.max(72, rows.length * rowHeight + 24);
-  const uid = opts.uid || 'slope';
-
-  if (!rows.length) {
-    return frame(
-      `<div class="viz-empty">No before and after pairs to plot</div>`,
-      opts,
-    );
-  }
-
-  const labelWidth = opts.labelWidth || 150;
-  const padRight = 56;
-  const plot = width - labelWidth - padRight;
-
-  const values = rows.flatMap((p) => [Number(p.before), Number(p.after)]);
-  const min = Math.min(0, ...values);
-  const max = Math.max(1, ...values);
-  const span = max - min || 1;
-  const xAt = (v) => labelWidth + ((Number(v) - min) / span) * plot;
-
-  const colorBefore = 'var(--viz-ink-mute, #8b94a7)';
-  const colorAfter = 'var(--viz-accent-bright, #0080ff)';
-
-  const marks = rows.map((p, i) => {
-    const y = 16 + i * rowHeight;
-    const x1 = xAt(p.before);
-    const x2 = xAt(p.after);
-    const label = escHtml(String(p.label || ''));
-    const unit = p.unit ? ` ${escHtml(p.unit)}` : '';
-    return `
-      <text class="viz-label" x="0" y="${(y + 4).toFixed(1)}">${label}</text>
-      <line class="viz-line" x1="${x1.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${colorBefore}" stroke-width="1.4"/>
-      <circle class="viz-dot" cx="${x1.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${colorBefore}"><title>${label}: before ${escHtml(formatNumber(p.before))}${unit}</title></circle>
-      <circle class="viz-dot" cx="${x2.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5" fill="${colorAfter}"><title>${label}: after ${escHtml(formatNumber(p.after))}${unit}</title></circle>
-      <text class="viz-value-label" x="${(width - padRight + 8).toFixed(1)}" y="${(y + 4).toFixed(1)}">${escHtml(formatNumber(p.after))}</text>`;
-  }).join('');
-
-  const svg = `<svg class="viz-svg" viewBox="0 0 ${width} ${height}" role="img"
-    aria-label="${escHtml(opts.ariaLabel || opts.title || 'Before and after')}" data-uid="${escHtml(uid)}">${marks}
-  </svg>`;
-
-  return frame(svg, opts);
-}
-
-/** The Viz Kit's panel wrapper, reproduced so this module can move as-is. */
-function frame(bodyHtml, opts = {}) {
-  if (opts.frame === false) return bodyHtml;
-  const head = opts.title || opts.scale
-    ? `<div class="viz-head"><span class="viz-title">${escHtml(opts.title || '')}</span><span class="viz-scale">${escHtml(opts.scale || '')}</span></div>`
-    : '';
-  return `<div class="viz-panel">${head}${bodyHtml}</div>`;
+function changeLabel(state) {
+  if (state === 'same') return '';
+  return `<span class="compare__change" aria-label="${state}">${state === 'added' ? '+' : '−'}</span>`;
 }

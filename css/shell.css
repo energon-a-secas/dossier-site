@@ -1,26 +1,12 @@
-/*
- * The application shell: the three regions, the two modes, and the furniture.
- *
- * Fleet tokens only. Every colour, type step, spacing step and radius comes
- * from the CDN base.css, so a seasonal theme or a site skin re-skins this file
- * without it knowing either exists. The one identity knob is --accent, set in
- * css/style.css.
- *
- * Read mode is the state that matters. A report that arrived in a link is
- * something to read, so the rail, the source pane and the findings step out of
- * the way and the document gets the window. H still works, because the kit
- * owns it; see js/chrome.js for why read mode is a separate attribute.
- */
-
 /* ── Regions ───────────────────────────────────────────────────────────── */
 
 .ds-shell {
   display: grid;
-  grid-template-columns: minmax(200px, 250px) minmax(0, 1fr) minmax(320px, 430px);
+  grid-template-columns: 200px minmax(0, 1fr) 310px;
   gap: var(--space-4);
   align-items: start;
-  padding: var(--space-4);
-  max-width: 2100px;
+  padding: 24px;
+  max-width: 1720px;
   margin: 0 auto;
   min-height: calc(100dvh - 160px);
 }
@@ -32,10 +18,9 @@ body:not(.is-empty) .ds-welcome { display: none; }
 .ds-rail,
 .ds-source,
 .ds-findings {
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-3);
+  background: transparent;
+  border: 0;
+  padding: 12px 0;
   position: sticky;
   top: var(--space-4);
   max-height: calc(100dvh - 120px);
@@ -117,7 +102,7 @@ body:not(.is-empty) .ds-welcome { display: none; }
   cursor: pointer;
   padding: var(--space-1);
   border-radius: var(--radius-sm);
-  opacity: 0;
+  opacity: 1;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 
@@ -268,8 +253,8 @@ body:not(.is-empty) .ds-welcome { display: none; }
   padding: var(--space-6) var(--space-4);
 }
 
-.ds-welcome__inner { max-width: 54ch; text-align: center; }
-.ds-welcome__inner h2 { margin: 0 0 var(--space-2); font-size: var(--text-xl); }
+.ds-welcome__inner { max-width: 70ch; text-align: center; }
+.ds-welcome__inner h2 { margin: 0 0 var(--space-2); font-size: 2.75rem; letter-spacing: -.045em; line-height: 1.15; }
 .ds-welcome__inner p { color: var(--text-secondary); margin: 0 0 var(--space-4); }
 
 .ds-welcome__actions {
@@ -333,7 +318,7 @@ html[data-dossier-chrome="hidden"] .header-bar { display: none; }
 
 html[data-dossier-mode="read"] .ds-shell {
   grid-template-columns: minmax(0, 1fr);
-  max-width: 1100px;
+  max-width: 1220px;
 }
 
 html[data-dossier-mode="read"] .ds-rail,
@@ -358,14 +343,16 @@ body.is-dropping::after {
 
 /* ── Narrow ───────────────────────────────────────────────────────────── */
 
-@media (max-width: 1200px) {
-  .ds-shell { grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); }
-  .ds-source { grid-column: 1 / -1; position: static; max-height: none; }
+@media (max-width: 1350px) {
+  .ds-shell { grid-template-columns: minmax(0, 1fr) 310px; }
+  .ds-rail { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; position: static; max-height: 220px; }
 }
 
 @media (max-width: 820px) {
   .ds-shell { grid-template-columns: minmax(0, 1fr); padding: var(--space-2); }
-  .ds-rail { position: static; max-height: none; }
+  .ds-rail { display: block; position: static; max-height: none; }
+  .ds-source { position: static; max-height: none; }
+  html[data-dossier-mode="read"] .ds-shell { padding: 16px 12px 40px; }
 }
 
 /* ── Print ────────────────────────────────────────────────────────────── */
@@ -396,49 +383,7 @@ body.is-dropping::after {
 
   .ds-report.is-stale { opacity: 1; filter: none; }
 
-  /*
-   * A light palette, for paper.
-   *
-   * This is the one place the site overrides fleet colour tokens, and it is
-   * not a style preference. The fleet's tokens are a dark theme: text is
-   * #f9f9f9 and surfaces are white at 3% alpha. Printing that on white paper
-   * gives near white text on white, so the report comes out blank while
-   * looking perfect on screen. base.css has no print palette to inherit, so
-   * these values are declared rather than referenced.
-   *
-   * Only the roles that carry text or a surface are overridden. The accent
-   * and the semantic good and bad colours keep their meaning, darkened enough
-   * to read on paper.
-   */
-  :root {
-    --bg: #ffffff;
-    --surface-1: #f6f7f9;
-    --surface-2: #eceef2;
-    --surface-toast: #eceef2;
-    --text-primary: #16181d;
-    --text-secondary: #3c414b;
-    --text-muted: #5f6672;
-    --border: rgba(0, 0, 0, .14);
-    --border-strong: rgba(0, 0, 0, .26);
-    --accent: #4f46e5;
-    --accent-bright: #4338ca;
-    --ok: #15803d;
-    --warn: #a16207;
-    --danger: #b91c1c;
-    --danger-hover: #b91c1c;
-    --viz-surface: #ffffff;
-    --viz-ink: #16181d;
-    --viz-ink-2: #3c414b;
-    --viz-ink-mute: #5f6672;
-    --viz-grid: rgba(0, 0, 0, .10);
-    --viz-grid-2: rgba(0, 0, 0, .06);
-    --viz-border: rgba(0, 0, 0, .14);
-    --viz-border-strong: rgba(0, 0, 0, .26);
-    --shadow-card: none;
-    --shadow-modal: none;
-  }
-
-  body { background: #fff; color: var(--text-primary); }
+  body { background: var(--surface-1); color: var(--text-primary); }
 
   /* A chart's fill carries its meaning, so the browser must not drop it to
      save ink. Without this a banded gauge prints as an empty outline. */

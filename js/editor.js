@@ -7,7 +7,6 @@
  * format action reserialises with stable key order.
  */
 
-import { debounce } from './neorgon-dom.js';
 import { parse } from './parse.js';
 
 /**
@@ -17,7 +16,7 @@ import { parse } from './parse.js';
  * @param {object} opts configuration
  *   - onChange(result) called when parsing completes, with { model, fatal, findings }
  *   - onFormat() called when user wants to format (caller updates source)
- *   - autoSave(text) called to persist source (debounced separately)
+ *   - autoSave(text) called after a valid edit is parsed
  * @returns {HTMLElement} the editor container
  */
 export function createEditor(sourceText = '', opts = {}) {
@@ -49,14 +48,18 @@ export function createEditor(sourceText = '', opts = {}) {
 
   const textarea = document.createElement('textarea');
   textarea.className = 'editor-textarea';
+  textarea.setAttribute('aria-label', 'Report source, JSON or YAML');
   textarea.spellcheck = 'false';
   textarea.value = sourceText;
   container.appendChild(textarea);
 
   let lastGoodModel = null;
   let escapeArmed = false;
+  let parseTimer = null;
 
-  const debouncedParse = debounce(() => {
+  function parseAndSave() {
+    clearTimeout(parseTimer);
+    parseTimer = null;
     const text = textarea.value;
     const result = parse(text);
 
@@ -68,7 +71,7 @@ export function createEditor(sourceText = '', opts = {}) {
     if (result.fatal) {
       const line = result.fatal.line ? `Line ${result.fatal.line}` : 'Parse error';
       const col = result.fatal.column ? `, column ${result.fatal.column}` : '';
-      errorBanner.innerHTML = `<strong>Parse error:</strong> ${line}${col}. ${result.fatal.message}`;
+      errorBanner.textContent = `${line}${col}. ${result.fatal.message}`;
       errorBanner.classList.add('error');
     }
 
@@ -77,15 +80,18 @@ export function createEditor(sourceText = '', opts = {}) {
       fatal: result.fatal,
       findings: result.findings,
     });
-  }, 200);
+    if (!result.fatal) autoSave(text);
+  }
 
-  const debouncedSave = debounce(() => {
-    autoSave(textarea.value);
-  }, 500);
+  function scheduleParse() {
+    clearTimeout(parseTimer);
+    parseTimer = setTimeout(parseAndSave, 200);
+  }
 
-  textarea.addEventListener('input', () => {
-    debouncedParse();
-    debouncedSave();
+  textarea.addEventListener('input', scheduleParse);
+  // Commit the pending edit before a click opens another report or form.
+  textarea.addEventListener('blur', () => {
+    if (parseTimer !== null) parseAndSave();
   });
 
   textarea.addEventListener('keydown', (e) => {
@@ -110,11 +116,7 @@ export function createEditor(sourceText = '', opts = {}) {
 
     if (escapeArmed && key === 'Tab') {
       escapeArmed = false;
-      e.preventDefault();
-      const next = textarea.nextElementSibling;
-      if (next && typeof next.focus === 'function') {
-        next.focus();
-      }
+      // Let the browser move focus out of the editor in the requested direction.
       return;
     }
 
@@ -143,11 +145,10 @@ export function createEditor(sourceText = '', opts = {}) {
           textarea.selectionStart = textarea.selectionEnd = before.length + indent.length;
         }
       } else {
-        const beforeNewline = before.lastIndexOf('\n');
-        const startLine = beforeNewline + 1;
-        const beforeLines = before.substring(0, startLine);
-        const selectedLines = before.substring(startLine) + after.substring(0, end - start);
-        const afterLines = after.substring(end - start);
+        const startLine = textarea.value.lastIndexOf('\n', start - 1) + 1;
+        const beforeLines = textarea.value.substring(0, startLine);
+        const selectedLines = textarea.value.substring(startLine, end);
+        const afterLines = textarea.value.substring(end);
 
         const lines = selectedLines.split('\n');
         const processedLines = shiftKey
@@ -159,32 +160,24 @@ export function createEditor(sourceText = '', opts = {}) {
         textarea.selectionEnd = startLine + processedLines.join('\n').length;
       }
 
-      debouncedParse();
-      debouncedSave();
+      scheduleParse();
     }
   });
 
-  debouncedParse();
-
   // The caller needs to push text in as well as read it: a report opened from
-
   // a share link, the library or a template has to appear in the editor, and
-
   // setting the value must not re-enter the parse that produced it.
-
   container.getValue = () => textarea.value;
-
   container.setValue = (next) => {
-
-    if (typeof next !== 'string' || next === textarea.value) return;
-
+    if (typeof next !== 'string') return;
+    clearTimeout(parseTimer);
+    parseTimer = null;
+    if (next === textarea.value) return;
     textarea.value = next;
-
+    lastGoodModel = null;
+    errorBanner.classList.add('hidden');
   };
-
   container.focusEditor = () => textarea.focus();
-
-
   return container;
 }
 

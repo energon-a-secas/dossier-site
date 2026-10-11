@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- This separate policy permits inline controls without relaxing the
+       workspace policy. The parent enforces sandbox=allow-scripts. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HTML report preview</title>
+</head>
+<body>
+  <script>
+    if (window.parent !== window) {
+      window.addEventListener('message', function receive(event) {
+        if (event.source !== window.parent || event.data?.type !== 'dossier-embed-content'
+            || typeof event.data.html !== 'string' || event.data.html.length > 410000) return;
+        window.removeEventListener('message', receive);
+        document.open();
+        document.write(event.data.html);
+        document.close();
+      });
+      window.parent.postMessage({ type: 'dossier-embed-ready' }, '*');
+    }
+  </script>
+</body>
+</html>
