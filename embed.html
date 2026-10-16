@@ -14,7 +14,15 @@
     // own policy, so tests/embed-cap.test.mjs keeps the two numbers equal. The
     // 1024 is room for the policy head embedDocument() puts in front.
     var MAX_CHARS = 2000000;
-    if (window.parent !== window) {
+    // Only the frame Dossier builds: sandbox="allow-scripts" gives an opaque origin
+    // (self.origin === 'null'). A page that frames this file without a sandbox, or with
+    // allow-same-origin, gets the real Dossier origin, and is refused before it can post
+    // anything. GitHub Pages cannot send frame-ancestors, so this check is the boundary.
+    var sealed = window.parent !== window && self.origin === 'null';
+    // Defence in depth where supported: the immediate parent must be Dossier itself.
+    if (sealed && location.ancestorOrigins && location.ancestorOrigins.length
+        && location.ancestorOrigins[0] !== location.origin) sealed = false;
+    if (sealed) {
       window.addEventListener('message', function receive(event) {
         if (event.source !== window.parent || event.data?.type !== 'dossier-embed-content'
             || typeof event.data.html !== 'string') return;
