@@ -1,46 +1,57 @@
 /* ── The Reports view: layout ─────────────────────────────────────────────
  *
- * Four regions in one grid: the rail (saved reports and the outline), the
- * report bar, the report, and the side column (Check report, and the editor
- * in edit mode). Which columns exist depends on three attributes on <html>
- * (js/chrome.js) and on the width:
+ * The desk: an optional rail (saved reports and the outline) on the left,
+ * the reading area in the middle (the report bar, then the sheet), and a side
+ * column on the right only while editing or while Check report is open.
+ * Which columns exist depends on attributes on <html> (js/chrome.js) and on
+ * the width:
  *
- *   data-dossier-mode   read | build    build adds the side column
+ *   data-dossier-mode   read | build    build adds the side column (editor)
  *   data-dossier-rail   open | closed   open docks the rail at 1280 px and up;
  *                                       narrower, it is a drawer over the report
  *   Check report open                   adds the side column in read mode too
  *
- * Breakpoints: 1280 (rail docks), 960 (side column beside the report),
- * 700 (the Header Kit's phone width), 480 (tight phone).
+ * Breakpoints: 1280 (the rail docks; js/chrome.js DOCKED says the same),
+ * 960 (side column beside the report), 900 (the file label drops under the
+ * title, css/report.css), 700 (the Header Kit's phone width).
  *
  * Sticky panes sit under the kit's sticky header. --bar-h is its height, and
  * drops to 0 when the kit hides the bar on scroll (.header-hidden) or the
  * visitor hides it with H (html[data-chrome="off"]). Both are read here, never
  * set: header geometry is the kit's.
  *
- * A sticky pane cannot leave its grid area, which ends above the shell's
- * bottom padding and the footer. At the end of the page a pane as tall as the
- * window was pushed up by that much (86 px at 1440 x 900) and its heading,
- * Close and the editor's tabs went above the window. So a pane is never
- * taller than the window minus the header and that tail. --ds-footer-h is
- * the footer's measured height (js/chrome.js followFooterHeight).
+ * A sticky pane cannot leave its grid area, which ends above the footer. At
+ * the end of the page a pane as tall as the window was pushed up by that much
+ * and its heading, Close and the editor's tabs went above the window. So the
+ * side column and the docked rail are as tall as the window under the header
+ * (--pane-max) less --ds-pane-cut, the part of the footer on screen: 0 until
+ * the footer comes into view, then up to the footer's height (--ds-footer-h,
+ * measured by js/chrome.js followFooterHeight). A scroll-linked animation
+ * follows the last --ds-footer-h pixels of the page's scroll range, which is
+ * exactly when the footer is on screen. A browser with no scroll timelines
+ * always leaves the footer's room: a strip of desk under the pane, never a
+ * heading under the header.
+ *
+ * The animated height must never decide the page's height, or the scroll
+ * range would chase it: whenever a pane is docked, the desk (or the report
+ * area beside the editor) is at least --pane-max tall, so a pane is never the
+ * tallest thing in its rows.
  */
 
 .ds-shell {
-  --rail-w: 256px;
-  --side-w: 360px;
-  --shell-pad-end: var(--space-8);
   --bar-h: var(--header-h-app, 56px);
-  --pane-top: calc(var(--bar-h) + var(--space-4));
-  --pane-max: calc(100dvh - var(--pane-top) - var(--shell-pad-end) - var(--ds-footer-h, 72px));
+  --read-pad: 32px;
+  /* The editor's column. The spec's 40% left the sheet 512 px wide at 1440
+   * with the rail open, and its title a word per line; a third keeps both
+   * usable, and the sheet's container queries handle the rest. */
+  --side-col: minmax(360px, 32%);
+  --pane-max: calc(100dvh - var(--bar-h));
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "bar" "side" "stage";
-  column-gap: var(--space-6);
   align-items: start;
-  padding: var(--space-4) var(--space-6) var(--shell-pad-end);
-  max-width: 1720px;
-  margin: 0 auto;
+  margin: 0;
+  padding: 0;
 }
 
 .header-bar.header-hidden ~ #main .ds-shell,
@@ -48,7 +59,7 @@ html[data-chrome="off"] .ds-shell { --bar-h: 0px; }
 
 .ds-rail { grid-area: rail; }
 .ds-reportbar { grid-area: bar; }
-.ds-stage { grid-area: stage; min-width: 0; }
+.ds-stage { grid-area: stage; min-width: 0; padding: 0 var(--read-pad) 64px; }
 .ds-side { grid-area: side; min-width: 0; }
 
 /* Nothing open: the welcome screen owns the window and the regions stand down. */
@@ -79,15 +90,16 @@ html[data-dossier-booting] .ds-boot:empty { padding: 0; }
 html[data-dossier-loading="failed"] .ds-boot { color: var(--text-primary); }
 
 /* ── View switch on a narrow phone ────────────────────────────────────────
- * Both view buttons are kept out of the kit's overflow menu (data-keep-mobile),
- * but below 480 px the brand, two labelled buttons, the menu and the home
- * link do not fit (measured: 12 px short at 390, 66 px at 320, the menu
- * button overlapping the home link). There the button for the view already
- * on screen steps aside, and the one left reads as the switch to the other
- * view. Visibility of our own two controls only: kit geometry is untouched. */
-@media (max-width: 480px) {
+ * The view group stays out of the kit's overflow menu (data-keep-mobile on
+ * the group). With 13 px labels the brand, both buttons, the menu and the
+ * home link fit down to 370 px (34 px to spare at 390, measured). Narrower,
+ * the button for the view already on screen steps aside and the one left is
+ * the way to the other view. Visibility of our own two controls only: kit
+ * geometry is untouched. */
+@media (max-width: 369px) {
   html[data-dossier-view="reports"] #viewReports,
   html[data-dossier-view="compare"] #viewCompare { display: none; }
+  .header-btn-group > .nav-link { border-radius: 6px; margin-left: 0; }
 }
 
 /* ── Columns ──────────────────────────────────────────────────────────── */
@@ -102,39 +114,88 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
 @media (min-width: 960px) {
   html[data-dossier-mode="build"] .ds-shell,
   .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) {
-    grid-template-columns: minmax(0, 1fr) var(--side-w);
+    grid-template-columns: minmax(0, 1fr) var(--side-col);
     grid-template-areas: "bar side" "stage side";
   }
+  html[data-dossier-mode="read"] .ds-shell { --side-col: 360px; }
 
   .ds-side {
+    --ds-pane-cut: var(--ds-footer-h, 72px);
     position: sticky;
-    top: var(--pane-top);
-    max-height: var(--pane-max);
+    top: var(--bar-h);
+    max-height: calc(var(--pane-max) - var(--ds-pane-cut));
     overflow: auto;
     overscroll-behavior: contain;
+    padding: 20px 20px 32px;
+  }
+
+  /* The editor is a pane of paper beside the desk, edited in place. */
+  html[data-dossier-mode="build"] .ds-side {
+    height: calc(var(--pane-max) - var(--ds-pane-cut));
+    background: var(--surface-1);
+    border-left: 1px solid var(--border);
   }
 
   /* A short report would end the side column's sticky range early and push
-   * the editor's top off screen; the report area is at least its height. */
+   * the editor's top off screen; the report area is at least its height. With
+   * Check report open in read mode the desk is, so the pane never sets the
+   * page's height (see the note at the top). */
   html[data-dossier-mode="build"] .ds-stage { min-height: var(--pane-max); }
+  .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) { min-height: var(--pane-max); }
+}
+
+/* The footer's room is taken only while the footer is on screen. Registered,
+ * so it interpolates as a length rather than flipping halfway. */
+@property --ds-pane-cut {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes ds-pane-fit {
+  from { --ds-pane-cut: 0px; }
+  to { --ds-pane-cut: var(--ds-footer-h, 72px); }
+}
+@supports (animation-timeline: scroll()) and (animation-range: 0% 100%) {
+  @media (min-width: 960px) {
+    .ds-side {
+      --ds-pane-cut: 0px;
+      animation-name: ds-pane-fit;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: scroll(root block);
+      animation-range: calc(100% - var(--ds-footer-h, 72px)) 100%;
+    }
+  }
+  @media (min-width: 1280px) {
+    html[data-dossier-rail="open"] .ds-rail {
+      --ds-pane-cut: 0px;
+      animation-name: ds-pane-fit;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: scroll(root block);
+      animation-range: calc(100% - var(--ds-footer-h, 72px)) 100%;
+    }
+  }
 }
 
 @media (min-width: 1280px) {
   html[data-dossier-rail="open"] .ds-shell {
-    grid-template-columns: var(--rail-w) minmax(0, 1fr);
+    grid-template-columns: var(--rail-width) minmax(0, 1fr);
     grid-template-areas: "rail bar" "rail stage";
+    min-height: var(--pane-max);
   }
 
   html[data-dossier-rail="open"][data-dossier-mode="build"] .ds-shell,
   html[data-dossier-rail="open"] .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) {
-    grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--side-w);
+    grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--side-col);
     grid-template-areas: "rail bar side" "rail stage side";
   }
 
   .ds-rail {
+    --ds-pane-cut: var(--ds-footer-h, 72px);
     position: sticky;
-    top: var(--pane-top);
-    max-height: var(--pane-max);
+    top: var(--bar-h);
+    height: calc(var(--pane-max) - var(--ds-pane-cut));
     overflow: auto;
     overscroll-behavior: contain;
   }
@@ -153,164 +214,113 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
     bottom: 0;
     left: 0;
     width: min(320px, calc(100vw - var(--space-8)));
-    padding: var(--space-4);
     overflow: auto;
     overscroll-behavior: contain;
-    background: var(--bg);
-    border-right: 1px solid var(--border);
     box-shadow: var(--shadow-modal);
   }
 }
 
-/* ── The report bar ───────────────────────────────────────────────────── */
-
-.ds-reportbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-  max-width: var(--sheet-width, 1220px);
-  width: 100%;
-  margin: 0 auto var(--space-3);
-  min-height: 40px;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-.ds-reportbar__rail svg { flex: none; }
-.ds-reportbar__origin {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.ds-reportbar__pages { margin-left: auto; font-variant-numeric: tabular-nums; }
-.ds-reportbar__pages:empty { display: none; }
-
-/* The rail toggle names what it opens; its state is aria-expanded. */
-.ds-reportbar__rail[aria-expanded="true"] { color: var(--text-primary); }
-
-/* Beside the side column the report is narrow, so the toggle keeps its icon
- * and its name is for assistive technology only. The bar then stays on one
- * line down to a 960 px window. From 1280 px the label is hidden only while
- * the docked rail is open, which already shows "Saved reports" as its own
- * heading: with the rail docked the bar is 568 px wide at 1280 and the label
- * wrapped it onto a second line below 1300 (measured). */
-@media (min-width: 960px) and (max-width: 1279px) {
-  html[data-dossier-mode="build"] .ds-reportbar__rail span,
-  .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) .ds-reportbar__rail span {
-    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
-  }
-}
-@media (min-width: 1280px) {
-  html[data-dossier-rail="open"][data-dossier-mode="build"] .ds-reportbar__rail span,
-  html[data-dossier-rail="open"] .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) .ds-reportbar__rail span {
-    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
-  }
-}
-
-/* ── The side column (Check report, editor) ───────────────────────────── */
-
-.ds-side > * + * { margin-top: var(--space-4); }
-
-.ds-source,
-.ds-findings { padding: 0; }
-
 /* ── The rail ─────────────────────────────────────────────────────────── */
 
-.ds-rail { padding: 4px 0 var(--space-4); }
+.ds-rail {
+  padding: 20px 16px 32px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
 
-.ds-rail__group + .ds-rail__group { margin-top: var(--space-6); }
+.ds-rail__group + .ds-rail__group { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--border); }
 
 .ds-rail__head {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
+  gap: 4px;
+  margin-bottom: var(--space-3);
 }
-
 .ds-rail__head h2 {
   margin: 0 auto 0 0;
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: .09em;
-  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .ds-rail input[type="search"] {
   width: 100%;
-  margin-bottom: var(--space-2);
+  height: 32px;
+  margin-bottom: 14px;
+  padding: 0 10px;
 }
 
 /* ── The report library ────────────────────────────────────────────────── */
 
-.ds-library { list-style: none; margin: 0; padding: 0; }
+.ds-library { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 
-.ds-library__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  border-radius: var(--radius-sm);
-}
-
-.ds-library__item[aria-current="true"] {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
+.ds-library__item { position: relative; display: flex; align-items: stretch; border-radius: var(--radius-sm); }
 
 .ds-library__open {
   flex: 1;
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 2px;
-  align-items: flex-start;
-  text-align: left;
-  background: none;
-  border: 0;
-  padding: var(--space-2);
-  color: inherit;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
   min-width: 0;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-
 .ds-library__open:hover { background: var(--surface-2); }
+.ds-library__open:focus-visible { outline-offset: -2px; }
+.ds-library__item[aria-current="true"] .ds-library__open {
+  background: var(--manila);
+  border-color: var(--manila-strong);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 
 .ds-library__title {
   font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.3;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
+  overflow-wrap: anywhere;
 }
-
 .ds-library__meta { font-size: var(--text-xs); color: var(--text-muted); }
+.ds-library__item[aria-current="true"] .ds-library__meta { color: var(--text-secondary); }
 
+/* Delete waits at the item's right edge and shows on hover or focus. A
+ * pointer that cannot hover always sees it. */
 .ds-library__delete {
-  background: none;
-  border: 0;
-  color: var(--text-muted);
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-secondary);
   font-size: var(--text-xs);
   cursor: pointer;
-  padding: var(--space-1);
-  border-radius: var(--radius-sm);
+  opacity: 0;
 }
-
+.ds-library__item:hover .ds-library__delete,
+.ds-library__delete:focus-visible,
+.ds-library__delete[data-confirm="armed"] { opacity: 1; }
+@media (hover: none) { .ds-library__delete { opacity: 1; } }
 .ds-library__delete:hover,
-.ds-library__delete[data-confirm="armed"] { color: var(--danger-hover); }
+.ds-library__delete[data-confirm="armed"] { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
 
-.ds-library__empty { font-size: var(--text-xs); color: var(--text-muted); padding: var(--space-2); }
+.ds-library__empty { padding: var(--space-2) 0; font-size: var(--text-xs); color: var(--text-secondary); }
 
 /* ── The outline ──────────────────────────────────────────────────────── */
 
-.ds-outline, .ds-outline ul { list-style: none; margin: 0; padding: 0; }
-.ds-outline ul { margin-left: var(--space-3); }
+.ds-outline,
+.ds-outline ul { margin: 0; padding: 0; list-style: none; }
+.ds-outline { display: grid; gap: 1px; }
+.ds-outline ul { margin: 2px 0 6px 10px; padding-left: 10px; border-left: 1px solid var(--border); }
 
 .ds-outline a {
   display: block;
-  padding: 4px var(--space-2);
+  padding: 5px 10px;
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   color: var(--text-secondary);
@@ -319,21 +329,173 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .ds-outline a:hover { background: var(--surface-2); color: var(--text-primary); }
+.ds-outline a:focus-visible { outline-offset: -2px; }
+.ds-outline a[aria-current="page"] { color: var(--text-primary); font-weight: 600; }
+.ds-outline ul a { padding: 4px 8px; font-size: var(--text-xs); }
+.ds-outline a[aria-current="location"] { color: var(--text-primary); border-radius: 0; box-shadow: inset 2px 0 0 var(--accent); }
 
-.ds-outline a[aria-current="page"] {
-  color: var(--accent-bright);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+/* ── The report bar ───────────────────────────────────────────────────── */
+
+/* One row on a desktop: the origin sentence grows into the free space and
+ * truncates first, down to 8em, and in a bar under 600 px the Check report
+ * button shows its count without its name (below). If the bar still wraps,
+ * the wrapped controls line up on the right, so Edit or Done never sits alone
+ * on the left of a second row. The bar is a size container for that rule. */
+.ds-reportbar {
+  container: reportbar / inline-size;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 16px;
+  width: 100%;
+  max-width: calc(var(--sheet-width) + 2 * var(--read-pad));
+  min-height: 52px;
+  margin: 0 auto 14px;
+  padding: 20px var(--read-pad) 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
 
-.ds-outline__heading { font-size: var(--text-xs); color: var(--text-muted); }
+.ds-reportbar__rail { flex: none; }
+.ds-reportbar__rail svg { flex: none; }
+/* The rail toggle names what it opens; its state is aria-expanded. */
+.ds-reportbar__rail[aria-expanded="true"] { color: var(--text-primary); }
+
+.ds-reportbar__origin {
+  display: block;
+  flex: 1 1 0;
+  min-width: min(8em, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+/* A filed-document mark before the origin sentence. */
+.ds-reportbar__origin::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  background: var(--text-secondary);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='12' height='3' rx='.6'/%3E%3Cpath d='M3 6v6.4c0 .3.3.6.6.6h8.8c.3 0 .6-.3.6-.6V6'/%3E%3Cpath d='M6.5 8.5h3' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='12' height='3' rx='.6'/%3E%3Cpath d='M3 6v6.4c0 .3.3.6.6.6h8.8c.3 0 .6-.3.6-.6V6'/%3E%3Cpath d='M6.5 8.5h3' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.ds-reportbar__pages { margin-left: auto; font-variant-numeric: var(--numerals-data); }
+.ds-reportbar__pages:empty { display: none; }
+.ds-reportbar__pages:empty + .ds-reportbar__check { margin-left: auto; }
+
+/* Check report is a secondary button; the count says what it found in words,
+ * warn ink for warnings and danger ink for errors. */
+.ds-reportbar__check.btn--quiet {
+  border-color: var(--border-strong);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+.ds-reportbar__check.btn--quiet:hover { background: var(--surface-2); }
+.ds-reportbar__check[aria-expanded="true"] { background: var(--manila); border-color: var(--manila-strong); }
+/* Beside the editor the bar is about 520 px at a 1280 px window, and "Check
+ * report  8 errors, 12 warnings" pushed Done onto a second row. There the
+ * count is the label: the words "Check report" stay in the accessible name
+ * and come back as soon as the count is empty. A phone has its own two rows. */
+@media (min-width: 701px) {
+  @container reportbar (max-width: 600px) {
+    .ds-reportbar__check:has(> .ds-count:not([hidden], :empty)) > span:first-child {
+      position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+    }
+  }
+}
+
+/* Beside the side column the report is narrow, so the rail toggle keeps its
+ * icon and its name is for assistive technology only, and the bar stays on
+ * one line down to a 960 px window. From 1280 px the label is hidden only
+ * while the docked rail is open, which already shows "Saved reports" as its
+ * own heading. */
+@media (min-width: 960px) and (max-width: 1279px) {
+  html[data-dossier-mode="build"] .ds-reportbar__rail span,
+  .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) .ds-reportbar__rail span {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
+@media (min-width: 1280px) {
+  html[data-dossier-rail="open"] .ds-reportbar__rail span {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
+
+/* ── The side column (Check report, editor) ───────────────────────────── */
+
+.ds-side > * + * { margin-top: var(--space-4); }
+
+/* Check report: a sheet of paper laid on top, like a popover. */
+.ds-findings {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-pop);
+}
+.ds-findings__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.ds-findings__head h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; }
+html[data-dossier-mode="build"] .ds-findings { box-shadow: none; }
+
+/* The count beside the control, in words, so a clipped list still says how
+ * much it clipped. A panel that hides findings without saying so is a defect. */
+.ds-count { font-weight: 600; color: var(--warn); font-variant-numeric: var(--numerals-data); }
+.ds-count.is-error { color: var(--danger); }
+
+/* ── The editor ───────────────────────────────────────────────────────── */
+
+.ds-source__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.ds-source__head h2 { margin: 0 auto 0 0; font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
+
+/* Add block, above the form. */
+.ds-source__tools { display: flex; gap: 4px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+
+/* Form and JSON: a segmented control. */
+.ds-source__tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+.ds-source__tabs [role="tab"] {
+  height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.ds-source__tabs [role="tab"]:hover { background: var(--surface-2); color: var(--text-primary); }
+.ds-source__tabs [role="tab"][aria-selected="true"] { background: var(--action); color: var(--on-action); }
 
 /* ── The report ───────────────────────────────────────────────────────── */
 
 .ds-report {
   min-width: 0;
-  max-width: var(--sheet-width, 1220px);
+  max-width: var(--sheet-width);
   margin-inline: auto;
 }
 
@@ -348,102 +510,38 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
   pointer-events: none;
 }
 
-/* ── The editor ───────────────────────────────────────────────────────── */
-
-.ds-source__head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-2);
-}
-
-.ds-source__head h2 {
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: .09em;
-  color: var(--text-muted);
-  margin: 0;
-  margin-right: auto;
-}
-
-.ds-source__tabs { display: inline-flex; gap: 2px; }
-
-.ds-source__tabs [role="tab"] {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  padding: 4px var(--space-2);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-}
-
-.ds-source__tabs [role="tab"][aria-selected="true"] {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  border-color: var(--accent);
-  color: var(--text-primary);
-}
-
-/* ── Check report ─────────────────────────────────────────────────────── */
-
-.ds-findings {
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-3);
-}
-
-.ds-findings__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-2);
-}
-
-.ds-findings__head h2 { font-size: var(--text-sm); margin: 0; }
-
-/* The count beside the control, in words, so a clipped list still says how
- * much it clipped. A panel that hides findings without saying so is a defect. */
-.ds-count {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: 999px;
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-  background: var(--surface-2);
-  color: var(--text-secondary);
-}
-
-.ds-count.is-error {
-  background: color-mix(in srgb, var(--danger) 26%, transparent);
-  color: var(--text-primary);
-}
-
-/* ── Metric tiles ─────────────────────────────────────────────────────── */
-
-/*
- * The delta tone rules live in css/blocks.css, not here. They were here first
- * and lost the cascade to a plain `.metric-delta { color: var(--text-secondary) }`
- * in blocks.css, which loads after this file, so every delta rendered grey
- * however good or bad it was. Block styling belongs in the block stylesheet.
- */
-.metric-baseline,
-.metric-target { display: block; font-size: var(--text-xs); color: var(--text-muted); }
-.metric-unit { font-size: .78em; color: var(--text-muted); margin-left: 2px; }
-.metric-spark { display: block; margin-top: 4px; }
-
 /* ── The welcome screen ───────────────────────────────────────────────── */
+
+/* The welcome screen is the app's front page, so it is UI: its titles keep
+ * the product serif (--font-serif) and Display's Typeface, which is a reading
+ * option for report prose and the compare reader, does not switch them. */
 
 .ds-welcome {
   display: grid;
   place-items: center;
-  padding: var(--space-10) var(--space-4) var(--space-12);
+  padding: var(--space-16) var(--space-4) var(--space-12);
 }
 
 .ds-welcome__inner { width: min(100%, 880px); text-align: center; }
-.ds-welcome__inner h2 { margin: 0 0 var(--space-3); font-size: var(--text-2xl); letter-spacing: -.02em; line-height: 1.2; text-wrap: balance; }
-.ds-welcome__lead { max-width: 62ch; margin: 0 auto var(--space-6); color: var(--text-secondary); }
+.ds-welcome__inner h2 {
+  max-width: 18em;
+  margin: 0 auto var(--space-4);
+  font-family: var(--font-serif);
+  font-size: var(--text-3xl);
+  line-height: var(--leading-tight);
+  font-weight: 600;
+  letter-spacing: -.012em;
+  text-wrap: balance;
+}
+.ds-welcome__lead {
+  max-width: 58ch;
+  margin: 0 auto var(--space-8);
+  font-family: var(--font-serif);
+  font-size: var(--text-base);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
 
 .ds-welcome__actions {
   display: flex;
@@ -451,125 +549,218 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
   gap: var(--space-2);
   justify-content: center;
 }
+.ds-welcome__actions .btn { height: 40px; padding: 0 18px; }
 
-.ds-welcome__examples { margin-top: var(--space-10); text-align: left; }
-.ds-welcome__examples h3 { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--text-secondary); text-align: center; }
+.ds-welcome__examples { margin-top: var(--space-12); text-align: left; }
+.ds-welcome__examples h3 { margin: 0 0 var(--space-4); font-size: var(--text-sm); font-weight: 600; color: var(--text-secondary); text-align: center; }
 
 /* Its own margin, with a selector that outranks nothing else: the old
  * `.ds-welcome__inner p` rule overrode it and the note touched the buttons. */
-.ds-welcome__note { margin: var(--space-8) 0 0; font-size: var(--text-xs); color: var(--text-muted); }
+.ds-welcome__note { margin: var(--space-10) 0 0; font-size: var(--text-xs); color: var(--text-secondary); }
 
 /* ── Example lists (welcome cards, Open dialog rows) ──────────────────── */
 
 .ds-examples {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
+/* A welcome card is a sheet of paper on the desk. */
 .ds-example {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   width: 100%;
   height: 100%;
-  padding: var(--space-3) var(--space-4);
-  text-align: left;
-  color: inherit;
-  background: var(--surface-1);
+  padding: var(--space-4) var(--space-4) 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sheet);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sheet);
+  color: inherit;
+  text-align: left;
   cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out);
 }
+.ds-example:hover { border-color: var(--border-strong); }
+.ds-example__title { font-family: var(--font-serif); font-size: var(--text-lg); line-height: 1.25; font-weight: 600; color: var(--text-primary); text-wrap: balance; }
+.ds-example__summary { font-size: var(--text-xs); line-height: 1.45; color: var(--text-secondary); }
+.ds-example__meta { margin-top: auto; padding-top: 4px; font-size: var(--text-xs); color: var(--text-secondary); }
 
-.ds-example:hover { border-color: var(--border-strong); background: var(--surface-2); }
-.ds-example__title { font-weight: 600; color: var(--text-primary); }
-.ds-example__summary { font-size: var(--text-xs); color: var(--text-secondary); }
-.ds-example__meta { margin-top: auto; padding-top: 4px; font-size: var(--text-xs); color: var(--text-muted); }
-
-.ds-examples--list { grid-template-columns: minmax(0, 1fr); gap: 0; }
-.ds-examples--list .ds-example { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px var(--space-3); border-width: 0 0 1px; border-radius: 0; background: none; padding: var(--space-2) 0; }
+.ds-examples--list { grid-template-columns: minmax(0, 1fr); gap: 0; border-top: 1px solid var(--border); }
+.ds-examples--list .ds-example {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-3);
+  padding: 10px 8px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
 .ds-examples--list .ds-example:hover { background: var(--surface-2); }
+.ds-examples--list .ds-example:focus-visible { outline-offset: -2px; }
+.ds-examples--list .ds-example__title { font-family: var(--font-ui); font-size: var(--text-sm); }
 .ds-examples--list .ds-example__summary { display: none; }
 .ds-examples--list .ds-example__meta { margin: 0 0 0 auto; padding: 0; }
-.ds-examples__empty { font-size: var(--text-xs); color: var(--text-muted); }
+.ds-examples__empty { font-size: var(--text-xs); color: var(--text-secondary); }
 
 /* ── Dialogs ──────────────────────────────────────────────────────────── */
 
 .ds-dialog {
-  margin: auto;
   width: min(620px, calc(100vw - var(--space-8)));
+  max-height: calc(100dvh - var(--space-8));
+  margin: auto;
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   background: var(--surface-1);
   color: var(--text-primary);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4);
   box-shadow: var(--shadow-modal);
 }
 
-.ds-dialog::backdrop { background: rgb(2 4 10 / .66); }
-.ds-dialog h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
-.ds-dialog__lead { color: var(--text-secondary); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
-.ds-dialog label { display: block; font-size: var(--text-xs); color: var(--text-muted); margin: var(--space-3) 0 4px; }
-.ds-dialog textarea { width: 100%; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-sm); }
+.ds-dialog::backdrop { background: var(--scrim); }
+.ds-dialog h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); font-weight: 600; line-height: 1.3; }
+.ds-dialog h3 { font-size: var(--text-sm); font-weight: 600; }
+.ds-dialog__lead { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-sm); }
+.ds-dialog label { display: block; margin: var(--space-4) 0 6px; font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); }
+.ds-dialog textarea { width: 100%; font-family: var(--font-mono); font-size: var(--text-xs); }
 /* The native file input has a wide intrinsic size; on a phone it ran past the dialog edge. */
-.ds-dialog input[type="file"] { display: block; width: 100%; max-width: 100%; min-width: 0; font-size: var(--text-sm); }
-.ds-dialog__detected { font-size: var(--text-xs); color: var(--accent-bright); min-height: 1.2em; margin: var(--space-2) 0 0; }
+.ds-dialog input[type="file"] { display: block; width: 100%; max-width: 100%; min-width: 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.ds-dialog input[type="file"]::file-selector-button {
+  height: 32px;
+  margin-right: 12px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ds-dialog input[type="file"]::file-selector-button:hover { background: var(--surface-2); }
+.ds-dialog__detected { min-height: 1.4em; margin: var(--space-2) 0 0; font-size: var(--text-xs); font-weight: 500; color: var(--accent); }
 
 .ds-dialog__actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
   justify-content: flex-end;
-  margin-top: var(--space-4);
+  margin-top: var(--space-5);
 }
 
 .ds-dialog__examples { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--border); }
-.ds-dialog__examples h3 { margin: 0 0 var(--space-1); font-size: var(--text-base); }
+.ds-dialog__examples h3 { margin: 0 0 var(--space-1); }
 
 .ds-export__choices { display: grid; gap: var(--space-2); }
 
 .ds-export__choice {
   display: grid;
   gap: 2px;
-  text-align: left;
-  background: var(--surface-2);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: var(--space-3);
-  cursor: pointer;
+  background: var(--surface-1);
   color: inherit;
-}
-
-.ds-export__choice:hover:not(:disabled) { border-color: var(--accent); }
-.ds-export__choice span { font-size: var(--text-xs); color: var(--text-muted); }
-
-/* Display options: one fieldset per option, choices in a row. */
-.ds-dialog--display { width: min(420px, calc(100vw - var(--space-8))); }
-.ds-display { display: grid; gap: var(--space-4); }
-.ds-display__option { margin: 0; padding: 0; border: 0; min-width: 0; }
-.ds-display__option legend { padding: 0; margin-bottom: var(--space-2); font-size: var(--text-sm); font-weight: 600; }
-.ds-display__choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-
-.ds-display__choices label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 6px 12px;
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  font-weight: 500;
+  text-align: left;
   cursor: pointer;
 }
+.ds-export__choice:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface-2); }
+.ds-export__choice span { font-size: var(--text-xs); font-weight: 400; color: var(--text-secondary); }
 
-.ds-display__choices label:has(input:checked) {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+/* ── Display options: a popover under the Aa button ───────────────────────
+ * A modal <dialog> (the platform traps focus and owns Escape), placed like a
+ * popover at the top right with no scrim; on a phone it is a sheet under the
+ * header with the scrim. Each option is a fieldset whose radios look like a
+ * segmented control: the radio covers its whole segment, invisible, so the
+ * click target, the keyboard (arrows within a group) and the accessible name
+ * are the native radio's. */
+.ds-dialog--display {
+  position: fixed;
+  inset: calc(var(--header-h-app, 56px) + 8px) 16px auto auto;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100dvh - var(--header-h-app, 56px) - 24px);
+  margin: 0;
+  padding: var(--space-4);
+  border-color: var(--border);
+  box-shadow: var(--shadow-pop);
+}
+.ds-dialog--display::backdrop { background: transparent; }
+.ds-dialog--display[open] { animation: ds-pop-in var(--dur) var(--ease-out); }
+@keyframes ds-pop-in { from { opacity: 0; transform: translateY(-8px); } }
+.ds-dialog--display h2 { margin-bottom: var(--space-3); font-size: var(--text-sm); }
+.ds-display { display: grid; gap: 14px; }
+.ds-display__option { min-width: 0; margin: 0; padding: 0; border: 0; }
+.ds-display__option legend { margin-bottom: 6px; padding: 0; font-size: var(--text-xs); font-weight: 400; color: var(--text-secondary); }
+.ds-display__choices {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+.ds-dialog .ds-display__choices label {
+  position: relative;
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 8px;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.15;
+  text-align: center;
+  cursor: pointer;
+}
+.ds-display__choices input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  appearance: none;
+}
+.ds-dialog .ds-display__choices label:hover { background: var(--surface-2); color: var(--text-primary); }
+.ds-dialog .ds-display__choices label:has(input:checked) { background: var(--action); color: var(--on-action); }
+.ds-display__choices label:has(input:focus-visible) { outline: var(--focus-width) solid var(--focus); outline-offset: 2px; z-index: 1; }
+.ds-display__hint { margin-top: 6px; font-size: var(--text-xs); line-height: 1.45; color: var(--text-secondary); }
+.ds-dialog--display .ds-dialog__actions { margin-top: var(--space-4); }
+/* The kit hides its bar on scroll (and NeoKeys on H): the popover then hangs
+ * from the top of the window instead of from a bar that is not there. */
+.header-bar.header-hidden ~ #main .ds-dialog--display,
+html[data-chrome="off"] .ds-dialog--display { top: 8px; max-height: calc(100dvh - 16px); }
+@media (forced-colors: active) {
+  .ds-display__choices label:has(input:checked) { outline: 2px solid CanvasText; }
+}
+@media (max-width: 700px) {
+  .ds-dialog--display {
+    inset: var(--header-h-app, 56px) 0 auto 0;
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - 112px);
+    border-width: 0 0 1px;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    box-shadow: var(--shadow-modal);
+  }
+  .ds-dialog--display::backdrop { background: var(--scrim); }
+  .header-bar.header-hidden ~ #main .ds-dialog--display,
+  html[data-chrome="off"] .ds-dialog--display { top: 0; max-height: calc(100dvh - 56px); }
 }
 
 /* ── A dropped file ───────────────────────────────────────────────────── */
@@ -595,28 +786,38 @@ body.is-dropping::after {
  * so editing does not mean scrolling past the whole report to the form. */
 @media (max-width: 959px) {
   .ds-side {
-    margin-bottom: var(--space-4);
     max-height: 60dvh;
+    margin: 0 var(--read-pad) var(--space-4);
+    padding: var(--space-3);
     overflow: auto;
     overscroll-behavior: contain;
-    padding: var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface-1);
   }
-
-  .ds-findings { border: 0; padding: 0; }
+  .ds-findings { padding: 0; border: 0; box-shadow: none; }
 }
 
 @media (max-width: 700px) {
-  .ds-shell { --shell-pad-end: var(--space-6); padding: var(--space-3) var(--space-3) var(--shell-pad-end); }
-  .ds-welcome { padding: var(--space-8) var(--space-4) var(--space-10); }
+  .ds-shell { --read-pad: 0px; }
+  .ds-stage { padding-bottom: 40px; }
+  .ds-side { margin-inline: 16px; }
+  .ds-welcome { padding: var(--space-10) var(--space-4) var(--space-10); }
+  .ds-welcome__inner h2 { font-size: var(--text-2xl); }
+
+  /* The report bar in two rows: rail, origin and Edit; then Check report
+   * with the page count pushed right. */
+  .ds-reportbar { gap: 8px 10px; padding: 12px 16px 0; margin-bottom: 12px; }
+  .ds-reportbar::after { content: ""; order: 3; flex-basis: 100%; height: 0; }
+  .ds-reportbar__rail { order: 0; }
+  .ds-reportbar__origin { order: 1; flex: 1 1 0; }
+  #toggleMode { order: 2; }
+  .ds-reportbar__check { order: 4; }
+  .ds-reportbar__pages { order: 5; }
+  .ds-reportbar__rail span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 
 @media (max-width: 480px) {
-  .ds-reportbar { gap: var(--space-2); }
-  .ds-reportbar__rail span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .ds-welcome__inner h2 { font-size: var(--text-xl); }
   .ds-examples { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -637,6 +838,7 @@ body.is-dropping::after {
   .ds-side,
   .ds-welcome,
   .ds-boot,
+  .toast,
   .nk-toast,
   .neo-beacon,
   dialog { display: none !important; }
@@ -646,6 +848,7 @@ body.is-dropping::after {
     padding: 0;
     max-width: none;
   }
+  .ds-stage { padding: 0; }
 
   html[data-dossier-booting] .ds-shell { visibility: visible; }
 
@@ -663,7 +866,6 @@ body.is-dropping::after {
   }
 
   .viz-panel,
-  .block-metrics,
   .block-grid { break-inside: avoid; page-break-inside: avoid; }
 
   /* A disclosure the reader cannot open on paper has to be open already. */
@@ -677,7 +879,7 @@ body.is-dropping::after {
   .ds-report a[href^="http"]::after {
     content: " (" attr(href) ")";
     font-size: .76em;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     word-break: break-all;
   }
 }

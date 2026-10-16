@@ -1,30 +1,6 @@
-/* Small workspace pieces that are not layout: the eyebrow label, the editor's
- * tool row, the response composer and the no-script note. The page has one
- * header, the Header Kit bar; nothing here styles it. */
-.ds-eyebrow { color: var(--accent); font-size: .6875rem; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; }
-.ds-source__tools { display: flex; gap: 4px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.ds-composer { max-width: 1120px; margin: 36px auto 72px; padding: 36px 40px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); }
-.ds-composer__head { margin-bottom: 32px; }
-.ds-composer__head h2 { margin: 8px 0 12px; font-size: 2rem; line-height: 1.2; letter-spacing: -.035em; }
-.ds-composer__head > p:last-child { max-width: 70ch; color: var(--text-secondary); }
-.ds-field { display: grid; gap: 7px; font-size: .8125rem; font-weight: 600; margin-bottom: 20px; }
-.ds-field input, .ds-field textarea { width: 100%; font-weight: 400; }
-.ds-field textarea { line-height: 1.65; }
-.ds-optional { color: var(--text-muted); font-weight: 400; font-size: .75rem; }
-.ds-composer__sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; margin-top: 28px; }
-.ds-composer__sides fieldset { min-width: 0; padding: 20px 0 0; border: 0; border-top: 1px solid var(--border); }
-.ds-composer__sides legend { padding-right: 12px; font-weight: 650; }
-.ds-composer__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
-.ds-composer__actions p { margin-left: auto; font-size: .75rem; color: var(--text-muted); }
-body.is-composing .ds-shell, body.is-composing .ds-welcome { display: none; }
-.ds-noscript { max-width: 65ch; margin: 48px auto; padding: 24px; }
-@media (max-width: 960px) {
-  .ds-composer { margin: 20px 12px 40px; padding: 24px; }
-}
-@media (max-width: 480px) {
-  .ds-composer { padding: 20px 16px; }
-  .ds-composer__head h2 { font-size: 1.5rem; }
-  .ds-composer__sides { grid-template-columns: minmax(0, 1fr); }
-  .ds-composer__actions p { width: 100%; margin: 4px 0 0; }
-}
-@media print { .ds-composer, .ds-noscript { display: none !important; } }
+/* The no-script note. The page has one header, the Header Kit bar; nothing
+ * here styles it. The old workbar, wordmark, context bar and response
+ * composer are gone, and their rules with them; the editor's tool row moved
+ * to css/shell.css with the rest of the editor. */
+.ds-noscript { max-width: 65ch; margin: 48px auto; padding: 24px; font-size: var(--text-sm); }
+@media print { .ds-noscript { display: none !important; } }

@@ -1,780 +1,734 @@
 /**
- * Block styling for all dossier block types.
+ * Block styling for every dossier block type.
+ *
+ * Reading text (prose, callouts, checklists, timelines, quotes) is set in the
+ * reading face at --reading-size and held to --measure; UI text (titles,
+ * tables, meta lines) is the UI face at --text-sm or --text-xs. Cards inside
+ * a sheet are rules, not boxes: a status is a 3 px rule on the left plus a
+ * word, never a colour alone.
  */
 
 .block {
   min-width: 0;
-  scroll-margin-top: 24px;
+  scroll-margin-top: 72px;
   overflow-wrap: anywhere;
 }
 
-.block-heading {
-  margin: 8px 0 0;
+/* A heading block never outranks its page heading (24 px reading face). */
+.block h2 { font-family: var(--font-reading); font-size: var(--text-xl); line-height: 1.25; font-weight: 600; letter-spacing: -.005em; }
+.block h3 { font-family: var(--font-ui); font-size: var(--text-sm); line-height: 1.3; font-weight: 600; }
+.block > h2 + *,
+.block > h3 + * { margin-top: var(--space-4); }
+.block-heading { margin: 0; }
+.block > .block-title + * { margin-top: 0; }
+
+/* A collapsed block is a disclosure whose summary is its title. */
+.block--collapsed > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-block: 1px solid var(--border);
+  cursor: pointer;
+  font-size: var(--text-sm);
   font-weight: 600;
+  list-style: none;
 }
+.block--collapsed > summary::-webkit-details-marker { display: none; }
+.block--collapsed > summary::before { content: "\203A"; display: inline-block; width: 12px; color: var(--text-secondary); transition: transform var(--dur) var(--ease-out); }
+.block--collapsed[open] > summary::before { transform: rotate(90deg); }
+.block--collapsed[open] > summary { margin-bottom: var(--space-4); }
 
-.block h2 {
-  font-size: var(--text-xl);
-}
-
-.block h3 {
-  font-size: var(--text-lg);
-}
+/* ── Prose ─────────────────────────────────────────────────────────────── */
 
 .block-prose {
-  line-height: 1.75;
-  max-width: 75ch;
-  color: var(--text-secondary);
+  max-width: var(--measure);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--leading-reading);
+  color: var(--text-primary);
+  hanging-punctuation: first;
+  overflow-wrap: break-word;
 }
-
+.block-prose p + p { margin-top: 1em; }
+.block code,
 .block-prose code {
-  background: var(--surface-2);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: ui-monospace, monospace;
-  font-size: 0.9em;
-}
-
-.block-prose a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.block-prose a:hover {
-  text-decoration: underline;
-}
-
-.block-callout {
-  padding: var(--space-4);
+  padding: 1px 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: .88em;
+  font-variant-numeric: normal;
 }
-
-.block-callout--neutral {
-  border-color: var(--text-secondary);
+.block pre code { padding: 0; border: 0; border-radius: 0; background: none; font-size: inherit; }
+.block a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
 }
+.block a:hover { text-decoration-thickness: 2.5px; }
+.is-unlinked { text-decoration: underline dotted var(--text-muted); text-underline-offset: 3px; cursor: help; }
 
-.block-callout--good {
-  border-color: var(--ok);
-  background: rgba(34, 197, 94, 0.1);
+/* ── Callout ──────────────────────────────────────────────────────────── */
+
+.block-callout {
+  --tone: var(--text-secondary);
+  --tone-soft: var(--surface-2);
+  /* The measure plus this box's own padding and rule (16 + 18 + 3 px), so the
+   * text inside holds the same line length as prose. */
+  max-width: calc(var(--measure) + 37px);
+  padding: 14px 18px 16px 16px;
+  border-left: 3px solid var(--tone);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--tone-soft);
+  color: var(--text-primary);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: 1.55;
 }
-
-.block-callout--bad {
-  border-color: var(--danger);
-  background: rgba(239, 68, 68, 0.1);
-}
-
-.block-callout--warn {
-  border-color: var(--warn);
-  background: rgba(234, 179, 8, 0.1);
-}
-
-.block-callout--info {
-  border-color: var(--accent);
-  background: rgba(165, 180, 252, 0.1);
-}
-
-.block-quote {
-  border-block: 1px solid var(--border);
-  padding: var(--space-3) 0 var(--space-3) var(--space-4);
-  font-style: italic;
-  color: var(--text-secondary);
-  margin: 0;
-}
-
-.block-quote p {
-  margin: 0;
-}
-
-.quote-attr {
+.block-callout > strong:first-child {
   display: block;
-  font-style: normal;
-  margin-top: var(--space-2);
+  margin-bottom: 4px;
+  font-family: var(--font-ui);
   font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-.quote-who::after {
-  content: ', ';
-}
-
-.block-steps,
-.block-kv,
-.block-checklist {
-  margin: var(--space-4) 0;
-  padding: 0 0 0 var(--space-6);
-}
-
-.block-steps li {
-  margin: var(--space-3) 0;
-  line-height: 1.6;
-}
-
-.block-steps li p {
-  margin: var(--space-2) 0 0 0;
-}
-
-.block-kv {
-  list-style: none;
-  padding: 0;
-}
-
-.block-kv dt {
   font-weight: 600;
-  margin: var(--space-3) 0 var(--space-1) 0;
+  line-height: 1.3;
+  color: var(--tone);
 }
+.block-callout--good { --tone: var(--ok); --tone-soft: var(--ok-soft); }
+.block-callout--bad { --tone: var(--danger); --tone-soft: var(--danger-soft); }
+.block-callout--warn { --tone: var(--warn); --tone-soft: var(--warn-soft); }
+.block-callout--neutral,
+.block-callout--info { --tone: var(--text-secondary); --tone-soft: var(--surface-2); }
 
-.block-kv dd {
-  margin: 0 0 var(--space-4) 0;
-  color: var(--text-secondary);
-}
+/* ── Quote ────────────────────────────────────────────────────────────── */
 
-/* Metrics */
-.block-metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
-  gap: 0;
-  border-block: 1px solid var(--border);
-  padding-block: 24px;
-}
-
-.metric-tile {
-  padding: 0 24px;
-  background: transparent;
-  border-radius: 0;
-  text-align: left;
-  border: 0;
-  border-right: 1px solid var(--border);
-}
-
-.metric-label {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  margin-bottom: var(--space-2);
-}
-
-.metric-value {
-  font-size: var(--text-2xl);
-  font-weight: 700;
+/* Italic sets narrower than roman, so the quote takes the measure of the
+ * italic face (js/display.js measures both) plus its own rule and padding. */
+.block-quote {
+  max-width: calc(var(--measure-italic) + var(--space-4) + 3px);
+  margin: 0;
+  padding: 2px 0 2px var(--space-4);
+  border-left: 3px solid var(--border-strong);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--leading-reading);
+  font-style: italic;
   color: var(--text-primary);
 }
+.block-quote p { margin: 0; }
+.quote-attr { display: block; margin-top: var(--space-2); font-family: var(--font-ui); font-style: normal; font-size: var(--text-xs); color: var(--text-secondary); }
+.quote-who { font-weight: 600; color: var(--text-primary); }
+.quote-who:has(+ .quote-role)::after { content: ", "; font-weight: 400; color: var(--text-secondary); }
+.quote-role { color: var(--text-secondary); }
+
+/* ── Steps and key facts ──────────────────────────────────────────────── */
+
+.block-steps {
+  max-width: var(--measure);
+  margin: 0;
+  padding: 0 0 0 var(--space-6);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: 1.55;
+}
+.block-steps li + li { margin-top: var(--space-3); }
+.block-steps li::marker { font-family: var(--font-ui); font-weight: 600; color: var(--text-secondary); font-variant-numeric: var(--numerals-data); }
+.step-title { font-weight: 600; }
+.block-steps li p { margin-top: 4px; color: var(--text-secondary); }
+
+.block-kv {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  max-width: var(--measure-wide);
+  margin: 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+.block-kv dt,
+.block-kv dd { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.block-kv dt { padding-right: var(--space-6); font-weight: 400; color: var(--text-secondary); }
+.block-kv dd { color: var(--text-primary); font-weight: 500; font-variant-numeric: var(--numerals-data); }
+.kv-value--good { color: var(--ok); }
+.kv-value--bad { color: var(--danger); }
+.kv-value--warn { color: var(--warn); }
+.kv-value--info { color: var(--text-primary); }
+@container sheet (max-width: 560px) {
+  .block-kv { grid-template-columns: minmax(0, 1fr); }
+  .block-kv dt { padding-bottom: 0; border-bottom: 0; font-size: var(--text-xs); }
+  .block-kv dd { padding-top: 2px; }
+}
+
+/* ── Metric tiles: a ruled ledger row, not cards ──────────────────────── */
+
+.block-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+  gap: 0;
+  border-top: 2px solid var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  padding-block: 0;
+}
+/* Each tile is its own size container, so the value steps down by the tile's
+ * width rather than the window's: the same row is three 268 px tiles on a
+ * wide sheet and three 150 px tiles beside the editor. */
+.metric-tile,
+.block-metrics .metric-tile {
+  container: metric / inline-size;
+  min-width: 0;
+  padding: 14px 18px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  gap: 0;
+}
+.metric-tile + .metric-tile { border-left: 1px solid var(--border); }
+.metric-tile:first-child { padding-left: 0; }
+.metric-tile .viz-stat__label {
+  font-family: var(--font-ui); font-size: var(--text-xs); font-weight: 500; line-height: 1.35;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+/* The number never breaks; the unit goes under it when the two do not fit. */
+.metric-tile .viz-stat__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 4px;
+  margin-top: 6px;
+  font-family: var(--font-reading); font-size: var(--text-2xl); font-weight: 600; line-height: 1.05;
+  letter-spacing: -.01em;
+  color: var(--text-primary);
+  font-variant-numeric: var(--numerals-data);
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+.metric-unit { min-width: 0; font-size: var(--text-lg); font-weight: 400; line-height: 1.2; letter-spacing: 0; color: var(--text-secondary); white-space: normal; overflow-wrap: anywhere; }
 
 /*
  * The arrow says which way the number moved. The colour says whether that was
  * good. Those are two different facts: a latency drop is down and good, and a
  * throughput drop is down and bad, which is why these classes are named for
- * goodness rather than direction.
- *
- * The word is always rendered beside the colour, because roughly one reader in
- * twelve cannot use hue to tell them apart, and a report whose headline
- * finding is carried by a shade of green is a report they cannot read.
- *
- * `--ok` and `--warn` are not defined by the fleet base.css, so the literal
- * fallbacks are load bearing rather than belt and braces.
+ * goodness rather than direction. The word is always rendered beside the
+ * colour, because roughly one reader in twelve cannot use hue to tell them
+ * apart.
  */
 .metric-delta {
-  font-size: var(--text-sm);
-  margin-top: var(--space-2);
+  display: block;
+  margin-top: 8px;
+  font-size: var(--text-xs);
+  line-height: 1.35;
   color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numerals-data);
+}
+.metric-delta--good { color: var(--ok); }
+.metric-delta--bad { color: var(--danger); }
+.metric-delta--flat { color: var(--text-secondary); }
+.metric-delta__word { font-weight: 400; }
+.metric-baseline,
+.metric-target { display: block; margin-top: 2px; font-size: var(--text-xs); color: var(--text-secondary); font-variant-numeric: var(--numerals-data); }
+.metric-spark { display: block; margin-top: 6px; color: var(--viz-c1); }
+
+@container sheet (max-width: 560px) {
+  .block-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-tile + .metric-tile { border-left: 1px solid var(--border); }
+  .metric-tile:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .metric-tile:nth-child(even) { padding-right: 0; }
+  .metric-tile:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .metric-tile .viz-stat__value { font-size: var(--text-xl); }
+}
+/* "1,420,000" is 150 px at 32 px: in a tile whose content box is 200 px or
+ * less the value is 24 px, at 140 px or less 20 px, so seven digits and their
+ * commas fit. After the phone rule, so a very narrow tile still steps down. */
+@container metric (max-width: 200px) {
+  .metric-tile .viz-stat__value { font-size: var(--text-xl); }
+  .metric-tile .metric-unit { font-size: var(--text-sm); }
+}
+@container metric (max-width: 140px) {
+  .metric-tile .viz-stat__value { font-size: var(--text-lg); }
 }
 
-.metric-delta--good { color: var(--ok, #34d399); }
-.metric-delta--bad { color: var(--danger-hover, #fb7185); }
-.metric-delta--flat { color: var(--text-muted); }
+/* ── Charts (the Viz Kit's frame) ─────────────────────────────────────── */
 
-.metric-delta__word { color: var(--text-muted); font-size: var(--text-xs); }
-
-.metric-tile:first-child { padding-left: 0; }
-.metric-tile:last-child { border-right: 0; }
-.metric-tile .viz-stat__label { font: 500 .75rem var(--font); color: var(--text-secondary); text-transform: none; letter-spacing: 0; }
-.metric-tile .viz-stat__value { font: 680 2.25rem/1.15 var(--font); letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
-.metric-unit { font-size: .5em; font-weight: 450; letter-spacing: 0; }
-.viz-panel { padding: 20px; box-shadow: none; }
-.viz-title { font: 600 .875rem var(--font); color: var(--text-primary); letter-spacing: 0; text-transform: none; }
-@media (max-width: 540px) {
-  .block-metrics { grid-template-columns: 1fr; padding: 0; }
-  .metric-tile, .metric-tile:first-child { padding: 16px 0; border-right: 0; border-bottom: 1px solid var(--border); }
-  .metric-tile:last-child { border-bottom: 0; }
-  .metric-tile .viz-stat__value { font-size: 1.875rem; }
+.block .viz-panel {
+  padding: 14px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
+.viz-title { font-family: var(--font-ui); font-size: var(--text-sm); font-weight: 600; line-height: 1.3; color: var(--text-primary); letter-spacing: 0; text-transform: none; }
+.block .viz-scale { font-family: var(--font-ui); font-size: var(--text-xs); font-weight: 400; line-height: 1.3; color: var(--text-secondary); font-variant-numeric: var(--numerals-data); }
+.block .viz-tick { font-family: var(--font-ui); font-size: 10px; fill: var(--text-secondary); letter-spacing: 0; }
+.block .viz-value-label { font-family: var(--font-ui); font-size: 11px; font-weight: 600; fill: var(--text-primary); }
+.block .viz-label { fill: var(--text-secondary); }
+.block .viz-gauge-value,
+.block .viz-donut-center { font-family: var(--font-reading); fill: var(--text-primary); }
+.block .viz-dot { stroke: var(--surface-1); }
+/* The banded gauge is drawn on a 260 px viewBox and scales to its width, so
+ * at full sheet width its 10 px ticks rendered 31 px tall. At 338 px they are
+ * 13 px, the chart label size. (The ring gauge carries its own max-width.) */
+.block[data-block-type="gauge"] .viz-svg { max-width: 338px; }
 
-/* Scorecard */
+/* ── Scorecard ────────────────────────────────────────────────────────── */
+
 .block-scorecard {
   width: 100%;
+  max-width: var(--measure-wide);
   border-collapse: collapse;
+  border-top: 1px solid var(--border);
   font-size: var(--text-sm);
 }
+.block-scorecard td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: baseline; }
+.block-scorecard td:first-child { padding-left: 0; }
+.scorecard-label { width: 70%; font-weight: 500; }
+.scorecard-detail { margin-top: 4px; font-size: var(--text-xs); font-weight: 400; color: var(--text-secondary); max-width: var(--measure-ui); }
+.scorecard-verdict { width: 30%; text-align: right; font-size: var(--text-xs); font-weight: 600; text-transform: capitalize; white-space: nowrap; }
+.verdict--pass { color: var(--ok); }
+.verdict--fail { color: var(--danger); }
+.verdict--partial { color: var(--warn); }
+.verdict--skipped,
+.verdict--unknown { color: var(--text-secondary); }
 
-.block-scorecard td {
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--border);
-}
+/* ── Tables ───────────────────────────────────────────────────────────── */
 
-.scorecard-label {
-  font-weight: 500;
-  width: 40%;
-}
-
-.scorecard-verdict {
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 11px;
-  width: 20%;
-  text-align: center;
-}
-
-.verdict--pass {
-  color: var(--ok);
-}
-
-.verdict--fail {
-  color: var(--danger);
-}
-
-.verdict--partial {
-  color: var(--warn);
-}
-
-.verdict--skipped {
-  color: var(--text-secondary);
-}
-
-/* Tables */
+/* The shadows at either edge appear only when there is more table that way:
+ * the paper-coloured covers scroll with the content, the shadows do not. */
 .table-wrapper {
   overflow-x: auto;
   overflow-wrap: normal;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  background:
+    linear-gradient(to right, var(--surface-1) 30%, transparent) left / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--surface-1) 30%, transparent) right / 28px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, oklch(0.3 0.03 70 / .2), transparent) left / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, oklch(0.3 0.03 70 / .2), transparent) right / 12px 100% no-repeat scroll;
 }
+.table-wrapper:focus-visible { outline-offset: -2px; }
 
-.block-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-sm);
-}
-
-.block-table th,
-.block-table td {
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-}
-
-.block-table th {
-  background: var(--surface-2);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.block-table:has(th:nth-child(4)) { min-width: 560px; }
-
-.block-table tr:hover {
-  background: var(--surface-2);
-}
-
-.block-table td[align="right"],
-.block-table th[align="right"] {
-  text-align: right;
-}
-
-.block-table td[align="center"],
-.block-table th[align="center"] {
-  text-align: center;
-}
-
-/* Code and logs */
-.block-code,
-.block-log {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow-x: auto;
-  padding: var(--space-4);
-  font-family: ui-monospace, monospace;
-  font-size: var(--text-sm);
-  line-height: 1.5;
-}
-
-.block-code code,
-.block-log code {
-  all: unset;
-}
-
-.block-code .line.hl {
-  background: rgba(255, 255, 0, 0.1);
-}
-
-/* Files, diff */
+.block-table,
 .block-files {
   width: 100%;
   border-collapse: collapse;
+  font-family: var(--font-ui);
   font-size: var(--text-sm);
+  font-variant-numeric: var(--numerals-data);
 }
-
-.block-files th,
-.block-files td {
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--border);
-}
-
+.block-table caption { caption-side: top; padding-bottom: 10px; text-align: left; font-weight: 600; }
+.block-table th,
 .block-files th {
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--text-primary);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
   font-weight: 600;
-  background: var(--surface-2);
+  text-align: left;
+  white-space: nowrap;
 }
+.block-table td,
+.block-files td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: baseline; }
+.block-table th:first-child,
+.block-table td:first-child,
+.block-files th:first-child,
+.block-files td:first-child { padding-left: 0; }
+.block-table tbody tr:hover,
+.block-files tbody tr:hover { background: var(--surface-2); }
+.block-table:has(th:nth-child(4)) { min-width: 560px; }
+.block-table td[align="right"],
+.block-table th[align="right"] { text-align: right; }
+.block-table td[align="center"],
+.block-table th[align="center"] { text-align: center; }
+.block-table tbody th[scope="row"] { color: var(--text-primary); font-size: var(--text-sm); font-weight: 500; border-bottom: 1px solid var(--border); }
+.block-files td:nth-child(n+3),
+.block-files th:nth-child(n+3) { text-align: right; }
+/* The state is one word and stays whole; .block's overflow-wrap would let the
+ * table squeeze it to "mod/ified". */
+.block-files td:nth-child(2) { color: var(--text-secondary); white-space: nowrap; overflow-wrap: normal; }
+.file-from { display: block; margin-top: 2px; font-size: var(--text-xs); color: var(--text-secondary); }
+/* A table cell scrolls inside .table-wrapper, so its code keeps one line. The
+ * files table has no wrapper: its paths stay whole while the table fits and
+ * break where they must when it does not, so the counts are never cut off. */
+.block-table code { white-space: nowrap; }
+.block-files code { overflow-wrap: anywhere; }
 
-.block-diff {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-4);
-}
+/* ── Code, logs and diffs ─────────────────────────────────────────────── */
 
+.block-code,
+.block-log,
 .diff-patch {
-  background: var(--bg);
+  margin: 0;
+  padding: var(--space-4);
+  overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: var(--space-3);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  overflow-wrap: normal;
+  font-variant-numeric: normal;
+}
+.block-code code,
+.block-log code,
+.diff-patch code { all: unset; }
+/* A highlighted line is the author's emphasis, not "you are here", so it is a
+ * neutral ink wash rather than manila. */
+.block-code .line.hl { background: color-mix(in srgb, var(--text-primary) 9%, transparent); }
+.block-code:focus-visible,
+.block-log:focus-visible { outline-offset: -2px; }
+.code-path,
+.diff-path { margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--text-secondary); }
+.code-path code,
+.diff-path code { border: 0; padding: 0; background: none; }
+
+.block-diff { min-width: 0; }
+.diff-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.diff-before pre,
+.diff-after pre {
+  margin: 0;
+  height: 100%;
+  padding: var(--space-3) var(--space-4);
   overflow-x: auto;
-  font-family: ui-monospace, monospace;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+.diff-before pre { background: var(--diff-del-unit); box-shadow: inset 3px 0 0 var(--diff-del-line); }
+.diff-after pre { background: var(--diff-ins-unit); box-shadow: inset 3px 0 0 var(--diff-ins-line); }
+.diff-before code,
+.diff-after code { all: unset; }
+@container sheet (max-width: 560px) { .diff-split { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── Checklist ────────────────────────────────────────────────────────── */
+
+/* State is a glyph in the first 22 px, never a strike: strikethrough means
+ * deletion everywhere in this product. A done item drops to secondary ink. */
+.block-checklist {
+  /* Set at the reading size, so the measure (in em) counts the characters of
+   * the label, plus the 34 px glyph gutter of each item. The rules end where
+   * the text does. */
+  max-width: calc(var(--measure) + 34px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+}
+.block-checklist li {
+  position: relative;
+  padding: 11px 0 11px 34px;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.45;
+}
+.block-checklist li::before {
+  position: absolute;
+  left: 0;
+  top: 11px;
+  width: 22px;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+}
+.check-done { color: var(--text-secondary); }
+.check-done::before { content: "\2713"; color: var(--ok); }
+.check-todo::before { content: "\25CB"; color: var(--text-secondary); }
+.check-partial::before { content: "\25D0"; color: var(--warn); }
+.check-skipped::before { content: "\2212"; color: var(--text-secondary); }
+.check-blocked::before { content: "\2297"; color: var(--danger); }
+.check-note { max-width: var(--measure-ui); margin-top: 4px; font-family: var(--font-ui); font-size: var(--text-xs); line-height: 1.45; color: var(--text-secondary); }
+
+/* ── Timeline: a log book ─────────────────────────────────────────────── */
+
+/* Times right-aligned in their own column, a ruled tick line with a dot per
+ * entry, the entry in the reading face. The time column is as wide as the
+ * longest time, so an ISO timestamp is never broken across lines. */
+.block-timeline {
+  display: grid;
+  grid-template-columns: minmax(48px, max-content) 22px minmax(0, 1fr);
+  column-gap: 10px;
+  max-width: var(--measure-wide);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.timeline-item {
+  position: relative;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  padding-bottom: 14px;
+}
+.timeline-item::after {
+  content: "";
+  position: absolute;
+  grid-column: 2;
+  top: 0;
+  bottom: 0;
+  left: 10px;
+  width: 1px;
+  background: var(--border-strong);
+}
+.timeline-item:first-child::after { top: 11px; }
+.timeline-item:last-child::after { bottom: auto; height: 11px; }
+.timeline-item:only-child::after { display: none; }
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  grid-column: 2;
+  top: 6px;
+  left: 5px;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--text-secondary);
+  border-radius: 50%;
+  background: var(--surface-1);
+}
+.timeline-info::before { background: var(--text-primary); border-color: var(--text-primary); }
+.timeline-good::before { background: var(--ok); border-color: var(--ok); }
+.timeline-bad::before { background: var(--danger); border-color: var(--danger); }
+.timeline-warn::before { background: var(--warn); border-color: var(--warn); }
+.timeline-time {
+  grid-column: 1;
+  grid-row: 1;
+  padding-top: 2px;
+  text-align: right;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: var(--numerals-data);
+}
+.timeline-label,
+.timeline-detail { grid-column: 3; max-width: var(--measure); }
+.timeline-label { grid-row: 1; margin: 0; font-family: var(--font-reading); font-size: var(--reading-size); line-height: 1.5; }
+.timeline-detail { grid-row: 2; margin: 4px 0 0; font-family: var(--font-reading); font-size: var(--text-sm); line-height: 1.5; color: var(--text-secondary); }
+@container sheet (max-width: 560px) {
+  .block-timeline { grid-template-columns: 22px minmax(0, 1fr); column-gap: 6px; }
+  .timeline-item::before,
+  .timeline-item::after { grid-column: 1; }
+  .timeline-time { grid-column: 2; grid-row: 1; text-align: left; white-space: normal; }
+  .timeline-label { grid-column: 2; grid-row: 2; }
+  .timeline-detail { grid-column: 2; grid-row: 3; }
+}
+
+/* ── Risks, actions, findings, tests: ruled rows with a status rule ───── */
+
+.block-risks,
+.block-actions,
+.block-findings,
+.block-tests { max-width: var(--measure-wide); border-top: 1px solid var(--border); }
+.risk-item,
+.action-item,
+.finding-item,
+.test-item {
+  --tone: var(--border-strong);
+  margin: 0;
+  padding: 12px 0 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: inset 3px 0 0 var(--tone);
+}
+.risk-item h4,
+.action-item h4 { margin: 0; font-size: var(--text-sm); font-weight: 600; line-height: 1.35; }
+/* The state words the renderer writes for screen readers ("high severity",
+ * "in progress") are shown to everyone: without them the rule colour would
+ * be the only visible carrier of the state. */
+.risk-item h4 > .visually-hidden,
+.action-item h4 > .visually-hidden,
+.test-name > .visually-hidden {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip-path: none;
+  white-space: normal;
+  font-weight: 600;
+  color: var(--tone-ink, var(--text-secondary));
+}
+.risk-likelihood,
+.risk-owner,
+.action-intent,
+.action-owner,
+.action-due,
+.action-link,
+.finding-path,
+.finding-state,
+.finding-rule,
+.test-duration,
+.tests-run { margin: 4px 0 0; font-size: var(--text-xs); color: var(--text-secondary); font-variant-numeric: var(--numerals-data); }
+.risk-mitigation,
+.finding-detail { max-width: var(--measure); margin: 6px 0 0; font-family: var(--font-reading); font-size: var(--text-sm); line-height: 1.5; }
+.risk-severity--high { --tone: var(--danger); --tone-ink: var(--danger); }
+.risk-severity--medium { --tone: var(--warn); --tone-ink: var(--warn); }
+.risk-severity--low { --tone: var(--border-strong); }
+.action-state--done { --tone: var(--ok); --tone-ink: var(--ok); }
+.action-state--done h4 { color: var(--text-secondary); }
+.action-state--in-progress { --tone: var(--accent); --tone-ink: var(--accent); }
+.action-state--todo { --tone: var(--border-strong); }
+.action-state--dropped { --tone: var(--border); }
+.action-state--dropped h4 { color: var(--text-secondary); }
+
+.finding-item .finding-message { margin: 0; font-size: var(--text-sm); font-weight: 500; }
+.finding-level--error { --tone: var(--danger); }
+.finding-level--warning { --tone: var(--warn); }
+.finding-level--note { --tone: var(--border-strong); }
+.finding-item[data-state="fixed"] .finding-message,
+.finding-item[data-state="wontfix"] .finding-message { color: var(--text-secondary); }
+
+.tests-run { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.block-tests:has(> .tests-run) { border-top: 0; }
+.block-tests > p:not([class]) { margin: 0; padding: 10px 0; font-size: var(--text-sm); }
+.test-name { margin: 0; font-size: var(--text-sm); font-weight: 500; }
+.test-name > .visually-hidden { font-weight: 500; }
+.test-state--passed { --tone: var(--ok); --tone-ink: var(--ok); }
+.test-state--failed,
+.test-state--errored { --tone: var(--danger); --tone-ink: var(--danger); }
+.test-state--flaky { --tone: var(--warn); --tone-ink: var(--warn); }
+.test-state--skipped { --tone: var(--border-strong); }
+.test-message {
+  margin: 8px 0 0;
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.5;
+  overflow-wrap: normal;
 }
-
-.diff-patch code {
-  all: unset;
-}
-
-/* Checklist */
-.block-checklist {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.block-checklist li {
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.block-checklist li:last-child {
-  border-bottom: none;
-}
-
-.check-done::before {
-  content: '✓ ';
-  color: var(--ok);
-  font-weight: 700;
-}
-
-.check-todo::before {
-  content: '○ ';
-  color: var(--text-secondary);
-}
-
-.check-partial::before {
-  content: '◐ ';
-  color: var(--warn);
-}
-
-.check-skipped::before {
-  content: '- ';
-  color: var(--text-secondary);
-}
-
-.check-blocked::before {
-  content: '⊗ ';
-  color: var(--danger);
-}
-
-/* Timeline */
-.block-timeline {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  position: relative;
-}
-
-.timeline-item {
-  padding: var(--space-4) 0 var(--space-4) var(--space-8);
-  position: relative;
-  border-left: 1px solid var(--border);
-  margin-left: var(--space-2);
-}
-
-.timeline-item::before {
-  content: '';
-  position: absolute;
-  left: -7px;
-  top: var(--space-4);
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--text-secondary);
-  border: 2px solid var(--bg);
-}
-
-.timeline-neutral::before {
-  background: var(--text-secondary);
-}
-
-.timeline-good::before {
-  background: var(--ok);
-}
-
-.timeline-bad::before {
-  background: var(--danger);
-}
-
-.timeline-warn::before {
-  background: var(--warn);
-}
-
-.timeline-info::before {
-  background: var(--accent);
-}
-
-.timeline-time {
-  font-weight: 600;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-.timeline-label {
-  margin: var(--space-1) 0 0 0;
-  font-weight: 500;
-}
-
-.timeline-detail {
-  margin: var(--space-2) 0 0 0;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-/* Risks, actions, decision */
-.risk-item,
-.action-item {
-  padding: var(--space-4);
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  margin-bottom: var(--space-3);
-}
-
-.risk-severity--high {
-  border-color: var(--danger);
-}
-
-.risk-severity--medium {
-  border-color: var(--warn);
-}
-
-.risk-severity--low {
-  border-color: var(--ok);
-}
-
-.action-state--done {
-  opacity: 0.7;
-  border-color: var(--ok);
-}
-
-.action-state--todo {
-  border-color: var(--accent);
-}
-
-.action-state--in-progress {
-  border-color: var(--accent);
-}
-
-.action-state--dropped {
-  border-color: var(--text-secondary);
-  opacity: 0.6;
-}
-
-.block-decision {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-}
-
-.decision-section {
-  border-bottom: 1px solid var(--border);
-  padding-bottom: var(--space-4);
-}
-
-.decision-section:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.decision-section h4 {
-  font-weight: 600;
-  margin: 0 0 var(--space-2) 0;
-}
-
-/* Image, embed */
-.block-image {
-  text-align: center;
-  margin: 0;
-}
-
-.block-image img {
-  max-width: 100%;
-  height: auto;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-}
-
-.block-image figcaption {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  margin-top: var(--space-2);
-}
-
-.block-embed-html {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-.block-embed { display: block; width: 100%; height: var(--embed-height, 780px); border: 0; background: var(--surface-1); }
-.block-embed__caption { padding: 10px 16px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: .75rem; }
-
-/* Evidence */
-.block-evidence {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.evidence-item {
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--text-sm);
-}
-
-.evidence-item:last-child {
-  border-bottom: none;
-}
-
-.evidence-item a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.evidence-item a:hover {
-  text-decoration: underline;
-}
-
-.evidence-checked-by {
-  color: var(--text-secondary);
-  font-size: 0.9em;
-}
-
-.evidence-marker {
-  display: flex;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.evidence-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-/* Note */
-
-
-/* Empty and error states */
-.block-empty,
-.block-error {
-  padding: var(--space-6);
-  text-align: center;
-  color: var(--text-secondary);
-  background: var(--surface-2);
-  border: 2px dashed var(--border);
-  border-radius: var(--radius-sm);
-  min-height: 100px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.block-error {
-  background: rgba(239, 68, 68, 0.05);
-  border-color: var(--danger);
-  color: var(--text-primary);
-}
-
-.error-hint {
-  font-size: var(--text-sm);
-  margin-top: var(--space-2);
-  color: var(--text-secondary);
-}
-
-/* Findings */
-.finding-item {
-  padding: var(--space-4);
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  margin-bottom: var(--space-3);
-}
-
-.finding-level--error {
-  border-color: var(--danger);
-}
-
-.finding-level--warning {
-  border-color: var(--warn);
-}
-
-.finding-level--note {
-  border-color: var(--border);
-}
-
-.finding-message {
-  margin: 0;
-  font-weight: 500;
-}
-
-.finding-path,
-.finding-rule {
-  margin: var(--space-2) 0 0 0;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-.finding-path code {
-  background: var(--bg);
-  padding: 2px 4px;
-  border-radius: 2px;
-}
-
-/* Tests */
-.test-item {
-  padding: var(--space-3);
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  margin-bottom: var(--space-2);
-}
-
-.test-state--passed {
-  border-color: var(--ok);
-}
-
-.test-state--failed {
-  border-color: var(--danger);
-}
-
-.test-state--skipped {
-  border-color: var(--text-secondary);
-}
-
-.test-name {
-  margin: 0;
-  font-weight: 500;
-  font-size: var(--text-sm);
-}
-
-.test-duration {
-  margin: var(--space-1) 0 0 0;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-/* Print-specific overrides */
-@media print {
-  .block {
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
-  .block-evidence,
-  .evidence-marker {
-    display: block;
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
-  table {
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
-}
-
-/* ── Evidence ──────────────────────────────────────────────────────────── */
+.test-message code { all: unset; }
+
+/* ── Decision ─────────────────────────────────────────────────────────── */
+
+/* Set at the reading size, so the measure (in em) counts the characters of
+ * the paragraphs inside it, not of the 15 px UI text around it. */
+.block-decision { display: grid; gap: var(--space-6); max-width: var(--measure); font-size: var(--reading-size); }
+.decision-status { margin: 0; font-size: var(--text-xs); font-weight: 600; color: var(--warn); text-transform: capitalize; }
+.decision-section { max-width: var(--measure); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
+.decision-section:last-child { padding-bottom: 0; border-bottom: 0; }
+.decision-section h4 { margin: 0 0 6px; font-size: var(--text-sm); font-weight: 600; }
+.decision-section p,
+.decision-section ul { font-family: var(--font-reading); font-size: var(--reading-size); line-height: var(--leading-reading); }
+.decision-section ul { margin: 0; padding-left: var(--space-6); }
+.decision-section li + li { margin-top: 6px; }
+
+/* ── Image ────────────────────────────────────────────────────────────── */
+
+.block-image { margin: 0; }
+.block-image img { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.block-image figcaption { max-width: var(--measure-ui); margin-top: var(--space-2); font-size: var(--text-xs); color: var(--text-secondary); }
+
+/* ── Evidence ─────────────────────────────────────────────────────────── */
 
 /*
- * The disclosure that answers "how do you know?". It is deliberately quiet
- * when closed and complete when open: a reader skimming does not need it, and
- * a reviewer checking a claim needs all of it.
- *
- * A block whose only source is a model's own assertion gets a different left
- * edge, because that is the case this product exists to make visible rather
- * than to smooth over.
+ * The disclosure that answers "how do you know?". Quiet when closed and
+ * complete when open: a reader skimming does not need it, and a reviewer
+ * checking a claim needs all of it. A block whose only source is a model's
+ * own assertion reads as a caution, because that is the case this product
+ * exists to make visible.
  */
-.evidence-marker {
-  margin-top: var(--space-2);
-  font-size: var(--text-xs);
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-2);
-}
-
-.evidence-marker--weak { border-color: var(--warn, #fbbf24); }
-
-.evidence-marker > summary {
-  cursor: pointer;
-  color: var(--text-muted);
+.block-evidence {
+  max-width: var(--measure-wide);
+  margin: 0;
+  padding: 0;
   list-style: none;
+  border-block: 1px solid var(--border);
 }
+.block-evidence > .evidence-item { padding: 10px 0; font-size: var(--text-sm); }
+.block-evidence > .evidence-item + .evidence-item { border-top: 1px solid var(--border); }
+.evidence-checked-by { font-size: var(--text-xs); color: var(--text-secondary); }
 
+.evidence-marker {
+  max-width: var(--measure-wide);
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+}
+.evidence-marker--weak { border-top-color: var(--warn); }
+.evidence-marker > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-secondary);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.evidence-marker--weak > summary { color: var(--warn); }
 .evidence-marker > summary::-webkit-details-marker { display: none; }
-.evidence-marker > summary::before { content: "+ "; font-variant-numeric: tabular-nums; }
-.evidence-marker[open] > summary::before { content: "- "; }
+.evidence-marker > summary::before {
+  content: "\203A";
+  display: inline-block;
+  width: 10px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform var(--dur) var(--ease-out);
+}
+.evidence-marker[open] > summary::before { transform: rotate(90deg); }
 .evidence-marker > summary:hover { color: var(--text-primary); }
 
-.evidence-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-2); }
-.evidence-item { display: grid; gap: 2px; }
-.evidence-name { color: var(--text-secondary); }
-.evidence-facts { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; }
-
-.evidence-who {
-  text-transform: uppercase;
-  letter-spacing: .07em;
-  font-size: .68rem;
-  padding: 1px 5px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
+.evidence-list { display: grid; gap: 10px; margin: var(--space-3) 0 var(--space-2); padding: 0; list-style: none; }
+.evidence-list > .evidence-item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; font-size: var(--text-sm); }
+.evidence-name { color: var(--text-primary); }
+.evidence-facts { display: flex; flex-wrap: wrap; gap: 4px var(--space-3); align-items: baseline; font-size: var(--text-xs); }
+.evidence-who { font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); }
+/* A machine check either passed or it did not. A person looked. A model said
+ * so. Only the third is a claim, and it is the one that reads as a caution. */
+.evidence-who--code { color: var(--ok); }
+.evidence-who--human { color: var(--accent); }
+.evidence-who--llm { color: var(--warn); }
+.evidence-who--none { color: var(--text-secondary); }
+.evidence-kind,
+.evidence-confidence { color: var(--text-secondary); }
+.evidence-hash { font-size: var(--text-xs); color: var(--text-secondary); }
+.evidence-excerpt {
+  max-width: var(--measure);
+  margin: 4px 0 0;
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border);
+  font-family: var(--font-reading);
+  font-size: var(--text-sm);
+  font-style: normal;
   color: var(--text-secondary);
 }
 
-/* A machine check either passed or it did not. A person looked. A model said
- * so. Only the third is a claim, and it is the one that reads as a caution. */
-.evidence-who--code { color: var(--ok, #34d399); }
-.evidence-who--human { color: var(--accent-bright); }
-.evidence-who--llm { color: var(--warn, #fbbf24); }
-.evidence-who--none { color: var(--text-muted); }
+/* ── Empty and error states ───────────────────────────────────────────── */
 
-.evidence-kind,
-.evidence-confidence { color: var(--text-muted); }
-.evidence-hash { font-size: .68rem; color: var(--text-muted); }
-
-.evidence-excerpt {
-  margin: 4px 0 0;
-  padding-left: var(--space-2);
-  border-left: 1px solid var(--border);
-  color: var(--text-muted);
-  font-style: normal;
+.block-empty,
+.block-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 96px;
+  padding: var(--space-6);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-align: center;
 }
+.block-error { border-style: solid; border-color: var(--danger); border-left-width: 3px; background: var(--danger-soft); color: var(--text-primary); }
+.error-hint { margin-top: var(--space-2); font-size: var(--text-xs); color: var(--text-secondary); }
 
 /* ── Grid ──────────────────────────────────────────────────────────────── */
 
@@ -785,18 +739,151 @@
 .block-grid {
   display: grid;
   grid-template-columns: repeat(var(--grid-columns, 2), minmax(0, 1fr));
-  gap: var(--space-4);
+  gap: var(--space-6);
   align-items: start;
 }
-
 .grid-item { min-width: 0; }
 .grid-item--full { grid-column: 1 / -1; }
 .grid-item--half { grid-column: span 1; }
 .grid-item--third { grid-column: span 1; }
 .grid-item--two-thirds { grid-column: span 2; }
-
-@media (max-width: 760px) {
+.grid-item .block-metrics { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); }
+@container sheet (max-width: 640px) {
   .block-grid { grid-template-columns: minmax(0, 1fr); }
   .grid-item,
   .grid-item--two-thirds { grid-column: 1 / -1; }
+}
+
+/* ── Embed (imported HTML) ────────────────────────────────────────────── */
+
+/* The box: the view controls on top, then the report in the view chosen.
+ * `clip`, not `hidden`, so the box is not a scroll container. */
+.block-embed-html {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  overflow: clip;
+}
+.embed-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+.embed-bar__scripts[hidden] { display: none; }
+/* One notice line: what was not loaded, or that scripts are running. */
+.embed-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.embed-note .ic { flex: none; width: 15px; height: 15px; margin-top: 1px; }
+.embed-note b { font-weight: 600; color: var(--text-primary); }
+.block-embed__body > .embed-note,
+.block-embed-html > .embed-note { margin: 12px 12px 0; }
+.block-embed__body > .embed-note:last-of-type,
+.block-embed-html > .embed-note:last-of-type { margin-bottom: 12px; }
+
+/* Original and the sealed host: a frame the width of the box. The frame
+ * shows the report's own page, so its backdrop is a light browser canvas
+ * whatever this page's theme. A static frame is sized to its document by
+ * js/embed-fit.js; the height below is where it starts. */
+.block-embed__frame { position: relative; }
+.block-embed {
+  display: block;
+  width: 100%;
+  height: var(--embed-height, 780px);
+  border: 0;
+  color-scheme: light;
+  background: Canvas;
+}
+.block-embed--interactive { height: clamp(480px, calc(100dvh - 180px), 1000px); }
+/* Anchors laid over the frame's headings, for the rail outline. */
+.block-embed__anchors { position: absolute; inset: 0; pointer-events: none; }
+.embed-anchor { position: absolute; top: 0; left: 0; width: 100%; height: 0; border-radius: var(--radius-sm); scroll-margin-top: 72px; }
+.embed-anchor:focus { outline: none; }
+
+/* Dossier format: the compare reader's typography at the Reports reading
+ * size (Display's Compact applies to Compare columns, not here). The text
+ * keeps to the measure from the page's left edge, as prose does (design
+ * spec 7.2.6), not centred as in a column; the notes sit at the top of the
+ * text column, so they share its width and its left edge. */
+.block-embed__body--format,
+.block-embed-html--format { padding: 20px 16px 32px; }
+.block-embed-reader {
+  --compare-reading-size: var(--reading-size);
+  --compare-leading: var(--leading-reading);
+}
+.block-embed-reader .reader__doc { margin-inline: 0; }
+.block-embed-reader .reader__doc > .embed-note { margin: 0 0 12px; }
+/* Doubled class: css/compare.css loads later and sets 16 px for a column.
+ * The headings keep the reading face (`.block h3` above sets the UI face),
+ * and sit a size under the compare reader's: in a report, the imported
+ * report's top heading is never larger than the report's own title. */
+.block-embed-reader.reader .r-h { scroll-margin-top: 72px; font-family: inherit; }
+.block-embed-reader.reader .r-h1 { font-size: var(--text-lg); }
+.block-embed-reader.reader .r-h2 { font-size: calc(var(--compare-reading-size) * 1.08); }
+.block-embed-reader.reader .r-h3 { font-size: var(--compare-reading-size); }
+
+.block-embed__caption { padding: 10px 16px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: var(--text-xs); }
+.block-embed-html--format > .block-embed__caption { margin: -20px -16px 16px; }
+/* The Dossier format copy a frame gets for the paper (js/embeds.js). */
+.block-embed__print { display: none; }
+
+/* An imported report on its own (css/report.css, `.report-shell--artifact`)
+ * has its title 24 px in from the sheet's edge; the view controls, the notes
+ * and the text line up with it. */
+.report-shell--artifact .embed-bar { padding-inline: 24px; }
+.report-shell--artifact .block-embed__body > .embed-note { margin-inline: 24px; }
+.report-shell--artifact .block-embed__body--format { padding-inline: 24px; }
+.block-embed--external {
+  max-width: var(--measure);
+  padding: var(--space-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.block-embed--external p { margin-bottom: var(--space-2); }
+.block-embed__link { font-weight: 500; color: var(--text-primary); overflow-wrap: anywhere; }
+
+/* ── Print ────────────────────────────────────────────────────────────── */
+
+@media print {
+  .block { break-inside: avoid; }
+  .block-metrics,
+  .block-evidence,
+  .evidence-marker,
+  .block-timeline,
+  table { break-inside: avoid; }
+  .block--collapsed > summary::before { content: none; }
+  .table-wrapper { background: none; }
+  .embed-bar, .embed-note, .block-embed__anchors { display: none; }
+  .block-embed-html { border: 0; overflow: visible; }
+  .block-embed-html--format, .block-embed__body--format { padding: 0; }
+  .block-embed-html--format > .block-embed__caption,
+  .block-embed__print > .block-embed__caption { margin: 0 0 12px; padding: 0; border: 0; }
+  .report-shell--artifact .block-embed-html--format,
+  .report-shell--artifact .block-embed__print { padding-inline: 24px; }
+  .block-embed-html:has(.block-embed-reader) { break-inside: auto; }
+  .block:has(.block-embed-reader) { break-inside: auto; }
+  .block-embed-reader .r-h { break-after: avoid; }
+  /* A frame prints as its Dossier format copy, in its place. */
+  .block-embed__print { display: block; }
+  .block-embed__body:has(> .block-embed__print) > :not(.block-embed__print) { display: none; }
+  /* A frame with no copy (the one-file export) still starts on the page it
+   * is on, rather than leaving that page blank and moving whole. */
+  .block:has(.block-embed-html iframe) { break-inside: auto; }
 }

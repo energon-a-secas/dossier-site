@@ -1,66 +1,225 @@
-/* A report is a document: one surface, clear sections, room for comparisons. */
-.report-shell { width: 100%; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-card); overflow: clip; }
-.report-header { padding: 40px 44px 30px; }
-.report-title-row { display: flex; flex-direction: column; gap: 20px; }
-.report-title { font-size: 2.375rem; font-weight: 730; letter-spacing: -.045em; line-height: 1.14; max-width: 30ch; text-wrap: balance; }
-.report-subtitle { max-width: 70ch; font-size: 1rem; color: var(--text-secondary); margin-top: 14px; line-height: 1.65; }
-.report-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; font-size: .75rem; color: var(--text-muted); }
-.meta-kind { color: var(--accent); font-weight: 650; text-transform: uppercase; letter-spacing: .08em; font-size: .625rem; }
-.meta-owner, .meta-period { overflow-wrap: anywhere; }
-.meta-status { padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; font-weight: 500; }
-.meta-status--in-review { color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent); border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
-.meta-status--shipped { color: var(--ok); }
-.meta-status--blocked, .meta-status--rolled-back { color: var(--danger); }
-.meta-source { font-weight: 500; }
-.report-tabs { display: flex; gap: 24px; padding: 0 44px; border-block: 1px solid var(--border); overflow-x: auto; }
-.report-tab { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; padding: 15px 0 13px; color: var(--text-muted); text-decoration: none; border-bottom: 2px solid transparent; font-size: .8125rem; font-weight: 550; }
-.report-tab__number { font-family: var(--font-mono); font-size: .625rem; opacity: .8; }
-.report-tab:hover { color: var(--text-primary); }
-.report-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* A report is a sheet of paper on the desk: a cover with the title and its
+ * case-file label, manila divider tabs, then the page. The folder shape (the
+ * label band and the tabs) appears here and nowhere else. */
+.report-shell {
+  width: 100%;
+  max-width: var(--sheet-width);
+  margin-inline: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--shadow-sheet);
+  overflow: clip;
+}
+
+/* ── Cover ────────────────────────────────────────────────────────────── */
+.report-header { padding: 48px 56px 36px; }
+.report-title-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+.report-title-row--label { grid-template-columns: minmax(0, 1fr) 236px; gap: 40px; }
+.report-title {
+  max-width: 18em;
+  font-family: var(--font-reading);
+  font-size: var(--text-3xl);
+  line-height: var(--leading-tight);
+  font-weight: 600;
+  letter-spacing: -.012em;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+.report-subtitle {
+  max-width: 46ch;
+  margin-top: 16px;
+  font-family: var(--font-reading);
+  font-size: var(--text-lg);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+/* The file label: the report's metadata, filed like a case folder. */
+.file-label {
+  align-self: start;
+  min-width: 0;
+  border: 1px solid var(--manila-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-size: var(--text-xs);
+}
+.file-label__band {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--manila);
+  border-bottom: 1px solid var(--manila-strong);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.file-label__band:last-child { border-bottom: 0; }
+.file-label__ref { font-weight: 500; color: var(--text-secondary); font-variant-numeric: var(--numerals-data); }
+.file-label dl { display: grid; grid-template-columns: 76px minmax(0, 1fr); }
+.file-label dt,
+.file-label dd { padding: 7px 0; border-top: 1px solid var(--border); }
+.file-label dt { padding-left: 12px; color: var(--text-muted); }
+.file-label dd {
+  padding-right: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-variant-numeric: var(--numerals-data);
+  overflow-wrap: anywhere;
+}
+.file-label dt:first-of-type,
+.file-label dd:first-of-type { border-top: 0; }
+/* A date moves to the next line whole; only one longer than the column breaks. */
+.file-label__date { display: inline-block; max-width: 100%; }
+
+/* Status: a dot and the word, never a colour alone. */
+.meta-status { display: inline-flex; align-items: center; gap: 6px; }
+.meta-status::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); }
+.meta-status--shipped::before { background: var(--ok); }
+.meta-status--in-review::before { background: var(--accent); }
+.meta-status--blocked::before,
+.meta-status--rolled-back::before { background: var(--danger); }
+.meta-status--draft::before { background: transparent; border: 1.5px solid var(--text-secondary); }
+
+/* ── Divider tabs ─────────────────────────────────────────────────────── */
+/* A row that runs past the sheet scrolls, and says so: the mask fades the
+ * row's own inline padding, which is empty while every tab fits, so the fade
+ * shows only over a tab that has scrolled into it, at either end and at every
+ * width. The second mask layer keeps the 1 px rule at the bottom whole, and
+ * scroll-padding keeps a tab reached by keyboard clear of the fade. */
+.report-tabs {
+  --tabs-pad-start: 56px;
+  --tabs-pad-end: 56px;
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 0 var(--tabs-pad-end) 0 var(--tabs-pad-start);
+  border-bottom: 1px solid var(--manila-strong);
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-padding-inline: var(--tabs-pad-start) var(--tabs-pad-end);
+  mask-image:
+    linear-gradient(to right, transparent, #000 var(--tabs-pad-start), #000 calc(100% - var(--tabs-pad-end)), transparent),
+    linear-gradient(#000, #000);
+  mask-size: 100% 100%, 100% 1px;
+  mask-position: 0 0, 0 100%;
+  mask-repeat: no-repeat;
+}
+.report-tabs::-webkit-scrollbar { display: none; }
+.report-tab {
+  position: relative;
+  bottom: -1px;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 9px;
+  border: 1px solid var(--manila-strong);
+  border-radius: var(--radius-tab);
+  background: var(--manila);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.report-tab:hover { background: var(--manila-strong); color: var(--text-primary); }
+.report-tab__number { color: var(--text-muted); font-weight: 500; font-variant-numeric: var(--numerals-data); }
+/* Muted ink on the hover fill is 4.3:1 (light) and 4.0:1 (dark); secondary
+ * ink keeps the number above 4.5:1 there. */
+.report-tab:hover .report-tab__number { color: var(--text-secondary); }
+.report-tab.active,
+.report-tab[aria-current="page"] {
+  background: var(--surface-1);
+  border-bottom-color: var(--surface-1);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: inset 0 3px 0 var(--accent);
+}
+.report-tab[aria-current="page"] .report-tab__number { color: var(--text-secondary); }
+/* Inside the scrolling row the ring is drawn inside the tab, or the row clips it. */
+.report-tab:focus-visible { outline-offset: -2px; }
+
+/* ── Pages and blocks ─────────────────────────────────────────────────── */
 .report-content { min-width: 0; }
-.report-page { padding: 32px 44px 44px; min-width: 0; }
+.report-page { min-width: 0; padding: 40px 56px 56px; }
 .report-page + .report-page { border-top: 1px solid var(--border); }
-.ds-export { padding: 24px; }
-.ds-export .report-shell { max-width: 1200px; margin-inline: auto; }
-.report-page__head { margin-bottom: 24px; }
-.report-page__head h2 { font-size: 1.375rem; letter-spacing: -.025em; font-weight: 650; }
-.report-page__head p { margin-top: 6px; max-width: 70ch; font-size: .8125rem; color: var(--text-secondary); }
-.report-blocks { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.report-page__head { margin-bottom: var(--space-8); }
+.report-page__head h2 {
+  font-family: var(--font-reading);
+  font-size: var(--text-xl);
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -.005em;
+}
+.report-page__head p { max-width: var(--measure-ui); margin-top: 6px; font-size: var(--text-sm); color: var(--text-secondary); }
+.report-blocks { min-width: 0; }
 .report-blocks > * { min-width: 0; }
-.block-title { margin: 0 0 16px; font-size: 1rem; font-weight: 650; letter-spacing: -.015em; }
-.block-note { max-width: 75ch; margin-top: 12px; color: var(--text-muted); font-size: .75rem; line-height: 1.65; }
+/* Blocks sit 40 px apart and a heading 16 px from its own content: that
+ * difference is what groups a heading with its block. */
+.report-blocks > * + * { margin-top: var(--space-10); }
+/* A heading block belongs to what follows it: 16 px below it, 48 px above. */
+.report-blocks > * + :has(> .block[data-block-type="heading"]) { margin-top: var(--space-12); }
+.report-blocks > :has(> .block[data-block-type="heading"]) + * { margin-top: var(--space-4); }
+.block-title { margin: 0 0 var(--space-4); font-family: var(--font-ui); font-size: var(--text-sm); line-height: 1.3; font-weight: 600; }
+.block-note { max-width: var(--measure-ui); margin-top: 12px; color: var(--text-secondary); font-size: var(--text-xs); line-height: 1.5; }
+
+/* ── The one-file export ──────────────────────────────────────────────── */
+.ds-export { padding: 32px 24px 64px; }
+
+/* An imported HTML report on its own: a compact cover, the frame full width. */
 .report-shell--artifact .report-header { padding: 20px 24px; }
-.report-shell--artifact .report-title { font-size: 1.25rem; max-width: none; }
-.report-shell--artifact .report-subtitle { margin-top: 6px; font-size: .8125rem; }
-.report-shell--artifact .report-meta:empty { display: none; }
-.report-shell--artifact .report-title-row { gap: 0; }
+.report-shell--artifact .report-title { font-size: var(--text-lg); max-width: none; }
+.report-shell--artifact .report-subtitle { margin-top: 6px; font-size: var(--text-sm); font-family: var(--font-ui); }
+.report-shell--artifact .report-title-row,
+.report-shell--artifact .report-title-row--label { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.report-shell--artifact .file-label { max-width: 420px; }
 .report-shell--artifact .report-page { padding: 0; }
 .report-shell--artifact .report-page__head { display: none; }
 .report-shell--artifact .block-embed-html { border-width: 1px 0 0; border-radius: 0; }
 .report-shell--artifact .block-embed { height: clamp(480px, calc(100dvh - 260px), 1000px); }
-@media (max-width: 760px) {
-  .report-header { padding: 28px 24px 24px; }
-  .report-title { font-size: 1.875rem; }
-  .report-subtitle { font-size: .9375rem; }
-  .report-tabs { padding-inline: 24px; gap: 20px; }
-  .report-page { padding: 24px; }
+
+/* ── Narrow ───────────────────────────────────────────────────────────────
+ * By the sheet's own width, not the window's: the same sheet is 808 px wide
+ * on a laptop with the rail open, about 560 px beside the editor, and one
+ * column of a comparison. The sheet is the query container. */
+.report-shell { container: sheet / inline-size; }
+@container sheet (max-width: 820px) {
+  .report-header { padding: 36px 32px 28px; }
+  .report-title-row--label { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .file-label { max-width: 420px; }
+  .report-tabs { --tabs-pad-start: 32px; --tabs-pad-end: 32px; }
+  .report-page { padding: 32px 32px 48px; }
 }
-@media (max-width: 420px) {
-  .report-header, .report-page { padding: 24px 18px; }
-  .report-title { font-size: 1.625rem; }
-  .report-tabs { padding-inline: 18px; }
-  .report-meta { gap: 8px 12px; }
+@container sheet (max-width: 560px) {
+  .report-header { padding: 28px 16px 20px; }
+  .report-title { font-size: var(--text-2xl); }
+  .report-subtitle { margin-top: 12px; font-size: var(--reading-size); }
+  /* A phone row nearly always scrolls, so its end padding is wider than its
+   * start: the fade there is long enough to read as "more". */
+  .report-tabs { --tabs-pad-start: 16px; --tabs-pad-end: 44px; }
+  .report-page { padding: 28px 16px 40px; }
+  .report-page__head { margin-bottom: var(--space-6); }
 }
+@media (max-width: 700px) {
+  .report-shell { border-radius: 0; border-inline: 0; }
+  .ds-export { padding: 0 0 40px; }
+}
+
+/* ── Print ────────────────────────────────────────────────────────────── */
 @media print {
   .ds-export { padding: 0; }
-  .report-shell { box-shadow: none; border: 0; border-radius: 0; overflow: visible; }
+  .report-shell { max-width: none; box-shadow: none; border: 0; border-radius: 0; overflow: visible; }
   .report-header { padding: 0 0 24px; }
   .report-title { font-size: 24pt; }
   .report-tabs { display: none; }
   .report-page { display: block; break-after: page; padding: 0; }
+  .report-page + .report-page { border-top: 0; }
   .report-page:last-child { break-after: auto; }
-  .report-blocks { gap: 20px; }
-  .block { break-inside: avoid; }
+  .report-blocks > * + * { margin-top: 24px; }
+  .file-label { break-inside: avoid; }
   code { overflow-wrap: anywhere; white-space: pre-wrap; }
   .table-wrapper { overflow: visible; }
 }

@@ -1,34 +1,338 @@
-/* Local foundations keep the report readable without a CDN connection. */
+/* Local foundations keep the report readable without a CDN connection.
+ *
+ * What lives here: the page base, the shared controls every view uses
+ * (buttons, inputs, the segmented control, toggles, pickers, tags, role
+ * badges), the Header Kit custom skin and the current-view marker, and the
+ * Footer Kit token override. Tokens are in css/tokens.css; nothing here
+ * defines a colour of its own. */
 *, *::before, *::after { box-sizing: border-box; }
 * { margin: 0; }
 [hidden] { display: none !important; }
-html { min-height: 100%; color-scheme: light; }
-body { min-height: 100dvh; background: var(--bg); color: var(--text-primary); font: 15px/1.55 var(--font); display: flex; flex-direction: column; }
+html { min-height: 100%; -webkit-text-size-adjust: 100%; }
+body {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-ui);
+  font-weight: var(--weight-ui);
+  font-variant-numeric: var(--numerals);
+  -webkit-font-smoothing: antialiased;
+}
 body:has(dialog[open]) { overflow: hidden; }
 main#main { flex: 1; min-width: 0; width: 100%; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
-a { color: var(--accent); text-underline-offset: 3px; }
+/* Links are ink with a folder-brown underline: the colour marks a link without
+ * competing with the text around it. */
+a { color: inherit; text-decoration-color: var(--accent); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2.5px; }
 button, a, input, textarea, select, summary { -webkit-tap-highlight-color: transparent; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* One ring everywhere, drawn outside the control so it sits on paper, desk or
+ * manila and never on an ink fill (folder brown on ink is 2.4:1). */
+:focus-visible { outline: var(--focus-width) solid var(--focus); outline-offset: var(--focus-offset); }
+::selection { background: var(--manila-strong); color: var(--text-primary); }
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: var(--font-ui); font-size: var(--text-xs); font-weight: 600; line-height: 1;
+}
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-.skip-link { position: fixed; left: 16px; top: 8px; z-index: 1000; padding: 8px 16px; background: var(--surface-1); transform: translateY(-150%); }
+.skip-link { position: fixed; left: 16px; top: 8px; z-index: 1000; padding: 8px 16px; background: var(--surface-1); border-radius: var(--radius); transform: translateY(-150%); }
 .skip-link:focus { transform: translateY(0); }
 .skip-link:not(:focus) { clip-path: inset(50%); }
 
-.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 8px 16px; gap: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-primary); font-size: .8125rem; font-weight: 600; line-height: 1.4; text-decoration: none; transition: background-color 160ms ease-out, border-color 160ms ease-out; }
-.btn:hover { background: var(--surface-2); border-color: var(--text-muted); }
-.btn--primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-.btn--primary:hover { background: var(--accent-bright); border-color: var(--accent-bright); }
+/* ── Buttons ──────────────────────────────────────────────────────────────
+ * One primary per surface, filled with ink, never with the accent. The
+ * accent (folder brown) marks focus, links and "you are here", not actions. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.btn:hover { background: var(--surface-2); }
+.btn--primary { background: var(--action); border-color: var(--action); color: var(--on-action); }
+.btn--primary:hover { background: var(--action-hover); border-color: var(--action-hover); }
 .btn--quiet { background: transparent; border-color: transparent; color: var(--text-secondary); }
-.btn--quiet:hover { border-color: transparent; color: var(--text-primary); }
-.btn--sm { min-height: 32px; padding: 5px 10px; font-size: .75rem; }
+.btn--quiet:hover { background: var(--surface-2); color: var(--text-primary); }
+.btn--sm { height: 32px; padding: 0 10px; }
+.btn--xs { height: 26px; padding: 0 8px; font-size: var(--text-xs); }
+.btn--icon { width: 36px; padding: 0; }
+.btn--sm.btn--icon { width: 32px; }
+.btn--xs.btn--icon { width: 26px; }
+.btn svg { flex: none; width: 16px; height: 16px; }
 button:disabled { opacity: .5; cursor: not-allowed; }
-input:not([type="checkbox"]):not([type="range"]), select, textarea { min-width: 0; padding: 9px 12px; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
-input::placeholder, textarea::placeholder { color: var(--text-muted); }
-textarea { resize: vertical; }
 
-.toast { position: fixed; bottom: 24px; right: 24px; z-index: 500; max-width: min(420px, calc(100vw - 32px)); padding: 12px 16px; background: var(--surface-toast); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-card); pointer-events: none; opacity: 0; transform: translateY(8px); transition: opacity 180ms ease-out, transform 180ms ease-out; font-size: .8125rem; }
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), select, textarea {
+  min-width: 0;
+  padding: 8px 12px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+}
+input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1; }
+textarea { resize: vertical; line-height: 1.5; }
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--action); }
+
+/* ── Shared controls (Display dialog, the compare toolbar and panels) ──── */
+
+/* A toggle button: a box carries the state, so it reads without colour. */
+.toggle { display: inline-flex; align-items: center; gap: 8px; }
+.toggle .box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+}
+.toggle .box svg { width: 12px; height: 12px; opacity: 0; color: var(--on-action); }
+.toggle[aria-pressed="true"] .box { background: var(--action); border-color: var(--action); }
+.toggle[aria-pressed="true"] .box svg { opacity: 1; }
+
+/* Segmented control. The chosen segment is an ink fill with a paper label. */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+.seg > button {
+  height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.seg > button:hover { background: var(--surface-2); color: var(--text-primary); }
+.seg > button[aria-pressed="true"],
+.seg > button[aria-checked="true"],
+.seg > button[aria-selected="true"] { background: var(--action); color: var(--on-action); }
+
+/* A button that looks like a select: label, value, caret. */
+.picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.picker:hover { background: var(--surface-2); }
+.picker .lbl { color: var(--text-secondary); font-weight: 400; }
+.picker .caret { width: 14px; height: 14px; color: var(--text-secondary); }
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tag--base { border-color: var(--text-secondary); color: var(--text-primary); background: var(--surface-2); }
+
+/* Role badges: a letter, a colour and a word, never the colour alone. A role
+ * colour is chrome only (a column's top edge, a badge); it never tints text. */
+[data-role="human"] { --role: var(--role-human); --role-soft: var(--role-human-soft); --role-ink: var(--role-human-ink); }
+[data-role="agent"] { --role: var(--role-agent); --role-soft: var(--role-agent-soft); --role-ink: var(--role-agent-ink); }
+[data-role="fix"] { --role: var(--role-fix); --role-soft: var(--role-fix-soft); --role-ink: var(--role-fix-ink); }
+[data-role="other"] { --role: var(--role-other); --role-soft: var(--role-other-soft); --role-ink: var(--role-other-ink); }
+/* Blind: every role reads the same until Reveal. */
+#compareView.blind [data-role] { --role: var(--role-neutral); --role-soft: var(--role-neutral-soft); --role-ink: var(--role-neutral-ink); }
+.rb {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid var(--role, var(--border-strong));
+  border-radius: var(--radius-sm);
+  background: var(--role-soft, var(--surface-2));
+  color: var(--role-ink, var(--text-primary));
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: var(--numerals-data);
+}
+.rb--sm { width: 20px; height: 20px; }
+
+/* ── Toast ──────────────────────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: var(--z-toast);
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 16px;
+  background: var(--surface-toast);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--text-sm);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
+}
 .toast.visible { opacity: 1; transform: translateY(0); }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 @media (max-width: 600px) { .toast { left: 16px; right: 16px; max-width: none; } }
+
+/* ── Header Kit: the custom skin ──────────────────────────────────────────
+ * The kit's contract selector, copied exactly (packages/neorgon-ui/header,
+ * the "custom" skin note): html:not([data-theme]) lets a visitor's ?theme=
+ * win, and the attribute selector outranks the kit's defaults. Tokens only,
+ * the one sanctioned exception to "no site-local header CSS". The bar is the
+ * same ink in both appearances; its colour is also the page's theme-color
+ * (index.html meta, site.webmanifest). */
+html:not([data-theme]) .header-bar[data-header-skin="custom"] {
+  --header-bg-start: #232c3b;
+  --header-bg-mid: #171e2a;
+  --header-bg-end: #0e131b;
+  --header-glass: rgba(14, 19, 27, .55);
+  --header-accent: #e6cf94;
+  --header-text: #f5f1e6;
+  --header-text-dim: rgba(245, 241, 230, .8);
+  --header-icon-color: rgba(245, 241, 230, .78);
+  --header-border: rgba(230, 207, 148, .14);
+  --header-border-strong: rgba(230, 207, 148, .5);
+  --header-control-border: rgba(230, 207, 148, .62);
+  --header-menu-bg: #171e2a;
+  --header-menu-hover: rgba(230, 207, 148, .13);
+  --header-current-bg: rgba(230, 207, 148, .2);
+  --header-focus: #e6cf94;
+  --header-edge-from: rgba(230, 207, 148, .26);
+  --header-edge-to: rgba(230, 207, 148, .26);
+}
+
+/* The view switch: Reports and Compare, one group in the bar. The kit sizes
+ * a grouped button (height, display) but its appearance fallback reaches only
+ * direct children of .header-actions, so the group's look is set here, from
+ * the kit's own tokens and values. That includes the fallback's padding and
+ * type size (0 12px, .875rem), which is a known departure from "no kit
+ * geometry here" (build briefs, Addendum 1): without it the two buttons are
+ * raw browser buttons beside the kit's controls. Drop those two declarations
+ * if the kit's fallback grows to cover grouped buttons. The current view is
+ * the kit's documented escape hatch: its header rules have zero specificity
+ * "so a site's own .btn/.nav-link styling wins". Manila fill, manila border
+ * and a 2 px manila underline: 7.6:1 or more for the label on every stop of
+ * the bar. */
+.header-actions > .header-btn-group { display: inline-flex; }
+.header-btn-group > .nav-link {
+  padding: 0 12px;
+  border: 1px solid var(--header-control-border, var(--header-border-strong));
+  border-radius: 0;
+  background: transparent;
+  color: var(--header-text);
+  font: inherit;
+  font-size: .875rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
+}
+.header-btn-group > .nav-link + .nav-link { margin-left: -1px; }
+.header-btn-group > .nav-link:first-child { border-radius: 6px 0 0 6px; }
+.header-btn-group > .nav-link:last-child { border-radius: 0 6px 6px 0; }
+.header-btn-group > .nav-link:hover { position: relative; background: var(--header-menu-hover); border-color: var(--header-accent); }
+.header-btn-group > .nav-link[aria-current="page"] {
+  position: relative;
+  z-index: 1;
+  background: var(--header-current-bg, var(--header-menu-hover));
+  border-color: var(--header-accent);
+  box-shadow: inset 0 -2px 0 var(--header-accent);
+  font-weight: 600;
+}
+.header-btn-group > .nav-link:focus-visible {
+  position: relative;
+  z-index: 2;
+  outline: var(--header-focus-w, 2px) solid var(--header-focus);
+  outline-offset: 2px;
+}
+/* The "Aa" glyph of Display options, set in the product's serif. It is UI, so
+ * Display's own Typeface choice does not change it. */
+.aa-glyph { font-family: var(--font-serif); font-size: 17px; letter-spacing: -.02em; }
+@media (max-width: 700px) {
+  .header-btn-group > .nav-link { padding: 0 10px; font-size: var(--text-xs); }
+}
+
+/* ── Footer Kit: token override ───────────────────────────────────────────
+ * The footer README sanctions overriding its tokens on .neo-footer. On the
+ * desk: the footer line 7.9:1, the faded stamp 4.7:1 and "Fin." 6.2:1 (the kit
+ * defaults gave 3.7 and 3.5), and focus in folder brown, not magenta.
+ * --footer-text-dim is set in css/tokens.css. */
+.neo-footer {
+  --footer-text: var(--text-secondary);
+  --footer-text-strong: var(--text-primary);
+  --footer-border: var(--border);
+  --footer-border-strong: var(--border-strong);
+  --footer-accent: var(--focus);
+  --footer-hover: var(--surface-2);
+}
+
+/* ── Motion, touch, forced colours ─────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  /* The side column and the rail are left out of `animation: none`: their one
+   * animation is their height following the scroll position at the end of the
+   * page (css/shell.css), not movement that plays by itself, and without it a
+   * pane's top would be pushed under the header there. */
+  *:not(.ds-side, .ds-rail), *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .ds-side, .ds-rail { transition: none !important; scroll-behavior: auto !important; }
+}
+@media (max-width: 699px) {
+  .btn { min-height: 40px; }
+  .btn--xs { min-height: 32px; }
+}
+@media (forced-colors: active) {
+  ins { text-decoration: underline 2px; }
+  del { text-decoration: line-through 2px; }
+  .seg > button[aria-checked="true"],
+  .seg > button[aria-pressed="true"],
+  .seg > button[aria-selected="true"] { outline: 2px solid CanvasText; }
+  .toggle[aria-pressed="true"] .box { forced-color-adjust: none; background: CanvasText; }
+}

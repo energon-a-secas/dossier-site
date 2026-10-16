@@ -1,35 +1,78 @@
-/* Dossier's document palette. Shared kits consume the same semantic roles. */
+/* Dossier tokens: the "Archive paper" visual system (2026-10-16).
+   Contrast for every pair below is measured in the design spec, section 4, and the main
+   pairs are re-measured in a browser by scripts/check-html-import.mjs.
+   Light: warm paper sheets on an archive-box board, blue-black ink, manila folder stock.
+   Dark: paper-white ink on a deep ink desk. Print always uses the light values.
+
+   Keep this file linked after css/viz.css: it overrides that file's own :root palette
+   (--viz-c1 to -c8, --viz-grid, --viz-heat-*).
+
+   Theme switch: js/appearance.js sets html[data-appearance="light|dark"] before paint.
+   With no attribute (no script yet) the system preference decides. html[data-theme] is
+   NOT used: the Header Kit reserves it for visitor palettes, and setting it switches the
+   header skin off.
+
+   Every name the old file defined is still defined. Values that changed size:
+     --text-xs 12 -> 13 px, --text-sm 13 -> 15 px, --text-base 15 -> 17 px (now the READING
+     size: move UI rules that used it to --text-sm first), --text-lg 18 -> 20 px,
+     --text-3xl 40 -> 42 px, --radius-sm 5 -> 3 px, --radius/--radius-md 8 -> 5 px,
+     --radius-lg 12 -> 10 px. --font is now the UI face (Seravek, Segoe UI), not -apple-system.
+   Old aliases kept: --surface, --surface-toast, --border-subtle, --danger-hover, --mono,
+     --comparison-a (= --role-human), --comparison-b (= --role-agent), --viz-surface,
+     --viz-grid-2, --footer-text-dim. The Header Kit custom skin lives in css/style.css. */
+
 :root {
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+
+  /* Families. System stacks only: the page CSP allows self-hosted fonts and nothing else.
+     Reading: Iowan Old Style (Apple), Charter (Apple, many Linux), Georgia (Windows, Apple,
+     Linux with core fonts). Sitka Text and Cambria were dropped from the stack: they were never
+     measured, and Georgia was. js/display.js sets --measure from the face that actually rendered. */
+  --font-ui: Seravek, "Segoe UI", Ubuntu, "Noto Sans", ui-sans-serif, system-ui, sans-serif;
+  --font: var(--font-ui);
+  /* --font-serif is the product's serif, fixed: the Aa glyph and the welcome screen's titles
+     are UI and keep it. --font-reading is the reader's choice (Display: Typeface) and only
+     report prose and the compare reader use it. */
+  --font-serif: "Iowan Old Style", Charter, "Bitstream Charter", Georgia, serif;
+  --font-reading: var(--font-serif);
+  --font-reading-sans: var(--font-ui);
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --mono: var(--font-mono);
-  --bg: oklch(0.965 0.006 270);
-  --surface-1: oklch(0.995 0.002 270);
-  --surface-2: oklch(0.96 0.008 270);
-  --surface: var(--surface-1);
-  --surface-toast: var(--surface-1);
-  --text-primary: oklch(0.265 0.024 275);
-  --text-secondary: oklch(0.435 0.022 275);
-  --text-muted: oklch(0.51 0.02 275);
-  --border: oklch(0.88 0.013 275);
-  --border-subtle: var(--border);
-  --border-strong: oklch(0.72 0.018 275);
-  --accent: oklch(0.49 0.17 290);
-  --accent-bright: oklch(0.425 0.17 290);
-  --on-accent: oklch(0.995 0.002 290);
-  --ok: oklch(0.43 0.09 170);
-  --warn: oklch(0.47 0.105 70);
-  --danger: oklch(0.49 0.17 25);
-  --danger-hover: var(--danger);
-  --comparison-a: oklch(0.52 0.045 275);
-  --comparison-b: oklch(0.48 0.12 180);
-  --text-xs: .75rem;
-  --text-sm: .8125rem;
-  --text-base: .9375rem;
-  --text-lg: 1.125rem;
+  --numerals: lining-nums proportional-nums;   /* reading text: incident reports are mostly numbers */
+  --numerals-data: lining-nums tabular-nums;   /* tables, stats, counters, ins and del */
+
+  /* Type scale: seven steps. 13 15 17 20 24 32 42 px at the default root size.
+     --text-base is the READING size, not the UI size: UI uses --text-sm. */
+  --text-xs: .8125rem;
+  --text-sm: .9375rem;
+  --text-base: 1.0625rem;
+  --text-lg: 1.25rem;
   --text-xl: 1.5rem;
   --text-2xl: 2rem;
-  --text-3xl: 2.5rem;
+  --text-3xl: 2.625rem;
+  --leading-tight: 1.18;
+  --leading-ui: 1.4;
+  --leading-reading: 1.62;
+  --reading-size: var(--text-base);            /* Display: 16, 17 or 18 px */
+  --compare-reading-size: var(--reading-size); /* Display: "Compact" sets 15 px for Compare only */
+  --compare-leading: 1.6;
+  --measure-chars: 68;                         /* Display: Narrow 60, Normal 68, Wide 73 average advances; lines top out near 61, 69 and 75 characters */
+  /* Line length in characters of the face that rendered. js/display.js measures the average
+     advance of an English sample in the reading face and sets --measure-advance in em, so the
+     measure follows the text size of whatever element uses it (a 13 px note gets a shorter line
+     than 17 px prose, and Compact compare text keeps its character count). Without script the
+     fallback is 52ch at the default width, at most 75 characters in every face measured.
+     A face sets its own advance: --measure for roman reading text, --measure-italic for italic
+     reading text (quotes; Iowan italic is 13 percent narrower than its roman), --measure-ui for UI-face text held
+     to a line length (notes, captions, page intros). */
+  --measure: calc(var(--measure-chars) * var(--measure-advance, calc(52ch / 68)));
+  --measure-italic: calc(var(--measure-chars) * var(--measure-advance-italic, calc(52ch / 68)));
+  --measure-ui: calc(var(--measure-chars) * var(--measure-advance-ui, calc(52ch / 68)));
+  --measure-wide: 54rem;
+  --weight-ui: 400;
+  --weight-strong: 600;
+
+  /* Spacing: a 4 px base */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -39,58 +82,282 @@
   --space-8: 32px;
   --space-10: 40px;
   --space-12: 48px;
-  --radius-sm: 5px;
-  --radius: 8px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --space-16: 64px;
+
+  /* Radii follow hierarchy: paper is nearly square, controls are soft, popovers softer. */
+  --radius-sm: 3px;
+  --radius: 5px;
+  --radius-md: 5px;
+  --radius-lg: 10px;
+  --radius-sheet: 4px;
+  --radius-tab: 7px 7px 0 0;
+
+  /* Motion */
   --dur: 180ms;
   --dur-fast: 120ms;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
+
+  /* Layout */
   --control-height: 40px;
   --control-height-sm: 32px;
-  --shadow-card: 0 2px 8px oklch(0.2 0.02 270 / .04);
-  --shadow-modal: 0 20px 60px oklch(0.2 0.02 270 / .18);
+  --toolbar-h: 56px;
+  --rail-width: 288px;
+  --panel-width: 360px;
+  --panel-dock-min: 400px;   /* the panel docks only if every column keeps this width beside it */
+  --sheet-width: 920px;
+  --col-min: 340px;
+  --col-gap: 10px;
+  --col-gutter: 30px;        /* left padding of a compare column: revision bars and + - ~ glyphs */
+  --ruler-width: 10px;
+
+  /* Focus ring: one rule everywhere */
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  --focus-ring: 0 0 0 var(--focus-offset) var(--surface-1), 0 0 0 calc(var(--focus-offset) + var(--focus-width)) var(--focus);
+
+  /* Header bar colour for the browser chrome (meta theme-color), the same in both themes */
+  --header-theme-color: #171e2a;
+
+  --z-toolbar: 150;
   --z-sticky-header: 200;
+  --z-panel: 300;
+  --z-sheet: 400;
   --z-toast: 500;
+
+  /* Colour: light (also the print palette) */
+  --bg: oklch(0.932 0.009 225);
+  --surface-1: oklch(0.99 0.005 90);
+  --surface-2: oklch(0.966 0.01 88);
+  --manila: oklch(0.92 0.04 88);
+  --manila-strong: oklch(0.85 0.058 85);
+  --text-primary: oklch(0.255 0.03 258);
+  --text-secondary: oklch(0.39 0.026 258);
+  --text-muted: oklch(0.47 0.02 258);
+  --border: oklch(0.87 0.01 240);
+  --border-strong: oklch(0.56 0.016 250);
+  --accent: oklch(0.485 0.08 82);
+  --accent-bright: oklch(0.42 0.07 82);
+  --on-accent: oklch(0.99 0.005 90);
+  --focus: oklch(0.485 0.08 82);
+  --action: oklch(0.255 0.03 258);
+  --action-hover: oklch(0.36 0.03 258);
+  --on-action: oklch(0.99 0.005 90);
+  --ok: oklch(0.47 0.09 155);
+  --ok-soft: oklch(0.955 0.028 155);
+  --warn: oklch(0.5 0.1 68);
+  --warn-soft: oklch(0.955 0.035 85);
+  --danger: oklch(0.5 0.155 30);
+  --danger-soft: oklch(0.955 0.022 30);
+  --role-human: oklch(0.56 0.15 325);
+  --role-human-soft: oklch(0.95 0.025 325);
+  --role-human-ink: oklch(0.45 0.13 325);
+  --role-agent: oklch(0.66 0.145 58);
+  --role-agent-soft: oklch(0.95 0.03 68);
+  --role-agent-ink: oklch(0.47 0.105 55);
+  --role-fix: oklch(0.48 0.1 165);
+  --role-fix-soft: oklch(0.95 0.025 165);
+  --role-fix-ink: oklch(0.42 0.085 165);
+  --role-other: oklch(0.34 0.03 258);
+  --role-other-soft: oklch(0.945 0.008 258);
+  --role-other-ink: oklch(0.34 0.03 258);
+  --role-neutral: oklch(0.56 0.016 250);
+  --role-neutral-soft: oklch(0.95 0.004 250);
+  --role-neutral-ink: oklch(0.33 0.02 258);
+  --diff-ins-unit: oklch(0.963 0.016 248);
+  --diff-ins-word: oklch(0.885 0.055 250);
+  --diff-ins-line: oklch(0.5 0.14 255);
+  --diff-del-unit: oklch(0.963 0.018 35);
+  --diff-del-word: oklch(0.86 0.07 35);
+  --diff-del-line: oklch(0.53 0.16 35);
+  --diff-change-unit: oklch(0.958 0 0);
+  --diff-change-bar: oklch(0.39 0.026 258);
+  --diff-current: oklch(0.485 0.08 82);
+  --viz-c1: oklch(0.38 0.05 258);
+  --viz-c2: oklch(0.6 0.12 75);
+  --viz-c3: oklch(0.54 0.1 170);
+  --viz-c4: oklch(0.57 0.135 38);
+  --viz-c5: oklch(0.58 0.11 240);
+  --viz-c6: oklch(0.56 0.13 350);
+  --viz-c7: oklch(0.53 0.08 115);
+  --viz-c8: oklch(0.62 0.015 85);
+  --viz-grid: oklch(0.9 0.012 85);
+  --viz-heat-0: oklch(0.955 0.008 250);
+  --viz-heat-1: oklch(0.85 0.04 250);
+  --viz-heat-2: oklch(0.72 0.07 252);
+  --viz-heat-3: oklch(0.57 0.09 255);
+  --viz-heat-4: oklch(0.42 0.09 258);
+  --scrim: oklch(0.25 0.03 258 / .38);
+
+  --shadow-sheet: 0 1px 0 oklch(0.8 0.015 240), 0 14px 32px -20px oklch(0.3 0.03 250 / .45);
+  --shadow-card: var(--shadow-sheet);
+  --shadow-pop: 0 1px 2px oklch(0.3 0.03 250 / .12), 0 12px 32px -8px oklch(0.3 0.03 250 / .28);
+  --shadow-modal: 0 24px 64px -12px oklch(0.25 0.03 258 / .35);
+
+  /* Names the current CSS, css/viz.css and the footer kit already read */
+  --surface: var(--surface-1);
+  --surface-toast: var(--surface-1);
+  --border-subtle: var(--border);
+  --danger-hover: var(--danger);
+  --comparison-a: var(--role-human);
+  --comparison-b: var(--role-agent);
   --viz-surface: var(--surface-1);
-  --viz-grid: var(--border);
   --viz-grid-2: var(--border);
-  --viz-c1: var(--comparison-a);
-  --viz-c2: var(--comparison-b);
-  --viz-c3: var(--accent);
-  --viz-c4: var(--warn);
-  --viz-c5: oklch(0.53 0.15 340);
-  --viz-c6: oklch(0.49 0.1 235);
-  --viz-c7: oklch(0.52 0.13 50);
-  --viz-c8: oklch(0.49 0.09 135);
-  --footer-text-dim: var(--text-muted);
+  --footer-text-dim: var(--text-primary);   /* the kit fades it to .75; primary ink keeps it above 4.5:1 */
 }
 
-/* A quiet palette for reading in a dim room. Paper colors remain the print default. */
 @media screen {
   :root[data-appearance="dark"] {
     color-scheme: dark;
-    --bg: oklch(0.205 0.015 275);
-    --surface-1: oklch(0.245 0.018 275);
-    --surface-2: oklch(0.285 0.021 275);
-    --text-primary: oklch(0.945 0.008 275);
-    --text-secondary: oklch(0.8 0.016 275);
-    --text-muted: oklch(0.7 0.021 275);
-    --border: oklch(0.36 0.023 275);
-    --border-strong: oklch(0.51 0.026 275);
-    --accent: oklch(0.78 0.125 295);
-    --accent-bright: oklch(0.85 0.085 295);
-    --on-accent: oklch(0.22 0.035 295);
-    --ok: oklch(0.76 0.12 170);
-    --warn: oklch(0.81 0.13 80);
-    --danger: oklch(0.76 0.13 25);
-    --comparison-a: oklch(0.75 0.055 275);
-    --comparison-b: oklch(0.77 0.12 180);
-    --viz-c5: oklch(0.77 0.13 340);
-    --viz-c6: oklch(0.75 0.1 235);
-    --viz-c7: oklch(0.77 0.12 50);
-    --viz-c8: oklch(0.75 0.1 135);
-    --shadow-card: 0 2px 10px oklch(0.1 0.01 275 / .18);
-    --shadow-modal: 0 20px 60px oklch(0.1 0.01 275 / .5);
+    --bg: oklch(0.185 0.024 258);
+    --surface-1: oklch(0.225 0.026 258);
+    --surface-2: oklch(0.262 0.028 258);
+    --manila: oklch(0.3 0.03 80);
+    --manila-strong: oklch(0.4 0.045 80);
+    --text-primary: oklch(0.935 0.014 85);
+    --text-secondary: oklch(0.83 0.018 85);
+    --text-muted: oklch(0.74 0.02 85);
+    --border: oklch(0.335 0.026 258);
+    --border-strong: oklch(0.56 0.03 258);
+    --accent: oklch(0.83 0.085 88);
+    --accent-bright: oklch(0.89 0.06 88);
+    --on-accent: oklch(0.2 0.03 258);
+    --focus: oklch(0.83 0.085 88);
+    --action: oklch(0.935 0.014 85);
+    --action-hover: oklch(0.85 0.016 85);
+    --on-action: oklch(0.2 0.03 258);
+    --ok: oklch(0.79 0.11 155);
+    --ok-soft: oklch(0.29 0.04 155);
+    --warn: oklch(0.83 0.11 80);
+    --warn-soft: oklch(0.3 0.04 80);
+    --danger: oklch(0.77 0.13 30);
+    --danger-soft: oklch(0.29 0.045 30);
+    --role-human: oklch(0.66 0.13 325);
+    --role-human-soft: oklch(0.3 0.05 325);
+    --role-human-ink: oklch(0.84 0.08 325);
+    --role-agent: oklch(0.76 0.14 60);
+    --role-agent-soft: oklch(0.3 0.05 60);
+    --role-agent-ink: oklch(0.85 0.1 65);
+    --role-fix: oklch(0.76 0.11 172);
+    --role-fix-soft: oklch(0.29 0.045 172);
+    --role-fix-ink: oklch(0.85 0.085 172);
+    --role-other: oklch(0.9 0.02 258);
+    --role-other-soft: oklch(0.3 0.015 258);
+    --role-other-ink: oklch(0.9 0.015 258);
+    --role-neutral: oklch(0.62 0.02 250);
+    --role-neutral-soft: oklch(0.3 0.012 258);
+    --role-neutral-ink: oklch(0.9 0.012 85);
+    --diff-ins-unit: oklch(0.265 0.04 252);
+    --diff-ins-word: oklch(0.37 0.085 252);
+    --diff-ins-line: oklch(0.77 0.12 250);
+    --diff-del-unit: oklch(0.265 0.038 35);
+    --diff-del-word: oklch(0.4 0.08 35);
+    --diff-del-line: oklch(0.77 0.13 38);
+    --diff-change-unit: oklch(0.265 0.006 258);
+    --diff-change-bar: oklch(0.83 0.018 85);
+    --diff-current: oklch(0.83 0.085 88);
+    --viz-c1: oklch(0.86 0.03 85);
+    --viz-c2: oklch(0.8 0.12 80);
+    --viz-c3: oklch(0.75 0.11 170);
+    --viz-c4: oklch(0.72 0.11 38);
+    --viz-c5: oklch(0.76 0.1 240);
+    --viz-c6: oklch(0.75 0.12 350);
+    --viz-c7: oklch(0.76 0.09 115);
+    --viz-c8: oklch(0.58 0.02 85);
+    --viz-grid: oklch(0.32 0.024 258);
+    --viz-heat-0: oklch(0.27 0.02 258);
+    --viz-heat-1: oklch(0.38 0.05 252);
+    --viz-heat-2: oklch(0.52 0.08 250);
+    --viz-heat-3: oklch(0.67 0.09 248);
+    --viz-heat-4: oklch(0.82 0.08 245);
+    --scrim: oklch(0.06 0.02 258 / .62);
+
+    --shadow-sheet: 0 1px 0 oklch(0.12 0.02 258), 0 16px 36px -18px oklch(0.08 0.02 258 / .8);
+    --shadow-card: var(--shadow-sheet);
+    --shadow-pop: 0 1px 2px oklch(0.08 0.02 258 / .5), 0 14px 36px -8px oklch(0.06 0.02 258 / .7);
+    --shadow-modal: 0 24px 64px -12px oklch(0.05 0.02 258 / .8);
   }
 }
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-appearance]) {
+    color-scheme: dark;
+    --bg: oklch(0.185 0.024 258);
+    --surface-1: oklch(0.225 0.026 258);
+    --surface-2: oklch(0.262 0.028 258);
+    --manila: oklch(0.3 0.03 80);
+    --manila-strong: oklch(0.4 0.045 80);
+    --text-primary: oklch(0.935 0.014 85);
+    --text-secondary: oklch(0.83 0.018 85);
+    --text-muted: oklch(0.74 0.02 85);
+    --border: oklch(0.335 0.026 258);
+    --border-strong: oklch(0.56 0.03 258);
+    --accent: oklch(0.83 0.085 88);
+    --accent-bright: oklch(0.89 0.06 88);
+    --on-accent: oklch(0.2 0.03 258);
+    --focus: oklch(0.83 0.085 88);
+    --action: oklch(0.935 0.014 85);
+    --action-hover: oklch(0.85 0.016 85);
+    --on-action: oklch(0.2 0.03 258);
+    --ok: oklch(0.79 0.11 155);
+    --ok-soft: oklch(0.29 0.04 155);
+    --warn: oklch(0.83 0.11 80);
+    --warn-soft: oklch(0.3 0.04 80);
+    --danger: oklch(0.77 0.13 30);
+    --danger-soft: oklch(0.29 0.045 30);
+    --role-human: oklch(0.66 0.13 325);
+    --role-human-soft: oklch(0.3 0.05 325);
+    --role-human-ink: oklch(0.84 0.08 325);
+    --role-agent: oklch(0.76 0.14 60);
+    --role-agent-soft: oklch(0.3 0.05 60);
+    --role-agent-ink: oklch(0.85 0.1 65);
+    --role-fix: oklch(0.76 0.11 172);
+    --role-fix-soft: oklch(0.29 0.045 172);
+    --role-fix-ink: oklch(0.85 0.085 172);
+    --role-other: oklch(0.9 0.02 258);
+    --role-other-soft: oklch(0.3 0.015 258);
+    --role-other-ink: oklch(0.9 0.015 258);
+    --role-neutral: oklch(0.62 0.02 250);
+    --role-neutral-soft: oklch(0.3 0.012 258);
+    --role-neutral-ink: oklch(0.9 0.012 85);
+    --diff-ins-unit: oklch(0.265 0.04 252);
+    --diff-ins-word: oklch(0.37 0.085 252);
+    --diff-ins-line: oklch(0.77 0.12 250);
+    --diff-del-unit: oklch(0.265 0.038 35);
+    --diff-del-word: oklch(0.4 0.08 35);
+    --diff-del-line: oklch(0.77 0.13 38);
+    --diff-change-unit: oklch(0.265 0.006 258);
+    --diff-change-bar: oklch(0.83 0.018 85);
+    --diff-current: oklch(0.83 0.085 88);
+    --viz-c1: oklch(0.86 0.03 85);
+    --viz-c2: oklch(0.8 0.12 80);
+    --viz-c3: oklch(0.75 0.11 170);
+    --viz-c4: oklch(0.72 0.11 38);
+    --viz-c5: oklch(0.76 0.1 240);
+    --viz-c6: oklch(0.75 0.12 350);
+    --viz-c7: oklch(0.76 0.09 115);
+    --viz-c8: oklch(0.58 0.02 85);
+    --viz-grid: oklch(0.32 0.024 258);
+    --viz-heat-0: oklch(0.27 0.02 258);
+    --viz-heat-1: oklch(0.38 0.05 252);
+    --viz-heat-2: oklch(0.52 0.08 250);
+    --viz-heat-3: oklch(0.67 0.09 248);
+    --viz-heat-4: oklch(0.82 0.08 245);
+    --scrim: oklch(0.06 0.02 258 / .62);
+
+    --shadow-sheet: 0 1px 0 oklch(0.12 0.02 258), 0 16px 36px -18px oklch(0.08 0.02 258 / .8);
+    --shadow-card: var(--shadow-sheet);
+    --shadow-pop: 0 1px 2px oklch(0.08 0.02 258 / .5), 0 14px 36px -8px oklch(0.06 0.02 258 / .7);
+    --shadow-modal: 0 24px 64px -12px oklch(0.05 0.02 258 / .8);
+  }
+}
+
+/* Reading options from the Display dialog. js/appearance.js sets these attributes before
+   the first paint from the stored choice, and js/display.js when the reader changes one.
+   They change report prose and the compare reader, never UI chrome. Absent attributes mean
+   the defaults above: Medium text (17 px), Normal width (68), Serif, compare text as reading. */
+:root[data-reading-size="small"] { --reading-size: 1rem; }
+:root[data-reading-size="large"] { --reading-size: 1.125rem; }
+:root[data-reading-size="xlarge"] { --reading-size: 1.25rem; }
+:root[data-measure="narrow"] { --measure-chars: 60; }
+:root[data-measure="wide"] { --measure-chars: 73; }
+:root[data-typeface="sans"] { --font-reading: var(--font-reading-sans); }
+:root[data-compare-size="compact"] { --compare-reading-size: var(--text-sm); --compare-leading: 1.55; }

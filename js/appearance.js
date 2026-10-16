@@ -3,7 +3,7 @@
  * module is deferred, and anything decided after the first paint is a flash.
  * External rather than inline, so the page policy needs no new hash.
  *
- * Two jobs, both read from storage and the address only:
+ * Three jobs, all read from storage and the address only:
  *
  * 1. Colour. `html[data-appearance]` is the resolved light or dark palette and
  *    `html[data-appearance-pref]` the visitor's choice: system, light or dark.
@@ -25,12 +25,28 @@
  *    that (`"failed"`). Neither shows the shell: without its modules every
  *    control in it is dead.
  *
+ * 3. Reading options, so report text has its size, line width and face in the
+ *    first frame: `data-reading-size`, `data-measure`, `data-typeface` and
+ *    `data-compare-size` on <html>, read from `dossier-site:reading`, which
+ *    js/display.js writes through the Persist Kit (`{"__v": 1, "data": ...}`).
+ *    css/tokens.css turns them into --reading-size, --measure-chars,
+ *    --font-reading and --compare-reading-size. This file only reads.
+ *
  * Do not use `data-theme` here: that is the Header Kit's visitor palette.
  */
 (() => {
   const root = document.documentElement;
   const APPEARANCE_KEY = 'dossier-site:appearance';
   const PREFERENCES_KEY = 'dossier-site:preferences';
+  const READING_KEY = 'dossier-site:reading';
+  // Mirrors READING in js/display.js. The first value of each is the default,
+  // and a stored value outside the list reads as the default.
+  const READING = {
+    readingSize: ['medium', 'small', 'large', 'xlarge'],
+    measure: ['normal', 'narrow', 'wide'],
+    typeface: ['serif', 'sans'],
+    compareSize: ['reading', 'compact'],
+  };
   // A boot still running after this long gets a visible "Loading" line.
   const SLOW_BOOT_MS = 900;
 
@@ -53,6 +69,19 @@
       else localStorage.setItem(APPEARANCE_KEY, preference);
     } catch { /* Keep the session choice. */ }
     apply();
+  }
+
+  /** The reader's text options, as attributes css/tokens.css reads. */
+  function applyReading() {
+    let saved = null;
+    try {
+      const parsed = JSON.parse(localStorage.getItem(READING_KEY) || 'null');
+      if (parsed && parsed.__v === 1 && parsed.data && typeof parsed.data === 'object') saved = parsed.data;
+    } catch { /* No stored choice: the defaults. */ }
+    for (const key of Object.keys(READING)) {
+      const values = READING[key];
+      root.dataset[key] = saved && values.includes(saved[key]) ? saved[key] : values[0];
+    }
   }
 
   /** Mirrors js/router.js and js/share.js, which are modules and not loaded yet. */
@@ -117,10 +146,12 @@
   shapeWorkspace();
   watchBoot();
   apply();
+  applyReading();
 
   document.addEventListener('dossier-appearance', (event) => choose(event.detail && event.detail.preference));
   system.addEventListener('change', apply);
   window.addEventListener('storage', (event) => {
+    if (event.key === READING_KEY || event.key === null) applyReading();
     if (event.key !== APPEARANCE_KEY && event.key !== null) return;
     preference = valid(event.key === null ? null : event.newValue);
     apply();
