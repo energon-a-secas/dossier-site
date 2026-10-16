@@ -28,7 +28,7 @@ import { syncToolbar } from './toolbar.js';
 import { createReading } from './reading.js';
 import { bindPopovers, closePopover, isPhone, PHONE } from './popover.js';
 import { createSync, elementScroller } from './sync.js';
-import { frameScroller } from './frame.js';
+import { frameScroller, blockedLinkSentence } from './frame.js';
 import { blankSet, filledColumns, sameContent } from './model.js';
 import { sanitizeSet } from './records.js';
 import { readSet, writeSet, listSets, onExternalChange } from './store.js';
@@ -81,9 +81,6 @@ const {
   rememberScroll, restoreScroll, scheduleCounter, counterInfo, step, announce,
   readingPlace, catchUp, caughtUp,
 } = createReading(compare);
-
-/** The longest link address a toast repeats; a longer one is cut short. */
-const LINK_SHOWN = 80;
 
 let loading = Promise.resolve();
 /** The page title the Reports view uses, put back when Compare is left. */
@@ -275,12 +272,17 @@ function commit(next, { save: shouldSave = true } = {}) {
   save();
 }
 
-/** A save waits a moment for the next keystroke; `flush` saves now. */
+/**
+ * A save waits a moment for the next keystroke; `flush` saves now and
+ * resolves once the write (or the one already under way) has landed.
+ */
 const save = (() => {
   let timer = 0;
+  let writing = Promise.resolve();
   const run = () => {
     timer = 0;
-    persistNow();
+    writing = persistNow();
+    return writing;
   };
   const schedule = () => {
     clearTimeout(timer);
@@ -288,9 +290,9 @@ const save = (() => {
   };
   schedule.pending = () => Boolean(timer);
   schedule.flush = () => {
-    if (!timer) return;
+    if (!timer) return writing;
     clearTimeout(timer);
-    run();
+    return run();
   };
   return schedule;
 })();
@@ -348,21 +350,6 @@ function render() {
   for (const fn of compare.hooks.afterRender || []) fn(compare);
 }
 
-/**
- * Why a link in an Original column did nothing. A relative address names a
- * file that sat beside the report; anything with a scheme of its own
- * (`data:`, `file:`, `javascript:`) was refused, and the sentence says so
- * without repeating it.
- */
-function blockedLinkSentence(href) {
-  const raw = String(href || '').trim();
-  if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//')) {
-    return 'That link was not opened: Dossier only opens web and mail links.';
-  }
-  const shown = raw.length > LINK_SHOWN ? `${raw.slice(0, LINK_SHOWN - 1)}\u2026` : raw;
-  return `That link points at ${shown}, a file beside the report that Dossier does not have.`;
-}
-
 function headInfo(col, record) {
   const base = { stats: record?.stats || null };
   return compare.hooks.headInfo ? { ...base, ...compare.hooks.headInfo(col, record) } : base;
@@ -386,11 +373,18 @@ function registerScroller(colId, record) {
   for (const fn of compare.hooks.onRegister || []) fn(colId);
 }
 
+/**
+ * The view is shown. Columns drawn while it was hidden (the example opened
+ * from the welcome screen) measured every heading at 0, so the positions are
+ * taken again now and once more after layout, and the counter follows.
+ */
 function enter() {
+  compare.sync.remeasure();
   render();
   requestAnimationFrame(() => {
     for (const colId of compare.ui.scroll.keys()) restoreScroll(colId);
     compare.sync.remeasure();
+    scheduleCounter();
   });
 }
 
@@ -436,6 +430,8 @@ export const api = {
   persistNow,
   rememberScroll,
   scheduleCounter,
+  /** Save a change still waiting now; resolves once it is written. */
+  flushSave: () => save.flush(),
   step,
   /**
    * A seam for the analysis features: tell a screen reader where a move

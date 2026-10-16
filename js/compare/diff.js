@@ -33,9 +33,9 @@ export { tokenize, inlineTokens, tokensToInline } from './diff-tokens.js';
 export { myers, wordDiff } from './diff-words.js';
 
 /** A removed and an added unit with at least this much in common are one changed unit. */
-export const PAIR_MIN = 0.4;
+const PAIR_MIN = 0.4;
 /** Above this share of changed or added units, a column is too different to mark word by word. */
-export const TOO_DIFFERENT = 0.5;
+const TOO_DIFFERENT = 0.5;
 const UNIT_MAX_D = 1500;
 const BUDGET_MS = 250;
 /** A pairing matrix larger than this pairs in order instead. */
@@ -47,7 +47,7 @@ const MEMO_MAX = 24;
 const GROUP = { h: 'h', tr: 'tr', pre: 'pre' };
 
 /** Units of a block list, in render order, with what the diff needs of each. */
-export function unitsOf(blocks) {
+function unitsOf(blocks) {
   const units = [];
   visitUnits(blocks, (u) => {
     const node = u.node;
@@ -86,7 +86,7 @@ function wordBag(unit) {
 }
 
 /** Dice similarity of two units' words, 0 to 1. */
-export function unitSimilarity(x, y) {
+function unitSimilarity(x, y) {
   if (x.group !== y.group) return 0;
   const a = wordBag(x);
   const b = wordBag(y);

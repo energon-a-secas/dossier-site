@@ -43,8 +43,10 @@
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://dossier.neorgon.com/">
   <meta property="og:locale" content="en_US">
-  <!-- The colour of the header bar, which is the same in light and dark. It
-       must equal theme_color in site.webmanifest (smoke check 24). -->
+  <!-- #171e2a is the middle stop of the header bar's gradient (--header-bg-mid,
+       the custom skin in css/style.css), and the bar is the same ink in light
+       and dark, so there is one value. It must equal theme_color in
+       site.webmanifest (smoke check 24). -->
   <meta name="theme-color" content="#171e2a">
   <meta property="og:image" content="https://dossier.neorgon.com/og-preview.jpg">
   <meta property="og:image:width" content="1200">
@@ -190,12 +192,21 @@
         <section class="ds-rail__group" aria-labelledby="libraryHeading">
           <div class="ds-rail__head">
             <h2 id="libraryHeading">Saved reports</h2>
-            <button type="button" class="btn btn--quiet btn--sm" data-action="new-report" aria-label="New report">New</button>
-            <button type="button" class="btn btn--quiet btn--sm ds-rail__hide" data-action="toggle-rail" aria-controls="rail" aria-expanded="true" aria-label="Hide saved reports">Hide</button>
+            <button type="button" class="btn btn--quiet btn--sm btn--icon ds-rail__hide" data-action="toggle-rail" aria-controls="rail" aria-expanded="true" aria-label="Hide saved reports" title="Hide saved reports"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><path d="M6 2.5v11" stroke="currentColor"/><path d="M11 6 9 8l2 2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           </div>
-          <label class="visually-hidden" for="reportFilter">Filter saved reports</label>
-          <input type="search" id="reportFilter" placeholder="Find a saved report" autocomplete="off"
-                 enterkeyhint="search" maxlength="120">
+          <!-- The filter: a search mark inside on the left, the key that
+               focuses it on the right (js/chrome.js keeps that hint true to a
+               remap), and New beside it. -->
+          <div class="ds-rail__find">
+            <div class="ds-rail__field">
+              <label class="visually-hidden" for="reportFilter">Filter saved reports</label>
+              <svg class="ds-rail__search" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m10.25 10.25 3.25 3.25" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              <input type="search" id="reportFilter" placeholder="Filter" autocomplete="off"
+                     enterkeyhint="search" maxlength="120" aria-keyshortcuts="/">
+              <kbd class="ds-rail__key" id="reportFilterKey" aria-hidden="true">/</kbd>
+            </div>
+            <button type="button" class="btn btn--sm ds-rail__new" data-action="new-report"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>New<span class="visually-hidden"> report</span></span></button>
+          </div>
           <ul class="ds-library" id="library"></ul>
         </section>
 

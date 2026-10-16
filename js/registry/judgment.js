@@ -255,7 +255,7 @@ export const JUDGMENT = [
         note: 'A remote URL is not framed: this page\'s policy refuses third-party frames, so the block renders a link and says why. Use "html" for content you want shown inline.',
       }),
       height: int({ note: 'Frame height in pixels. Defaults to 780; single-artifact reports fit the viewport.' }),
-      scripts: bool({ note: 'Allow inline controls inside the isolated frame. Off by default. External scripts and access to the workspace are blocked.' }),
+      scripts: bool({ note: 'Let the reader run the report\'s own scripts, in a sealed frame with no network, no storage and no access to this page. The report still opens as a static copy, with its scripts off, until the reader runs them. Off by default.' }),
     },
     sample: {
       type: 'embed',
@@ -271,10 +271,10 @@ export const JUDGMENT = [
           add('info', 'A remote embed URL is shown as a link, not a frame, because this page refuses third-party frames. Inline the HTML in "html" to render it.');
         }
         if (b.scripts === true) {
-          add('info', 'Inline controls run in an isolated preview. External resources and access to the workspace are blocked.');
+          add('info', 'The reader can run this report\'s scripts, in a sealed frame with no network, no storage and no access to this page. Until then it shows a static copy with its scripts off.');
         }
         if (typeof b.html === 'string' && /<script\b/i.test(b.html) && b.scripts !== true) {
-          add('info', 'The embedded HTML contains a script tag, which will not run. Set "scripts": true if it is load bearing, or convert the output to blocks.');
+          add('info', 'The embedded HTML contains a script tag, which will not run. Set "scripts": true to let the reader run it, or convert the output to blocks.');
         }
       },
     ],

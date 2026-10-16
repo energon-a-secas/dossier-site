@@ -21,19 +21,20 @@ Then open http://localhost:8899. It must be served over HTTP: the app is ES modu
 | `js/neorgon-beacon.js` | 500 | none |
 | `js/validate.js` | 485 | `validate`, `claimAudit` |
 | `js/events.js` | 452 | `elements`, `bindEvents`, `showFindings`, `showSourceTab` |
+| `js/open.js` | 426 | `beginOpen`, `openGeneration`, `releaseOpen`, `applyRead`, `onComparisonBundle` |
+| `js/share.js` | 419 | `INFLATE_MAX_BYTES`, `encodeDocument`, `COMPARISON_LINK_MAX`, `encodeComparison`, `decodeComparison` |
+| `js/parse.js` | 390 | `parse`, `initYaml` |
 | `js/viz.js` | 387 | `skeleton`, `empty`, `error`, `statGrid`, `bars` |
-| `js/parse.js` | 380 | `parse`, `initYaml` |
+| `js/derive.js` | 386 | `markDerived`, `wasDerived`, `derive` |
+| `js/export.js` | 386 | `exportJson`, `exportYaml`, `exportStandaloneHtml`, `exportPrint`, `exportSageDeck` |
+| `js/boot.js` | 371 | `boot` |
 | `js/forms.js` | 366 | `blockForm`, `metaForm` |
 | `js/render/index.js` | 363 | `renderReport`, `blockHtml` |
-| `js/export.js` | 318 | `exportJson`, `exportYaml`, `exportStandaloneHtml`, `exportPrint`, `exportSageDeck` |
-| `js/share.js` | 316 | `encodeDocument`, `decodeFragment`, `fragmentCarriesReport`, `loadFromUrl`, `loadFromUrlAsync` |
+| `js/store.js` | 337 | `listReports`, `readReport`, `writeReport`, `deleteReport`, `estimateUsage` |
 | `js/registry/judgment.js` | 311 | `COMPARE_MODES`, `COMPARE_KINDS`, `JUDGMENT` |
-| `js/derive.js` | 302 | `markDerived`, `wasDerived`, `derive` |
 | `js/neokeys/core.js` | 287 | `RESERVED`, `CONVENTIONAL`, `onChange`, `setTypingSelector`, `isTypingTarget` |
 | `js/catalog.js` | 268 | `createCatalogDialog`, `openCatalog` |
 | `js/registry/measurement.js` | 267 | `CHART_FORMS`, `BETTER`, `MEASUREMENT` |
-| `js/store.js` | 258 | `listReports`, `readReport`, `writeReport`, `deleteReport`, `estimateUsage` |
-| `js/adapters/html.js` | 258 | `toDossier` |
 | `js/registry/work.js` | 248 | `FILE_STATES`, `CHECK_STATES`, `WORK` |
 | `js/editor.js` | 212 | `createEditor`, `formatJson` |
 | `js/render/judgment.js` | 198 | `JUDGMENT_TYPES`, `renderJudgmentBlock` |
@@ -45,32 +46,33 @@ Then open http://localhost:8899. It must be served over HTTP: the app is ES modu
 | `js/render/charts.js` | 178 | `renderChartBlock` |
 | `js/pipeline.js` | 176 | `applyText`, `applyParsed`, `applyDocument`, `rerender`, `claims` |
 | `js/chrome.js` | 175 | `setMode`, `followVisitorChromeChoice`, `mode`, `toggleMode`, `initialMode` |
-| `js/boot.js` | 169 | `boot` |
 | `js/neorgon-dom.js` | 157 | `escHtml`, `debounce`, `throttle`, `clamp`, `uid` |
 | `js/neorgon-persist.js` | 152 | `safeGet`, `safeSet`, `safeRemove`, `safeGetJSON`, `safeSetJSON` |
 | `js/render/compare.js` | 148 | `compareHtml`, `slopeSvg` |
 | `js/render/narrative.js` | 143 | `NARRATIVE_TYPES`, `renderNarrativeBlock` |
 | `js/findings-panel.js` | 141 | `createFindingsPanel`, `updateFindingsPanel` |
 | `js/neokeys/fleet.js` | 139 | `setSource`, `open`, `close`, `toggle`, `count` |
+| `js/read.js` | 136 | `readText`, `carriesDerived`, `readRecord` |
 | `js/registry/types.js` | 135 | `TYPES`, `field`, `str`, `text`, `num` |
 | `js/registry/results.js` | 131 | `FINDING_LEVELS`, `TEST_STATES`, `RESULTS` |
 | `js/adapters/index.js` | 127 | `ADAPTERS`, `detect` |
+| `js/render/results.js` | 124 | `RESULTS_TYPES`, `renderResultsBlock` |
 | `js/adapters/junit.js` | 123 | `toDossier` |
+| `js/adapters/html.js` | 122 | `toDossier`, `htmlHasScripts`, `hasScripts`, `hasScriptsByPattern` |
 | `js/library.js` | 118 | `persistCurrent`, `refreshLibrary`, `filterLibrary`, `openStored`, `removeStored` |
 | `js/neokeys/chrome.js` | 118 | `isHidden`, `setScope`, `isFull`, `show`, `hide` |
 | `js/neokeys/index.js` | 116 | `init` |
 | `js/render/format.js` | 115 | `formatNumber`, `formatBytes`, `formatDuration`, `formatDate`, `formatCell` |
 | `js/render/work.js` | 110 | `WORK_TYPES`, `renderWorkBlock` |
 | `js/adapters/lighthouse.js` | 108 | `toDossier` |
+| `js/state.js` | 105 | `state`, `loadSaved`, `setPreference`, `forgetPreference` |
 | `js/adapters/ctrf.js` | 104 | `toDossier` |
 | `js/adapters/sarif.js` | 101 | `toDossier` |
 | `js/adapters/numstat.js` | 93 | `toDossier` |
 | `js/neokeys/store.js` | 88 | `enabled`, `open`, `toggle` |
 | `js/adapters/commits.js` | 85 | `toDossier` |
 | `js/render/dispatch.js` | 73 | `rendererFor`, `renderBlock`, `missingRenderers`, `rendererClashes` |
-| `js/render/results.js` | 72 | `RESULTS_TYPES`, `renderResultsBlock` |
 | `js/render/outline.js` | 71 | `outline`, `outlineFlat` |
-| `js/state.js` | 66 | `state`, `loadSaved`, `save`, `setPreference` |
 | `js/render/url.js` | 66 | `safeHref`, `safeImageSrc` |
 | `js/render/markdown.js` | 63 | `inlineMarkdown`, `emptyFrame`, `safeLink` |
 | `js/neorgon-navigation.js` | 44 | `updateQuery`, `createQueryHistory` |
@@ -93,7 +95,7 @@ than a lost preference.
 | Where | Key | Holds |
 |---|---|---|
 | IndexedDB | `dossier` database, v1 | `reports` store: the documents. `meta` store: title, kind, status, page count, timestamps |
-| localStorage | `dossier-site:preferences` | Only validated preferences, through the fleet Persist Kit: source tab, findings panel open, last report id, read mode |
+| localStorage | `dossier-site:preferences` | Only validated preferences, through the fleet Persist Kit: source tab, findings panel open, last report id, read mode, side rail open |
 | localStorage | `neokeys-prefs` | The kit's own shortcut remaps and disable switch, per site |
 | Cookie | `neo_chrome` | The kit's chrome preference, scoped to `.neorgon.com`, fleet wide by design |
 

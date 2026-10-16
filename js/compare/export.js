@@ -98,6 +98,9 @@ function readerCopy(record, groups, ids = null) {
   // A notice's pointer at a control the file does not have ("Turn on Word
   // marks"): the file's heads carry no buttons.
   for (const hint of copy.querySelectorAll('.col-note__live')) hint.remove();
+  // The base's name, kept current on screen without a redraw
+  // (js/compare/marks.js `baseName`), is plain text in a file.
+  for (const name of copy.querySelectorAll('[data-base-ref]')) name.replaceWith(name.textContent);
   for (const el of copy.querySelectorAll('.u-current')) el.classList.remove('u-current');
   for (const el of copy.querySelectorAll('[data-text-surface]')) el.removeAttribute('data-text-surface');
   copy.removeAttribute('style');
@@ -164,7 +167,7 @@ const EXTRA_CSS = `
  *
  * @returns {Promise<string>}
  */
-export async function comparisonHtml() {
+async function comparisonHtml() {
   const { api, analysis } = current;
   const { compare } = api;
   const set = compare.set;

@@ -182,6 +182,7 @@ export function renderSections(host, set, baseId, headingsOf) {
   };
   const coverage = data.coverage.map((c) => {
     const who = `<b>${escHtml(nameOf(set, c.colId).ref)}</b>`;
+    if (!c.total) return c.adds ? `<p>${who} has ${c.adds} section${c.adds === 1 ? '' : 's'} the base does not.</p>` : '';
     const of = c.covered === c.total ? `all ${c.total}` : `${c.covered} of ${c.total}`;
     const renamed = c.renamed ? ` (${c.renamed} under another name)` : '';
     const adds = c.adds ? ` and adds ${c.adds}` : '';
@@ -189,13 +190,17 @@ export function renderSections(host, set, baseId, headingsOf) {
   }).join('');
   const unreadable = data.unreadable.map((id) => `<p><b>${escHtml(nameOf(set, id).ref)}</b> runs its own scripts, so its headings cannot be read.</p>`).join('');
 
+  // A base with no sections still shows the sections only other columns
+  // have: those rows used to go with the table.
+  const none = data.rows.length ? '' : `<p class="panel__intro">${escHtml(base.ref)} has no section headings to line up${data.extras.length ? ', so every section below is in another column only' : ''}.</p>`;
   host.innerHTML = `
     <p class="panel__intro">Rows follow ${escHtml(base.ref)}, the base. Select a row to bring that section to the reading line in every column.</p>
-    ${data.rows.length ? `<table class="secmap">
+    ${none}
+    ${data.rows.length || data.extras.length ? `<table class="secmap">
       <thead><tr><th scope="col">Section in ${escHtml(base.ref)}</th>${headCells}</tr></thead>
       <tbody>${data.rows.map(rowHtml).join('')}
       ${data.extras.length ? `<tr class="group"><td colspan="${columns.length + 1}">Only in other columns</td></tr>${data.extras.map(extraHtml).join('')}` : ''}
-      </tbody></table>` : `<p class="panel__intro">${escHtml(base.ref)} has no section headings to line up.</p>`}
+      </tbody></table>` : ''}
     <div class="coverage">${coverage}${unreadable}<p>Matched by heading text, not by meaning.</p></div>
     <p class="legend"><span>${icon('check')}Present</span><span><span class="ren">Renamed</span>similar heading</span><span class="miss">Missing</span></p>
     <div class="panel__foot"><p>Changing the base column changes every row.</p></div>`;

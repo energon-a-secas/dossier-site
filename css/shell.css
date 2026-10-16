@@ -115,6 +115,7 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
   html[data-dossier-mode="build"] .ds-shell,
   .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) {
     grid-template-columns: minmax(0, 1fr) var(--side-col);
+    grid-template-rows: auto 1fr;
     grid-template-areas: "bar side" "stage side";
   }
   html[data-dossier-mode="read"] .ds-shell { --side-col: 360px; }
@@ -178,9 +179,14 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
   }
 }
 
+/* Whenever the desk has a minimum height (a docked pane, see the note at the
+ * top), the free space under a short report goes to the stage row. Two auto
+ * rows shared it, and a 170 to 240 px band of desk opened between the report
+ * bar and the sheet. */
 @media (min-width: 1280px) {
   html[data-dossier-rail="open"] .ds-shell {
     grid-template-columns: var(--rail-width) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
     grid-template-areas: "rail bar" "rail stage";
     min-height: var(--pane-max);
   }
@@ -243,16 +249,36 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
   color: var(--text-primary);
 }
 
-.ds-rail input[type="search"] {
-  width: 100%;
-  height: 32px;
-  margin-bottom: 14px;
-  padding: 0 10px;
+/* The filter (design 7.2.3): a 32 px field with a search mark inside on the
+ * left and the key that focuses it on the right, then New. The key hint steps
+ * aside while the field has focus or text, where the browser's own clear
+ * button goes. The id outranks the shared input rule's padding. */
+.ds-rail__find { display: flex; gap: 8px; margin-bottom: 14px; }
+.ds-rail__field { position: relative; flex: 1 1 auto; min-width: 0; }
+#reportFilter { width: 100%; height: 32px; padding: 0 32px 0 31px; }
+.ds-rail__search {
+  position: absolute;
+  top: calc(50% - 8px);
+  left: 9px;
+  width: 16px;
+  height: 16px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+.ds-rail__key { position: absolute; top: calc(50% - 10px); right: 6px; pointer-events: none; }
+.ds-rail__field:focus-within .ds-rail__key,
+.ds-rail__field:has(> input:not(:placeholder-shown)) .ds-rail__key { display: none; }
+.ds-rail__new { flex: none; }
+/* A phone's buttons are 40 px tall (css/style.css): the field and the square
+ * collapse button match them. */
+@media (max-width: 699px) {
+  #reportFilter { height: 40px; }
+  .ds-rail__hide.btn--icon { width: 40px; }
 }
 
 /* ── The report library ────────────────────────────────────────────────── */
 
-.ds-library { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.ds-library { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0; list-style: none; }
 
 .ds-library__item { position: relative; display: flex; align-items: stretch; border-radius: var(--radius-sm); }
 
@@ -313,13 +339,20 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
 
 /* ── The outline ──────────────────────────────────────────────────────── */
 
+/* One column no wider than the rail. A grid's implicit column took the width
+ * of the longest heading (nowrap), so the links never truncated and the rail
+ * scrolled sideways; min-width 0 lets every level shrink to the rail and the
+ * link ellipsize instead. js/chrome.js gives a cut link its full text as a
+ * title. */
 .ds-outline,
 .ds-outline ul { margin: 0; padding: 0; list-style: none; }
-.ds-outline { display: grid; gap: 1px; }
+.ds-outline { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.ds-outline li { min-width: 0; }
 .ds-outline ul { margin: 2px 0 6px 10px; padding-left: 10px; border-left: 1px solid var(--border); }
 
 .ds-outline a {
   display: block;
+  min-width: 0;
   padding: 5px 10px;
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
@@ -868,12 +901,20 @@ body.is-dropping::after {
   .viz-panel,
   .block-grid { break-inside: avoid; page-break-inside: avoid; }
 
-  /* A disclosure the reader cannot open on paper has to be open already. */
+  /* A disclosure the reader cannot open on paper has to be open already.
+   * js/chrome.js opens a report's closed ones on beforeprint and closes them
+   * on afterprint; these rules are the fallback for a print that script does
+   * not see (the one-file export, which has no chrome.js). Chromium keeps a
+   * closed disclosure's content in its own slot, out of reach of
+   * `details > *`, and `::details-content` (a rule of its own, so a browser
+   * that does not know it drops only that rule) is how to reach it. */
   details { display: block; }
   details > summary { list-style: none; }
   details[open] > summary,
   details > summary { font-weight: 600; }
   details > *:not(summary) { display: revert !important; }
+
+  details::details-content { display: block; content-visibility: visible; }
 
   /* A link is useless on paper unless it says where it goes. */
   .ds-report a[href^="http"]::after {

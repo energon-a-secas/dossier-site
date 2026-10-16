@@ -80,6 +80,49 @@ test('raw HTML inside Markdown is text, never markup', () => {
   assert.match(html, /Hello/);
 });
 
+test('script and style in Markdown go with their contents, in blocks and in running text', () => {
+  const md = [
+    '# Title',
+    '',
+    'Before <script>alert("inline")</script> after, <style>p { color: red }</style>done.',
+    '',
+    '<script>',
+    'const secret = "block script";',
+    '',
+    'more()',
+    '</script>',
+    '',
+    '<STYLE type="text/css">',
+    'body { display: none }',
+    '</style> Tail text.',
+    '',
+    '> <script>quoted()</script> Quoted words.',
+    '',
+    '- item <style>.x{}</style>kept',
+    '',
+    '```html',
+    '<script>kept in code</script>',
+    '```',
+    '',
+    'Inline `<style>shown</style>` stays.',
+    '',
+    '<script>unclosed()',
+    'to the end',
+  ].join('\n');
+  const { blocks } = markdownToIr(md);
+  const text = renderIr(blocks).replace(/<[^>]+>/g, ' ');
+  for (const gone of ['alert', 'inline', 'color: red', 'secret', 'block script', 'more()', 'display: none', 'quoted()', '.x{}', 'unclosed()', 'to the end']) {
+    assert.ok(!text.includes(gone), `"${gone}" is still read as text`);
+  }
+  assert.match(text, /Before\s+after, done\./);
+  assert.match(text, /Tail text\./);
+  assert.match(text, /Quoted words\./);
+  assert.match(text, /item\s+kept/);
+  assert.ok(blocks.some((b) => b.t === 'pre' && b.text.includes('<script>kept in code</script>')), 'a fenced script is code, and stays');
+  const inline = blocks.find((b) => b.t === 'p' && b.inl.some((run) => run.code !== undefined));
+  assert.ok(inline && inline.inl.some((run) => /shown/.test(run.code)), 'a code span is not taken for a style element');
+});
+
 test('every string is escaped and only safe links and data images survive', () => {
   const hostile = '"><img src=x onerror=alert(1)>';
   const blocks = [

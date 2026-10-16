@@ -102,12 +102,59 @@ test('alignment keeps order and maximises the summed similarity', () => {
   assert.deepEqual(alignHeadings([], agent), []);
 });
 
-test('alignment of a few hundred headings is quick', () => {
-  const a = Array.from({ length: 400 }, (_, i) => h(`Section ${i} about topic ${i % 37}`));
-  const b = Array.from({ length: 400 }, (_, i) => h(`Section ${i + 1} about topic ${(i + 1) % 37}`));
-  const start = performance.now();
-  alignHeadings(a, b);
-  assert.ok(performance.now() - start < 2000);
+test('aligning a few hundred headings costs no more than their pairs', () => {
+  const list = (n, shift) => Array.from({ length: n }, (_, i) => h(`Section ${i + shift} about topic ${(i + shift) % 37}`));
+  const run = (n) => {
+    const a = list(n, 0);
+    const b = list(n, 1);
+    const start = performance.now();
+    const pairs = alignHeadings(a, b);
+    return { ms: performance.now() - start, pairs, a, b };
+  };
+  // A fixed budget in milliseconds failed on a busy machine, so the time is
+  // measured against the same work at a quarter of the size, run just before
+  // it so the machine is as busy for both. The pairs to score grow 16 times;
+  // past 40 the work is growing faster than the pairs. A busy moment during
+  // the large run can only make one round look slow, so the best of up to
+  // five rounds counts.
+  run(25);
+  let best = Infinity;
+  for (let round = 0; round < 5 && best >= 40; round += 1) {
+    const small = run(100);
+    const large = run(400);
+    if (round === 0) {
+      // Each heading meets its namesake one place along, and nothing else.
+      assert.equal(large.pairs.length, 399);
+      assert.ok(large.pairs.every((p) => p.b === p.a - 1 && p.sim === 1 && large.a[p.a].text === large.b[p.b].text));
+    }
+    best = Math.min(best, large.ms / Math.max(small.ms, 0.1));
+  }
+  assert.ok(best < 40, `400 headings took ${best.toFixed(1)} times as long as 100, for 16 times the pairs`);
+});
+
+test('aligning headings scores each pair a fixed number of times', () => {
+  // The count the timing above cannot give on a busy machine: every score
+  // reads both headings' text, so the reads count the work. The alignment
+  // scores each pair once and each matched pair once more on its way back;
+  // the bound leaves room for twice that, while an alignment that scored
+  // each pair against a whole row or column would read 120 times as much.
+  let reads = 0;
+  const counted = (n, shift) => Array.from({ length: n }, (_, i) => {
+    const text = `Section ${i + shift} about topic ${(i + shift) % 37}`;
+    return {
+      level: 2,
+      get text() {
+        reads += 1;
+        return text;
+      },
+    };
+  });
+  const n = 120;
+  const pairs = alignHeadings(counted(n, 0), counted(n, 1));
+  assert.equal(pairs.length, n - 1);
+  assert.ok(pairs.every((p) => p.b === p.a - 1 && p.sim === 1));
+  assert.ok(reads >= n * n, `${reads} reads of heading text for ${n * n} pairs: the count no longer sees the scoring`);
+  assert.ok(reads <= 4 * n * n, `${reads} reads of heading text for ${n * n} pairs`);
 });
 
 test('positions map piecewise-linearly between anchors', () => {

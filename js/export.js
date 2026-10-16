@@ -11,6 +11,7 @@
 import { downloadText, showToast } from './neorgon-dom.js';
 import { renderReport } from './render/index.js';
 import { reportOf } from './render/model.js';
+import { DEFAULT_SIDE_LABELS } from './render/compare.js';
 import { bindComparisons } from './comparison-controls.js';
 import { authored } from './pipeline.js';
 import { embedViewFor } from './embeds.js';
@@ -334,15 +335,18 @@ function slidesForBlock(block, heading) {
     case 'log': return [{ type: 'code', heading: h, language: 'text', code: text(b.source) }];
     case 'image': return b.src ? [{ type: 'image', heading: h, src: text(b.src), alt: text(b.alt), ...(b.caption ? { caption: text(b.caption) } : {}) }] : [];
     case 'compare': {
+      // An unlabelled side is named the way the screen names it. The deck
+      // said Left and Right while the report said Before and After.
+      const [leftName, rightName] = DEFAULT_SIDE_LABELS;
       if (b.kind === 'image' && b.left?.src && b.right?.src) {
         return [{
           type: 'compare',
           heading: h,
-          before: { src: text(b.left.src), alt: text(b.left.label) || 'Left', label: text(b.left.label) || 'Left' },
-          after: { src: text(b.right.src), alt: text(b.right.label) || 'Right', label: text(b.right.label) || 'Right' },
+          before: { src: text(b.left.src), alt: text(b.left.label) || leftName, label: text(b.left.label) || leftName },
+          after: { src: text(b.right.src), alt: text(b.right.label) || rightName, label: text(b.right.label) || rightName },
         }];
       }
-      return [{ type: 'split', heading: h, left: compareSide(b.left, 'Left', b.kind), right: compareSide(b.right, 'Right', b.kind) }];
+      return [{ type: 'split', heading: h, left: compareSide(b.left, leftName, b.kind), right: compareSide(b.right, rightName, b.kind) }];
     }
     default: return [];
   }

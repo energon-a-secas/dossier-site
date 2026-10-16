@@ -27,6 +27,10 @@ import { HTML_MAX_CHARS, htmlTooLargeMessage } from '../embed-policy.js';
 const EXECUTABLE = new Set(['', 'module', 'text/javascript', 'application/javascript',
   'text/ecmascript', 'application/ecmascript', 'text/jscript', 'text/livescript']);
 
+const FALLBACK_TITLE = 'Imported HTML report';
+
+const BASE = /<base\b[^>]*>/gi;
+
 export function toDossier(source) {
   if (typeof source !== 'string' || !source.trim()) return { document: null, findings: [] };
 
@@ -36,8 +40,9 @@ export function toDossier(source) {
   }
 
   const parsed = parseInert(source);
-  const title = ((parsed && (parsed.querySelector('title')?.textContent || parsed.querySelector('h1')?.textContent))
-    || 'Imported HTML report').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Imported HTML report';
+  const named = ((parsed && (parsed.querySelector('title')?.textContent || parsed.querySelector('h1')?.textContent)) || '')
+    .replace(/\s+/g, ' ').trim().slice(0, 120);
+  const title = named || FALLBACK_TITLE;
   const scripts = parsed ? hasScripts(parsed) : hasScriptsByPattern(source);
 
   return {
@@ -45,7 +50,10 @@ export function toDossier(source) {
       dossier: {
         version: 1,
         title,
-        subtitle: 'Imported HTML · original layout',
+        // Neutral on purpose: the reader switches between the original layout
+        // and Dossier format, and a subtitle that named one view was wrong
+        // in the other. Left out when the title already says it.
+        ...(named ? { subtitle: FALLBACK_TITLE } : {}),
         pages: [{
           title: 'HTML report',
           blocks: [{ type: 'embed', html: source, scripts }],
@@ -56,14 +64,33 @@ export function toDossier(source) {
   };
 }
 
-/** An inert document, or null where there is no DOMParser (Node). */
+/**
+ * An inert document, or null where there is no DOMParser (Node).
+ *
+ * A `<base>` is taken out first. Even in a DOMParser document this page's
+ * policy (`base-uri`) refuses it and logs a CSP violation on every import,
+ * and nothing read here needs it. The stored source keeps it: the static
+ * copy drops it again (js/compare/frame.js), and the source is the author's.
+ */
 function parseInert(source) {
   if (typeof DOMParser === 'undefined') return null;
   try {
-    return new DOMParser().parseFromString(source, 'text/html');
+    return new DOMParser().parseFromString(String(source).replace(BASE, ''), 'text/html');
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether an HTML source has scripts a reader could run, decided the same way
+ * the import decides it, so what the Open dialog promises is what opens.
+ *
+ * @param {string} source
+ * @returns {boolean}
+ */
+export function htmlHasScripts(source) {
+  const parsed = parseInert(source);
+  return parsed ? hasScripts(parsed) : hasScriptsByPattern(source);
 }
 
 /** True when the parsed report has an executable script or an inline handler. */

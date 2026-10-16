@@ -80,15 +80,21 @@ function renderTests(block) {
     for (const test of items) {
       if (!test || typeof test !== 'object') continue;
       // A state outside the enum used to land in a class name, and the
-      // duration in the page, both raw.
-      const state = pick(test.state, TEST_STATES, 'passed');
+      // duration in the page, both raw. Then it fell back to "passed", which
+      // turned a test the report could not classify into a green one and hid
+      // its failure output. An unknown state is shown as unknown, in the
+      // neutral rule, with the value the author wrote.
+      const known = pick(test.state, TEST_STATES, null);
+      const state = known || 'unknown';
       html += `<div class="test-item test-state--${state}">`;
-      html += `<p class="test-name">${escHtml(String(test.name || ''))}<span class="visually-hidden">, ${state}</span></p>`;
+      html += `<p class="test-name">${escHtml(String(test.name || ''))}<span class="visually-hidden">, ${known || unknownState(test.state)}</span></p>`;
       const seconds = formatNumber(test.duration);
       if (seconds) {
         html += `<p class="test-duration">${seconds}s</p>`;
       }
-      if (test.message && state !== 'passed') {
+      // Whatever the state: output the author included is part of the record,
+      // and a passing test with a message (a warning, a retry) says something.
+      if (test.message !== undefined && test.message !== null && String(test.message).trim()) {
         html += `<pre class="test-message"><code>${escHtml(String(test.message))}</code></pre>`;
       }
       html += '</div>';
@@ -101,4 +107,17 @@ function renderTests(block) {
   }
   html += '</div>';
   return html;
+}
+
+/**
+ * The words for a state outside the enum, escaped: the value itself when it
+ * is a short scalar, so the reader sees what the report said.
+ */
+function unknownState(raw) {
+  if (raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) return 'state not given';
+  if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
+    const value = String(raw).trim();
+    return `unknown state “${escHtml(value.length > 40 ? `${value.slice(0, 39)}…` : value)}”`;
+  }
+  return 'unknown state';
 }

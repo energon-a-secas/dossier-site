@@ -379,8 +379,6 @@ export function sentence(text) {
   return /[.!?…]["'”’)]?$/.test(text) ? text : `${text}.`;
 }
 
-let lastPayload = null;
-
 /**
  * Copy the current report to clipboard as a share link.
  *
@@ -398,7 +396,6 @@ export async function copyShareLink(document) {
     say(`Too long for a link at ${payload.length.toLocaleString()} characters. Export the one HTML file instead: it needs no account and no network.`);
     return false;
   }
-  lastPayload = payload;
   const url = new URL(window.location.href);
   url.hash = fragment.replace(/^#/, '');
   url.search = '';

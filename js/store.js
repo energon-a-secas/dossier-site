@@ -25,7 +25,11 @@ const BLOCKED_RETRY_MS = 3000;
  * A blocked open (another tab holds an older connection during an upgrade)
  * used to resolve null on the spot, so storage looked empty for the whole
  * session, which reads as data loss. It now says so in the console, waits,
- * and tries once more before giving up.
+ * and tries once more. If that is blocked too, the calls waiting on it get
+ * null (saving is off for now), but the second request is left open: when
+ * the other tab lets go it succeeds, and from then on this tab uses it. The
+ * first version closed that late success, so saving stayed off until the
+ * page was reloaded, whatever the console said.
  */
 function initDb(attempt = 0) {
   return new Promise((resolve) => {
@@ -34,6 +38,8 @@ function initDb(attempt = 0) {
       return;
     }
     let settled = false;
+    // True once this request is given up on with nothing in flight after it.
+    let gaveUp = false;
     const done = (value) => {
       if (settled) return;
       settled = true;
@@ -49,8 +55,9 @@ function initDb(attempt = 0) {
     req.onerror = () => done(null);
     req.onsuccess = () => {
       const database = req.result;
-      if (settled) {
-        // This request was given up on and a retry is in flight.
+      if (settled && (!gaveUp || db)) {
+        // This request was given up on and a retry is in flight, or a
+        // connection is already in use.
         database.close();
         return;
       }
@@ -63,6 +70,14 @@ function initDb(attempt = 0) {
           initPromise = null;
         }
       };
+      if (settled) {
+        // Given up on, and then the other tab let go: use it from now on.
+        db = database;
+        initPromise = Promise.resolve(database);
+        // eslint-disable-next-line no-console
+        console.info('Dossier storage is available again: the other tab released the database.');
+        return;
+      }
       done(database);
     };
     req.onblocked = () => {
@@ -74,7 +89,8 @@ function initDb(attempt = 0) {
           done(initDb(1));
         } else {
           // eslint-disable-next-line no-console
-          console.warn('Dossier storage is still blocked by another tab. Saving is off in this tab until that tab closes.');
+          console.warn('Dossier storage is still blocked by another tab. Saving is off in this tab until that tab closes or reloads.');
+          gaveUp = true;
           done(null);
         }
       }, BLOCKED_RETRY_MS);

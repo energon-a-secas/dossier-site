@@ -36,6 +36,40 @@
     <foreignObject width="120" height="40"><div onclick="top.__dossierPwned = 'foreign'">foreign</div></foreignObject>
     <a href="javascript:top.__dossierPwned='svg link'"><text x="10" y="25">svg link</text></a>
   </svg>
+  <!-- SVG links a selector for a[href] misses: an xlink:href, and addresses
+       written by an animation, which runs without scripts. Followed, each
+       would take the frame away from the report. -->
+  <svg width="360" height="66" aria-label="SVG links">
+    <a id="svgXlink" xlink:href="https://example.invalid/svg-xlink"><text x="10" y="18">svg xlink link</text></a>
+    <a id="svgSet"><set attributeName="href" to="https://example.invalid/svg-set"/><text x="10" y="38">svg set link</text></a>
+    <a id="svgAnimate"><animate attributeName="xlink:href" values="https://example.invalid/svg-animate" dur="1s" fill="freeze"/><text x="10" y="58">svg animate link</text></a>
+  </svg>
+  <!-- Links an SVG <use> draws, in a copy of the drawing that no listener
+       outside can read. A click reaches only a navigation, its relative
+       address already resolved against the page that holds the frame; a
+       middle click opens a new tab that no navigation of the frame sees. -->
+  <svg width="360" height="66" aria-label="SVG links drawn by use">
+    <defs>
+      <g id="useWebShape"><a href="https://example.invalid/use-web"><text x="10" y="18">use web link</text></a></g>
+      <g id="useFileShape"><a href="other-use.html"><text x="10" y="38">use file link</text></a></g>
+      <g id="usePlaceShape"><a href="#forms"><text x="10" y="58">use in-page link</text></a></g>
+    </defs>
+    <use id="useWeb" href="#useWebShape"/>
+    <use id="useFile" href="#useFileShape"/>
+    <use id="usePlace" href="#usePlaceShape"/>
+  </svg>
+  <!-- Declarative shadow roots, which the parser builds with no script. A
+       template's content is a fragment that a query of the tree misses, a
+       click inside an open root reaches a listener on the document
+       retargeted to the host, and nothing outside sees into a closed root. -->
+  <div id="shadowOpen"><template shadowrootmode="open">
+    <p><a id="shadowLink" href="https://example.invalid/shadow-open">An open shadow root link</a>
+      and <a id="shadowJs" href="javascript:top.__dossierPwned='shadow link'">a javascript: link in it</a>.</p>
+    <svg width="220" height="22" aria-label="A shadow root SVG link"><a id="shadowSet"><set attributeName="href" to="https://example.invalid/shadow-set"/><text x="0" y="16">shadow svg set link</text></a></svg>
+    <meta http-equiv="refresh" content="0; url=https://example.invalid/shadow-refresh">
+    <img src="https://example.invalid/shadow-pixel.png" alt="Shadow pixel" onerror="top.__dossierPwned = 'shadow onerror'">
+  </template></div>
+  <p><span id="shadowClosed" style="display: inline-block"><template shadowrootmode="closed"><a href="https://example.invalid/shadow-closed">A closed shadow root link</a></template></span></p>
 
   <!-- Text inside a style in this parse, a live image in the next one: a copy
        that is serialised and parsed again must be cleaned again. -->

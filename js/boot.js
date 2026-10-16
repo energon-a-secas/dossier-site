@@ -17,7 +17,7 @@
  * dropped during boot is not replaced by the stored report a moment later.
  */
 
-import { loadSaved, setPreference } from './state.js';
+import { loadSaved, setPreference, forgetPreference } from './state.js';
 import { rerender } from './pipeline.js';
 import { reportOf } from './render/index.js';
 import { loadFromUrl, fragmentCarriesReport, say, sentence } from './share.js';
@@ -138,7 +138,12 @@ async function start(state) {
   initialRail({ fromLink: claimed === 'url', preference: state.preferences.railOpen });
 
   if (claimed === 'superseded') {
-    // Something the visitor opened while we loaded already rendered itself.
+    // Something the visitor opened while we loaded owns the stage now. If it
+    // opened, it drew itself (js/open.js finishOpen). If it failed, it gave
+    // its ticket back (releaseOpen): when that happened before we checked,
+    // we were never superseded and drew the stored report below; when after,
+    // the failed open drew the empty state itself (openFailed). Either way
+    // the stage is never left blank.
     if (!document.documentElement.dataset.dossierMode) {
       setMode(state.preferences.readMode ? 'read' : 'build');
     }
@@ -229,12 +234,13 @@ async function loadInitialReport(state, ticket) {
  * Another tab deleted reports. If one of them is open here, close it: left
  * open, it still said "Saved in this browser", and this tab's next edit wrote
  * it back under the same id, so the deleted report came back. The remembered
- * last report is forgotten too, or this tab's next preference save would
- * restore the id the other tab cleared.
+ * last report is forgotten too, but only where it still names a deleted
+ * report: decided from this tab's memory, the write put back this tab's stale
+ * preferences and wiped the newer `lastReportId` the other tab had saved.
  */
 async function forgetDeleted(state, els, ids) {
   if (!Array.isArray(ids) || !ids.length) return;
-  if (ids.includes(state.preferences.lastReportId)) setPreference(state, 'lastReportId', null);
+  forgetPreference(state, 'lastReportId', ids);
   if (!state.reportId || !ids.includes(state.reportId)) return;
   const instead = await replaceDeleted(state, els);
   say(instead

@@ -30,8 +30,20 @@ const KIND_WORDS = { h: 'heading', p: 'paragraph', li: 'list item', tr: 'table r
 
 const hidden = (text) => `<span class="visually-hidden u-sr">${escHtml(text)}</span>`;
 
+/**
+ * The base column's name inside a column's text. Blind or a move renames the
+ * base without changing a mark, so js/compare/analysis.js renames these in
+ * place rather than draw the column again, which lost its scroll position
+ * and focus.
+ *
+ * @param {string} ref
+ */
+export function baseName(ref) {
+  return `<span data-base-ref>${escHtml(ref)}</span>`;
+}
+
 /** Word segments to markup: unchanged words plain, `ins` and `del` marked. */
-export function segmentsHtml(segments, colId) {
+function segmentsHtml(segments, colId) {
   return (segments || []).map((seg) => {
     const html = renderInline(seg.inl, colId);
     if (seg.type === 'ins') return `<ins><span class="visually-hidden">inserted: </span>${html}</ins>`;
@@ -47,7 +59,7 @@ function ghostHtml(run, number, { baseUnits, baseRef, container, cells }) {
   const full = run.units.map((i) => baseUnits[i]).filter(Boolean)
     .map((u) => `<p class="ghost__unit${u.kind === 'h' ? ' ghost__unit--h' : ''}"><del><span class="visually-hidden">deleted: </span>${escHtml(u.text.trim())}</del></p>`)
     .join('');
-  const body = `<span class="ghost__what"><b>Removed from ${escHtml(baseRef)}:</b> ${escHtml(info.what)}, ${words}</span>`
+  const body = `<span class="ghost__what"><b>Removed from ${baseName(baseRef)}:</b> ${escHtml(info.what)}, ${words}</span>`
     + `<span class="ghost__prev" aria-hidden="true"><del>${escHtml(info.preview)}</del></span>`
     + '<button type="button" class="btn btn--quiet btn--xs ghost__show" data-action="cmp-ghost" aria-expanded="false">Show</button>'
     + `<div class="ghost__full" hidden>${full}</div>`;

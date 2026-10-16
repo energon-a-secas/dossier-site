@@ -2,103 +2,29 @@
  * Browser checks for the Compare view: building a comparison from files,
  * sections sync, stepping, the focus layout and the phone switcher, saving
  * and reopening, the Comparisons switcher (rename, delete, undo), the
- * bundled example, and a hostile report that must not run, reach this page,
- * navigate anything or leave localhost, in every render mode.
+ * bundled example, the empty column, and a view that fills the window with
+ * the footer below the fold. The hostile report, SVG links and the frame
+ * backstop are in scripts/check-compare-hostile.mjs, run at the end.
  *
  * Run against the dev server: `node scripts/check-compare.mjs`
  * (DOSSIER_URL overrides http://127.0.0.1:8899).
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import {
+  base, file, watch, noOverflow, fillsWindow, focusOn, chooseFile, headingTop,
+} from './compare-check-helpers.mjs';
 
-const base = process.env.DOSSIER_URL || 'http://127.0.0.1:8899';
-const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const file = (rel) => path.join(root, rel);
 const browser = await chromium.launch();
 const errors = [];
 await fs.mkdir(file('.verify'), { recursive: true });
-
-function watch(page) {
-  page.on('pageerror', (error) => errors.push(`${page.url()}: ${error.message}`));
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(`${page.url()}: console: ${msg.text()}`);
-  });
-}
-
-async function noOverflow(page, label) {
-  const over = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-  assert.ok(over <= 1, `${label}: the page scrolls sideways by ${over}px`);
-}
-
-/**
- * The page itself never scrolls in Compare: only the columns do. A wheel over
- * the toolbar used to scroll the page by the footer's height and slide the
- * toolbar under the sticky header.
- */
-async function pageStill(page, label) {
-  for (const target of ['#cmpToolbar', '#compareView .col__head:visible']) {
-    await page.locator(target).first().hover();
-    await page.mouse.wheel(0, 400);
-  }
-  await page.waitForTimeout(150);
-  const state = await page.evaluate(() => ({
-    y: scrollY,
-    taller: document.documentElement.scrollHeight - innerHeight,
-    toolbar: document.querySelector('#cmpToolbar').getBoundingClientRect().top,
-    header: document.querySelector('.header-bar').getBoundingClientRect().bottom,
-  }));
-  assert.equal(state.y, 0, `${label}: a wheel over the toolbar or a column head scrolled the page`);
-  assert.ok(state.taller <= 0, `${label}: the page is ${state.taller}px taller than the window`);
-  assert.ok(Math.abs(state.toolbar - state.header) <= 1, `${label}: the toolbar is at ${state.toolbar}px, not under the header at ${state.header}px`);
-}
-
-/** Wait until focus is on an element matching `selector`; fail with `why`. */
-async function focusOn(page, selector, why) {
-  try {
-    await page.waitForFunction((sel) => Boolean(document.activeElement?.matches?.(sel)), selector, { timeout: 2000 });
-  } catch {
-    const at = await page.evaluate(() => {
-      const el = document.activeElement;
-      return el ? `${el.localName}${el.id ? `#${el.id}` : ''}${el.className ? `.${String(el.className).trim().split(/\s+/).join('.')}` : ''}` : 'nothing';
-    });
-    assert.fail(`${why}: focus is on ${at}, not ${selector}`);
-  }
-}
-
-/** Put a file into a column through its "Choose a file" button. */
-async function chooseFile(page, colId, rel) {
-  const [chooser] = await Promise.all([
-    page.waitForEvent('filechooser'),
-    page.locator(`#cmp-col-${colId} [data-action="cmp-choose-file"]`).click(),
-  ]);
-  await chooser.setFiles(file(rel));
-  await page.locator(`#cmp-col-${colId} .col__scroll, #cmp-col-${colId} .col__frame`).first().waitFor();
-}
-
-/** A heading's distance from the top of its column's scroller. */
-function headingTop(page, colId, text) {
-  return page.evaluate(([id, wanted]) => {
-    // The heading as the report wrote it: without the difference marks'
-    // hidden words ("Changed heading:"), removed words or "Added" label.
-    const plain = (h) => {
-      const c = h.cloneNode(true);
-      c.querySelectorAll('.visually-hidden, del, .u-label, .cur-tag').forEach((e) => e.remove());
-      return c.textContent.replace(/\s+/g, ' ').trim();
-    };
-    const scroller = document.querySelector(`#cmp-col-${id} .col__scroll`);
-    const heading = [...scroller.querySelectorAll('.r-h')].find((h) => plain(h) === wanted);
-    return heading ? heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
-  }, [colId, text]);
-}
 
 try {
   // ── A new comparison, built from two files ─────────────────────────────────
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
-  watch(page);
+  watch(page, errors);
   // From the welcome screen: its button hides with it, so focus moves to the
   // Compare view's own header button, not to the one that leads back.
   await page.goto(`${base}/?check=compare`, { waitUntil: 'networkidle' });
@@ -112,6 +38,11 @@ try {
   assert.equal(await page.locator('#compareView .col').count(), 2);
   assert.equal(await page.locator('#compareView .col--empty').count(), 2);
   assert.match(await page.locator('#cmp-col-k1 .drop').innerText(), /Drop a report here/);
+  // An empty column's who line is plain text, and it promises nothing about
+  // differences before there is a report (design spec 7.3.11).
+  assert.equal(await page.locator('#cmp-col-k1 .col__who').innerText(), 'Human, no report yet');
+  assert.equal(await page.locator('#compareView .col--empty .col__who .role-name').count(), 0, 'An empty column inks its role word');
+  assert.equal(await page.locator('#compareView .col--empty .col__diff').count(), 0, 'An empty column talks about differences');
 
   await chooseFile(page, 'k1', 'reports/compare/human-draft.html');
   await chooseFile(page, 'k2', 'reports/compare/agent-output.md');
@@ -124,7 +55,24 @@ try {
   const fonts = await page.evaluate(() => ['k1', 'k2'].map((id) => getComputedStyle(document.querySelector(`#cmp-col-${id} .r-h2`)).fontFamily));
   assert.equal(fonts[0], fonts[1], 'Both columns read in one typeface');
   assert.equal(await page.locator('#cmp-col-k1 .reader').getByText('Payments platform: incident notes').count(), 0, 'Page chrome outside main was kept');
-  await pageStill(page, '1440px');
+  await fillsWindow(page, '1440px');
+  // The toolbar's title is chrome in the product's fixed serif: Display's
+  // Typeface changes the reading text, not it.
+  const faces = await page.evaluate(() => {
+    const read = () => ({
+      title: getComputedStyle(document.querySelector('.cmp-toolbar .set-title')).fontFamily,
+      reader: getComputedStyle(document.querySelector('#cmp-col-k1 .reader')).fontFamily,
+      serif: getComputedStyle(document.documentElement).getPropertyValue('--font-serif').trim(),
+    });
+    const before = read();
+    document.documentElement.dataset.typeface = 'sans';
+    const sans = read();
+    delete document.documentElement.dataset.typeface;
+    return { before, sans };
+  });
+  assert.equal(faces.sans.title, faces.before.title, 'The toolbar title followed the Typeface option');
+  assert.notEqual(faces.sans.reader, faces.before.reader, 'The Typeface option did not reach the reading text');
+  assert.equal(faces.before.title.replace(/\s/g, ''), faces.before.serif.replace(/\s/g, ''), 'The toolbar title is not in the product serif');
 
   // The skip link moves focus and adds no history entry for Back to undo.
   const historyBefore = await page.evaluate(() => history.length);
@@ -219,8 +167,18 @@ try {
   assert.ok(caught.top > -24 && caught.top < caught.view * 0.35, `A's frame did not catch up with B: its "Customer impact" is at ${caught.top}px`);
   assert.equal(await page.locator('#cmp-col-k1 .col__frame').getAttribute('sandbox'), 'allow-same-origin');
   assert.equal(await page.locator('#cmp-col-k2 .col__frame').count(), 0, 'Markdown has no original layout');
+  // A frame read to its end keeps the wheel too: the page does not move.
+  await page.locator('#cmp-col-k1 .col__frame').evaluate((f) => f.contentWindow.scrollTo(0, f.contentDocument.documentElement.scrollHeight));
+  await page.locator('#cmp-col-k1 .col__frame').hover();
+  await page.mouse.wheel(0, 600);
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => scrollY), 0, 'A wheel past an Original frame\'s end scrolled the page');
   await page.locator('.cmp-toolbar [data-action="cmp-set-mode"][data-value="format"]').click();
   await page.locator('#cmp-col-k1 .col__scroll').waitFor();
+  // The change is saved 400 ms after the click. A reload inside that wait
+  // flushes it on pagehide, but IndexedDB does not always finish a write the
+  // page started while unloading, so the reload waits for the save.
+  await page.waitForTimeout(600);
 
   // ── Saved: a reload reopens the same comparison ────────────────────────────
   await page.reload({ waitUntil: 'networkidle' });
@@ -250,10 +208,12 @@ try {
   await page.keyboard.type('Checkout review');
   await page.keyboard.press('Enter');
   assert.equal(await page.locator('.cmp-toolbar .set-title__text').innerText(), 'Checkout review');
-  await page.waitForTimeout(600);
+  // Straight away, inside the save's 400 ms wait: the switcher writes the
+  // waiting change before it reads the list, so the row has the new title.
   await page.locator('#cmpSwitcherBtn').click();
   // The list is read from storage first, then focus lands in the filter.
   await page.waitForFunction(() => document.activeElement?.id === 'cmpSwitcherFilter');
+  assert.equal(await page.locator('#cmpSwitcher .sw__row.is-current .sw__title').innerText(), 'Checkout review', 'The switcher listed the old title');
   await page.locator('#cmpSwitcher [data-action="cmp-new-set"]').click();
   assert.equal(await page.locator('#compareView .col--empty').count(), 2);
   await chooseFile(page, 'k1', 'reports/compare/fixes.html');
@@ -312,7 +272,7 @@ try {
   assert.equal(await page.evaluate(() => location.hash), '#/~compare', 'Choosing a tab saved the example');
   const savedTitles = await page.evaluate(async () => (await (await import('/js/compare/store.js')).listSets()).map((item) => item.title));
   assert.ok(!savedTitles.includes('Illustrative example: checkout latency incident'), 'Choosing a tab saved a copy of the example');
-  await pageStill(page, '390px');
+  await fillsWindow(page, '390px');
   await page.locator('#cmpOptionsBtn').click();
   assert.equal(await page.locator('#cmpOptions').isVisible(), true);
   assert.equal(await page.locator('#cmpScrim').isVisible(), true, 'Options opens as a sheet over a scrim');
@@ -444,146 +404,54 @@ try {
   assert.equal(await page.locator('#compareView .col .reader').count(), 2);
   await page.waitForFunction(() => /^#\/~compare\/c-/.test(location.hash));
 
-  // ── Dossier format without the page's CSS ──────────────────────────────────
-  // A stat tile's number and label stay two words; a word styled inside
-  // running text stays one. A drawing coloured by the page's classes is
-  // described (it would paint solid black), one with its own fills is drawn.
-  const normalized = await page.evaluate(async () => {
-    const { htmlToIr } = await import('/js/compare/normalize.js');
-    const { renderIr } = await import('/js/compare/ir-render.js');
-    const html = '<main><div class="stat"><span class="num">201</span><span class="lbl">tickets this year</span></div>'
-      + '<p>Up <span class="num">5</span><span class="unit">%</span> since May.</p>'
-      + '<svg viewBox="0 0 10 10" role="img"><title>A styled star</title><circle class="star" cx="5" cy="5" r="4"/></svg>'
-      + '<svg viewBox="0 0 10 10" aria-label="A drawn dot"><circle cx="5" cy="5" r="4" fill="#335"/></svg></main>';
-    const out = document.createElement('div');
-    out.innerHTML = renderIr(htmlToIr(html).blocks, { colId: 'zz' });
-    return { text: out.textContent.replace(/\s+/g, ' '), images: [...out.querySelectorAll('img')].map((img) => img.alt) };
-  });
-  assert.match(normalized.text, /201 tickets this year/, 'A stat tile ran its number into its label');
-  assert.match(normalized.text, /Up 5% since May/, 'A styled word in running text was split');
-  assert.match(normalized.text, /A styled star\. A drawing coloured by its page/, 'A class-styled drawing was not described');
-  assert.deepEqual(normalized.images, ['A drawn dot'], 'Only the drawing with its own fills is drawn');
   await context.close();
 
-  // ── A hostile report, in every mode ────────────────────────────────────────
-  const hostile = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const hp = await hostile.newPage();
-  // The report's own scripts fail on purpose here (blocked loads, a sealed
-  // frame refused access to this page): those messages are the proof, not
-  // errors. Anything else this page raises still fails the run.
-  hp.on('pageerror', (error) => {
-    if (!/Blocked a frame with origin "null"|cross-origin frame/.test(error.message)) errors.push(`hostile: ${error.message}`);
-  });
-  // In Dossier format and Original nothing of the report is even attempted:
-  // the static copy leaves out its scripts, base, frames and outside loads,
-  // so the browser has nothing to refuse and logs nothing. Interactive runs
-  // the report's scripts, whose failures are the proof, so it is not counted.
-  const refusals = [];
-  let countRefusals = true;
-  hp.on('console', (msg) => { if (countRefusals && msg.type() === 'error') refusals.push(msg.text()); });
-  // A request the frame's policy refuses is reported by the browser, then
-  // fails with "csp" before anything is sent. Only the others left.
-  const outside = new Map();
-  let watching = false;
-  const isOutside = (raw) => {
-    const url = new URL(raw);
-    return !['127.0.0.1', 'localhost'].includes(url.hostname) && /^https?:$/.test(url.protocol);
-  };
-  hostile.on('request', (req) => { if (watching && isOutside(req.url())) outside.set(req, req.url()); });
-  hostile.on('requestfailed', (req) => { if (/csp/i.test(req.failure()?.errorText || '')) outside.delete(req); });
-  hostile.on('page', (popup) => outside.set(popup, `popup ${popup.url()}`));
-  await hp.goto(`${base}/?check=hostile#/~compare`, { waitUntil: 'networkidle' });
-  watching = true;
-  await hp.evaluate(() => {
-    window.__opened = [];
-    window.open = (url) => { window.__opened.push(String(url)); return null; };
-  });
-  await chooseFile(hp, 'k1', 'fixtures/compare/hostile.html');
-  await hp.waitForTimeout(400);
-  const reader = hp.locator('#cmp-col-k1 .reader');
-  assert.match(await reader.innerText(), /A reader should see these words/);
-  assert.equal(await reader.getByText('Hidden paragraph').count(), 0);
-  assert.equal(await reader.getByText('Invisible paragraph').count(), 0);
-  const formatMarkup = await reader.innerHTML();
-  // Words like "javascript:" may be shown as text; no tag may carry them.
-  const tags = formatMarkup.match(/<[^>]+>/g) || [];
-  const liveTags = tags.filter((tag) => /^<(script|iframe|form|input|button|object|embed|base|meta|link|style)\b|\son[a-z]+=|(href|src)="\s*(javascript|data:text|vbscript)/i.test(tag));
-  assert.deepEqual(liveTags, [], "Dossier format kept something live");
-  assert.ok(!/example\.invalid\/pixel/.test(formatMarkup), 'A remote image reached an img');
-  assert.match(formatMarkup, /Remote image from example\.invalid not loaded/);
-
-  async function hostileClean(label) {
-    const state = await hp.evaluate(() => ({
-      pwned: window.__dossierPwned || null,
-      stored: localStorage.getItem('dossier-pwned'),
-      bothTokens: [...document.querySelectorAll('iframe')].filter((f) => {
-        const tokens = (f.getAttribute('sandbox') || '').split(/\s+/);
-        return tokens.includes('allow-scripts') && tokens.includes('allow-same-origin');
-      }).length,
-      unsandboxed: [...document.querySelectorAll('#compareView iframe')].filter((f) => !f.hasAttribute('sandbox')).length,
-    }));
-    assert.equal(state.pwned, null, `${label}: a script in the report ran (${state.pwned})`);
-    assert.equal(state.stored, null, `${label}: the report wrote to this page's storage`);
-    assert.equal(state.bothTokens, 0, `${label}: a frame has allow-scripts and allow-same-origin`);
-    assert.equal(state.unsandboxed, 0, `${label}: a frame has no sandbox`);
-  }
-  await hostileClean('Dossier format');
-
-  // Original: static frame. Links are caught, nothing navigates.
-  await hp.locator('#cmp-col-k1 .col__menu').click();
-  await hp.locator('#cmpColumnMenu [data-value="original"]').click();
-  const frameEl = hp.locator('#cmp-col-k1 .col__frame');
-  await frameEl.waitFor();
-  await hp.waitForTimeout(500);
-  assert.equal(await frameEl.getAttribute('sandbox'), 'allow-same-origin');
-  assert.match(await hp.locator('#cmp-col-k1 .col__notes').innerText(), /not loaded/);
-  // The frame was handed a copy with no handler, refresh or script address
-  // left, even the ones that only show up when the copy is parsed again.
-  const copy = await frameEl.evaluate((f) => {
-    const doc = f.contentDocument;
-    return {
-      handlers: [...doc.querySelectorAll('*')].filter((el) => [...el.attributes].some((a) => /^on/i.test(a.name))).length,
-      refresh: [...doc.querySelectorAll('meta[http-equiv]')].filter((m) => /refresh/i.test(m.getAttribute('http-equiv'))).length,
-      scriptLinks: [...doc.querySelectorAll('[href]')].filter((el) => /^\s*javascript:/i.test(el.getAttribute('href'))).length,
-    };
-  });
-  assert.deepEqual(copy, { handlers: 0, refresh: 0, scriptLinks: 0 }, 'The static copy kept something live');
-  const frame = hp.frameLocator('#cmp-col-k1 .col__frame');
-  const pageUrl = hp.url();
-  const said = () => hp.locator('#app-toast').innerText();
-  for (const id of ['jsLink', 'dataLink', 'topLink', 'relLink', 'localLink']) {
-    await frame.locator(`#${id}`).click();
-    await hp.waitForTimeout(100);
-    // A refused scheme is not "a file beside the report", and is not repeated.
-    if (id === 'dataLink') assert.equal(await said(), 'That link was not opened: Dossier only opens web and mail links.');
-    if (id === 'relLink') assert.match(await said(), /^That link points at other-report\.html, a file beside the report/);
-  }
-  await frame.locator('#hostileSubmit').click();
-  await frame.locator('p', { hasText: 'Hover over this paragraph' }).hover();
-  await hp.waitForTimeout(300);
-  assert.equal(hp.url(), pageUrl, 'A link in the report navigated the page');
-  const frameUrl = await frameEl.evaluate((f) => f.contentWindow.location.href);
-  assert.equal(frameUrl, 'about:srcdoc', 'A link navigated the frame');
-  assert.deepEqual(await hp.evaluate(() => window.__opened), ['https://example.invalid/top'], 'Only the web link opens, in a new tab');
-  await hostileClean('Original');
-  assert.deepEqual(refusals, [], 'Dossier format or Original logged errors');
-  countRefusals = false;
-
-  // Interactive: the sealed host, scripts run with no way out.
-  await hp.locator('#cmp-col-k1 .col__menu').click();
-  await hp.locator('#cmpColumnMenu [data-value="interactive"]').click();
-  const live = hp.locator('#cmp-col-k1 .col__frame--interactive');
-  await live.waitFor();
-  await hp.waitForTimeout(800);
-  assert.equal(await live.getAttribute('sandbox'), 'allow-scripts');
-  assert.equal(await live.getAttribute('src'), 'embed.html');
-  await hostileClean('Interactive');
-  await hp.waitForTimeout(300);
-  assert.deepEqual([...outside.values()], [], 'Requests left localhost');
-  await hostile.close();
+  await checkHiddenStart();
 
   assert.deepEqual(errors, [], 'The page raised errors');
-  console.log('Passed: Compare entered from the welcome screen with focus on its own button, a comparison built from an HTML and a Markdown file in one typeface, a page that never scrolls at 1440 and 390 with the toolbar under the header, a skip link with no history entry, sections sync and sync off, ] steps headings and announces them, focus layout and back with focus kept and the columns named by their tabs, Original as a static frame that catches up with the column being read, saved and reopened at the same address, scroll kept across views, rename, delete with undo, remove a column with undo (focus back on what returned), the bundled example unsaved even after a tab tap, a pasted Dossier document with prefixed ids and nested heading levels, an Edit source that refuses a broken document, Move renaming the bodies, the phone Options sheet keeping Tab with four columns, Options at 1024 closing when Tab leaves it, a comparison bundle from the Open dialog, no sideways scroll at 1440, 1024, 768 and 390, / opens the switcher, one column at a time on a phone with the Options sheet under the bar, its title inside it, closed by Escape or the scrim, stat tiles and page-styled drawings in Dossier format, and a hostile report inert in Dossier format, Original (a static copy that stays clean when parsed again, and link refusals that say why) and Interactive with no request off localhost and no console error outside Interactive.');
+  console.log('Passed: Compare entered from the welcome screen with focus on its own button, empty columns that say "Human, no report yet" in plain text and nothing about differences, a comparison built from an HTML and a Markdown file in one typeface, a view that fills the window under the header at 1440 and 390 with the footer below the fold, reachable, a toolbar that focus brings back from under the header, and a column that keeps the wheel at its end, a toolbar title in the fixed serif whatever the Typeface, a skip link with no history entry, sections sync and sync off, ] steps headings and announces them, focus layout and back with focus kept and the columns named by their tabs, Original as a static frame that catches up with the column being read and keeps the wheel at its end, saved and reopened at the same address, scroll kept across views, rename shown in the switcher at once, delete with undo, remove a column with undo (focus back on what returned), the bundled example unsaved even after a tab tap, a pasted Dossier document with prefixed ids and nested heading levels, an Edit source that refuses a broken document, Move renaming the bodies, the phone Options sheet keeping Tab with four columns, Options at 1024 closing when Tab leaves it, a comparison bundle from the Open dialog, no sideways scroll at 1440, 1024, 768 and 390, / opens the switcher, one column at a time on a phone with the Options sheet under the bar, its title inside it, closed by Escape or the scrim, and a comparison opened while the view was hidden counting its headings from the first one.');
 } finally {
   await browser.close();
+}
+
+// The second area: untrusted HTML, in every mode and in both views.
+await import('./check-compare-hostile.mjs');
+
+/**
+ * A comparison opened while the view is hidden (from the Reports view's Open
+ * dialog, as the welcome screen's example card does) is drawn before it can
+ * be measured. Its heading counter must start at the first heading, not say
+ * "4 of 4" until the first scroll.
+ */
+async function checkHiddenStart() {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  watch(page, errors);
+  await page.goto(`${base}/?check=hidden-start`, { waitUntil: 'networkidle' });
+  // The Open button does nothing until boot has wired it.
+  await page.waitForFunction(() => !document.documentElement.hasAttribute('data-dossier-booting'));
+  const sections = (name) => `# ${name}\n\n${['One', 'Two', 'Three'].map((h) => `## ${h}\n\n${'Words in a section. '.repeat(40)}`).join('\n\n')}`;
+  const bundle = {
+    dossierCompare: {
+      version: 1,
+      title: 'Opened while hidden',
+      view: { diff: { on: false } },
+      columns: [
+        { id: 'k1', role: 'human', label: 'Draft', source: { kind: 'markdown', name: 'a.md', text: sections('A') } },
+        { id: 'k2', role: 'agent', label: 'Agent', source: { kind: 'markdown', name: 'b.md', text: sections('B') } },
+      ],
+    },
+  };
+  await page.locator('#openReport').click();
+  await page.locator('#importDialog').waitFor({ state: 'visible' });
+  await page.locator('#importText').fill(JSON.stringify(bundle));
+  await page.locator('#importDialog [data-action="import-confirm"]').click();
+  await page.waitForFunction(() => document.documentElement.dataset.dossierView === 'compare');
+  await page.waitForFunction(() => document.querySelectorAll('#compareView .col .reader').length === 2);
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.cmp-toolbar [data-action="cmp-toggle-diff"]').getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.locator('.counter__main').innerText(), '1 of 4', 'A comparison opened while hidden counted from its last heading');
+  // The column under the pointer leads (the Open dialog's button was over B).
+  assert.match(await page.locator('.counter__sub').innerText(), /^headings in [AB]$/);
+  await context.close();
 }

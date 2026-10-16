@@ -4,7 +4,8 @@
  * into the core through `compare.hooks` (js/compare/index.js), so the core
  * draws columns without knowing any of this exists.
  *
- *   plan      per column: is it the base, is it marked (and how), or why not
+ *   plan      per column (js/compare/plans.js): is it the base, is it marked
+ *             (and how), or why not
  *   marks     drawn by the IR renderer through `bodyHooks().marks`
  *   current   the change the counter points at: outlined, tagged "2 of 9",
  *             followed as the column scrolls, moved by `[`, `]` and the ruler
@@ -18,16 +19,12 @@
 import { escHtml } from '../neorgon-dom.js';
 import { view as currentView } from '../chrome.js';
 import { say } from '../share.js';
-import { htmlToIr } from './normalize.js';
-import { markdownToIr } from './markdown-ir.js';
-import { textToIr } from './ir.js';
-import { diffBlocks } from './diff.js';
-import { columnMarks, countsSentence } from './marks.js';
-import { effectiveMode, note } from './column.js';
+import { columnMarks, countsSentence, baseName } from './marks.js';
+import { bodyKey } from './column.js';
 import { columnEl } from './view.js';
 import { icon } from './icons.js';
-import { columnById, defaultBase } from './model.js';
-import { nameOf, displayColumns, reportNumbers } from './blind.js';
+import { columnById } from './model.js';
+import { nameOf, displayColumns } from './blind.js';
 import { isPhone } from './popover.js';
 import { attachRuler, keepRulers } from './ruler.js';
 import { createPanel } from './panel.js';
@@ -35,21 +32,7 @@ import { renderSections, markSectionRow } from './sections-panel.js';
 import { createReview } from './review.js';
 import { bindDiffControls } from './diff-controls.js';
 import { createChanges, TICK_OFFSET } from './changes.js';
-
-
-const irs = new WeakMap();
-const sourceIds = new WeakMap();
-let sourceSeq = 0;
-
-/** A stable small id per source object, for redraw keys. */
-function sourceId(source) {
-  if (!source) return 'none';
-  if (!sourceIds.has(source)) {
-    sourceSeq += 1;
-    sourceIds.set(source, sourceSeq);
-  }
-  return sourceIds.get(source);
-}
+import { createPlans, sourceId } from './plans.js';
 
 /** @param {object} api from js/compare/index.js */
 export function initAnalysis(api) {
@@ -86,60 +69,7 @@ export function initAnalysis(api) {
 
   // ── Plans ──────────────────────────────────────────────────────────────────
 
-  /** The column every other is marked against. */
-  function baseId(set = compare.set) {
-    if (!set) return null;
-    const chosen = set.view.diff.base;
-    if (chosen && columnById(set, chosen)?.source) return chosen;
-    const fallback = defaultBase(set);
-    return fallback && columnById(set, fallback)?.source ? fallback : null;
-  }
-
-  /** A column's IR. A Dossier document's comes from its drawn record. */
-  function irOf(col, record = null) {
-    const source = col?.source;
-    if (!source) return null;
-    if (source.kind === 'dossier') {
-      const rec = record || compare.ui.records.get(col.id);
-      return rec && rec.kind === 'reader' && Array.isArray(rec.blocks) ? rec.blocks : null;
-    }
-    if (!irs.has(source)) {
-      let blocks = [];
-      if (source.kind === 'html') blocks = htmlToIr(source.text).blocks;
-      else if (source.kind === 'markdown') blocks = markdownToIr(source.text).blocks;
-      else blocks = textToIr(source.text);
-      irs.set(source, blocks);
-    }
-    return irs.get(source);
-  }
-
-  /**
-   * What the differences mean for one column.
-   *
-   * @returns {null | {base: true} | {off: 'mode'|'scripts'} | {pending: true}
-   *   | {result: object, bars: boolean, forced: boolean, counted: boolean}}
-   *   `counted`: a Dossier document, counted and not marked
-   */
-  function planFor(col, record = null, set = compare.set) {
-    if (!set || !col?.source || !set.view.diff.on) return null;
-    const base = baseId(set);
-    if (!base) return null;
-    if (col.id === base) return { base: true };
-    const mode = effectiveMode(set, col);
-    if (mode === 'interactive') return { off: 'scripts' };
-    if (mode !== 'format') return { off: 'mode' };
-    const baseBlocks = irOf(columnById(set, base));
-    const blocks = irOf(col, record);
-    if (!baseBlocks || !blocks) return { pending: true };
-    const result = diffBlocks(baseBlocks, blocks, set.view.diff);
-    const forced = ui.wordMarks.has(`${set.id}:${col.id}`);
-    return {
-      result,
-      bars: result.tooDifferent && !forced,
-      forced,
-      counted: col.source.kind === 'dossier',
-    };
-  }
+  const { baseId, planFor } = createPlans(compare, ui.wordMarks);
 
   const refOf = (colId) => nameOf(compare.set, colId).ref;
 
@@ -154,14 +84,23 @@ export function initAnalysis(api) {
     // in its head's difference line, once (`headInfo`), not again here.
     if (!plan.result) return {};
     if (plan.result.failed) {
-      return { notes: note('Its sections still line up in the Sections panel.', `Too different from ${baseRef} to compare part by part.`) };
+      return { notes: baseNote(`<b>Too different from ${baseName(baseRef)} to compare part by part.</b> Its sections still line up in the Sections panel.`) };
     }
     if (plan.counted) {
-      return { notes: note(`Differences from ${baseRef} are counted above, not marked in the text: this column holds a Dossier document.`) };
+      return { notes: baseNote(`Differences from ${baseName(baseRef)} are counted above, not marked in the text: this column holds a Dossier document.`) };
     }
     const hooks = { marks: columnMarks(plan.result, { colId: col.id, baseRef, bars: plan.bars }) };
     if (plan.bars) hooks.notes = barsNote(baseRef);
     return hooks;
+  }
+
+  /**
+   * A column notice naming the base, as js/compare/column.js `note` draws
+   * one. `html` is our own markup; the base's name goes in through
+   * `baseName`, escaped there and renamed in place (`relabel`).
+   */
+  function baseNote(html) {
+    return `<p class="col-note">${icon('info')}<span>${html}</span></p>`;
   }
 
   /**
@@ -171,9 +110,22 @@ export function initAnalysis(api) {
    * (js/compare/export.js `readerCopy`).
    */
   function barsNote(baseRef) {
-    return `<p class="col-note">${icon('info')}<span><b>${escHtml(`Too different from ${baseRef} to mark word by word.`)}</b> `
+    return baseNote(`<b>Too different from ${baseName(baseRef)} to mark word by word.</b> `
       + 'Margin bars show where it differs, and its sections still line up. '
-      + '<span class="col-note__live">Turn on Word marks to see every word anyway.</span></span></p>';
+      + '<span class="col-note__live">Turn on Word marks to see every word anyway.</span>');
+  }
+
+  /**
+   * Name the base as it is named now everywhere a column's text names it.
+   * Its name is not part of a body's key (`bodyKeyExtra`): Blind and a move
+   * rename the base without changing a mark, and a body drawn again starts
+   * at its top and drops focus, which with Sync off nothing put back.
+   */
+  function relabel(base) {
+    const ref = base ? refOf(base) : '';
+    for (const el of refs.columns.querySelectorAll('[data-base-ref]')) {
+      if (el.textContent !== ref) el.textContent = ref;
+    }
   }
 
   function bodyKeyExtra(col) {
@@ -183,10 +135,12 @@ export function initAnalysis(api) {
     // differences, so toggling them never reloads its frame.
     if (!plan || plan.base || plan.off) return '';
     if (plan.pending) return '|dp';
+    if (plan.unreadable) return `|du:${plan.unreadable}`;
     const base = baseId(set);
     const d = set.view.diff;
+    // The base's name is left out on purpose: `relabel` keeps it current.
     return `|d:${base}:${sourceId(columnById(set, base)?.source)}:${d.ignoreCase ? 1 : 0}${d.ignorePunctuation ? 1 : 0}`
-      + `:${plan.bars ? 'b' : 'w'}:${refOf(base)}`;
+      + `:${plan.bars ? 'b' : 'w'}`;
   }
 
   function headInfo(col, record) {
@@ -195,13 +149,20 @@ export function initAnalysis(api) {
     if (!set.view.diff.on) return { diffLine: '<span>Differences are off.</span>' };
     const base = baseId(set);
     if (!base) return {};
-    if (col.id === base) return { isBase: true, diffLine: '<span>Base for differences. Other columns are marked against this one.</span>' };
+    if (col.id === base) {
+      const diffLine = planFor(col, record)?.unreadable
+        ? '<span>Base for differences, but it could not be read, so no column is marked. Choose another base in Differences against.</span>'
+        : '<span>Base for differences. Other columns are marked against this one.</span>';
+      return { isBase: true, diffLine };
+    }
     const baseRef = refOf(base);
     const info = { baseStats: compare.ui.records.get(base)?.stats || null, baseLetter: baseRef };
     const plan = planFor(col, record);
     if (!plan) return info;
     if (plan.off === 'scripts') info.diffLine = '<span>Differences are off for a column that runs its scripts.</span>';
     else if (plan.off) info.diffLine = '<span>Differences show in Dossier format.</span>';
+    else if (plan.unreadable === 'column') info.diffLine = '<span>Not compared: this Dossier document could not be read.</span>';
+    else if (plan.unreadable) info.diffLine = `<span>Not compared: ${escHtml(baseRef)}, the base, could not be read.</span>`;
     else if (plan.pending) info.diffLine = `<span>Counting differences from ${escHtml(baseRef)}.</span>`;
     else if (plan.result.failed) info.diffLine = `<span>Too different from ${escHtml(baseRef)} to compare.</span>`;
     else info.diffLine = diffLine(col, plan, baseRef);
@@ -239,7 +200,7 @@ export function initAnalysis(api) {
     api, ui, planFor, refOf, baseId,
   });
   const {
-    markedColumns, changeColumn, showCurrent, goTo, counter, step,
+    changeColumn, showCurrent, goTo, counter, step,
   } = changes;
   // The view is drawn before it is shown when a comparison opens from the
   // welcome screen or the Open dialog: the first layout places the counter.
@@ -382,17 +343,16 @@ export function initAnalysis(api) {
     root.classList.toggle('hide-removed', !d.showRemoved);
     root.classList.toggle('blind', Boolean(set.view.blind));
     const base = baseId(set);
-    const numbers = set.view.blind ? reportNumbers(set) : null;
-    let pending = false;
+    let stale = false;
     const marked = new Set();
+    // Blind's report order is the page's own order (js/compare/view.js
+    // `renderColumns`), so print, Tab and a screen reader follow it too.
     for (const col of set.columns) {
       const el = columnEl(refs, col.id);
       if (!el) continue;
       el.classList.toggle('is-base', Boolean(d.on && col.id === base));
-      // Blind lays the columns out in report order.
-      el.style.order = numbers ? String(numbers.get(col.id) || 0) : '';
       const plan = planFor(col);
-      if (plan?.pending) pending = true;
+      if (staleBody(set, col, el)) stale = true;
       const rec = compare.ui.records.get(col.id);
       if (plan?.result && !plan.counted && !plan.result.failed && rec?.kind === 'reader' && rec.scrollEl?.isConnected) {
         marked.add(col.id);
@@ -403,6 +363,7 @@ export function initAnalysis(api) {
       }
     }
     keepRulers(marked);
+    relabel(base);
     if (ui.current.setId === set.id && !marked.has(ui.current.colId)) ui.current = { setId: set.id, colId: null, n: 0 };
     showCurrent();
     // The counter starts where the column being read is, and once more at
@@ -422,14 +383,28 @@ export function initAnalysis(api) {
     panel.layout();
     keepShareOn();
 
-    // A Dossier document as the base is read from its drawn record, which
-    // the first draw does not have yet: draw again once it does.
-    if (pending && !ui.pendingFrame && base && compare.ui.records.get(base)) {
+    // A body drawn before what its marks depend on (a Dossier document is
+    // read from its drawn record, which a column drawn before it does not
+    // have yet) is drawn once more. Twice in a row at most, so nothing can
+    // keep the view redrawing: an unreadable document used to, every frame.
+    ui.redraws = stale ? (ui.redraws || 0) + 1 : 0;
+    if (stale && ui.redraws <= 2 && !ui.pendingFrame) {
       ui.pendingFrame = requestAnimationFrame(() => {
         ui.pendingFrame = 0;
         api.render();
       });
     }
+  }
+
+  /**
+   * The column's body was drawn for differences that have changed since in
+   * the same render: its key, with the part this module adds, is not the
+   * one it would get now.
+   */
+  function staleBody(set, col, el) {
+    if (!col.source || compare.ui.forms.has(col.id)) return false;
+    const key = el.querySelector(':scope > .col__body')?.dataset.key;
+    return Boolean(key) && key !== bodyKey(set, col) + bodyKeyExtra(col);
   }
 
   /** The header's Share works in Compare even with no report open. */
@@ -472,7 +447,6 @@ export function initAnalysis(api) {
   });
   for (const name of ['diff', 'panels', 'blind']) api.enableFeature(name);
 
-  return {
-    baseId, planFor, review, panel, markedColumns, changeColumn, goTo, irOf,
-  };
+  // What the one-file export needs (js/compare/export.js).
+  return { baseId, changeColumn };
 }

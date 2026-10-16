@@ -75,7 +75,11 @@ export function bindDiffControls(api, parts) {
       + `<span class="lbl">against</span><span class="rb" aria-hidden="true">${escHtml(name.mark)}</span><span class="picker__name">${escHtml(word)}</span>${icon('down', 'caret')}</button>`;
   }
 
-  /** Bring the picker, the open menu and the Blind help in step. */
+  /**
+   * Bring the picker, the menu and the Blind help in step. The menu is
+   * rebuilt while closed too: kept from before Blind, its hidden markup
+   * still named each column and carried its role.
+   */
   function sync() {
     const s = set();
     if (!s) return;
@@ -100,16 +104,15 @@ export function bindDiffControls(api, parts) {
         host.dataset.html = html;
       }
     }
-    if (!menu.hidden) {
-      const html = menuHtml(s);
-      if (menu.dataset.html !== html) {
-        const focus = document.activeElement && menu.contains(document.activeElement)
-          ? `[data-action="${document.activeElement.dataset.action}"]${document.activeElement.dataset.col ? `[data-col="${document.activeElement.dataset.col}"]` : ''}${document.activeElement.dataset.opt ? `[data-opt="${document.activeElement.dataset.opt}"]` : ''}`
-          : null;
-        menu.innerHTML = html;
-        menu.dataset.html = html;
-        if (focus) menu.querySelector(focus)?.focus({ preventScroll: true });
-      }
+    const html = menuHtml(s);
+    if (menu.dataset.html !== html) {
+      const active = !menu.hidden && menu.contains(document.activeElement) ? document.activeElement.dataset : null;
+      const focus = active
+        ? `[data-action="${active.action}"]${active.col ? `[data-col="${active.col}"]` : ''}${active.opt ? `[data-opt="${active.opt}"]` : ''}`
+        : null;
+      menu.innerHTML = html;
+      menu.dataset.html = html;
+      if (focus) menu.querySelector(focus)?.focus({ preventScroll: true });
     }
     for (const el of root.querySelectorAll('[data-action="cmp-toggle-blind"]')) {
       el.title = 'Hides names, roles and authors and orders the columns by report number. A report that corrects another still reads as an edit of it.';

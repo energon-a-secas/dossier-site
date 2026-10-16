@@ -13,7 +13,7 @@ import {
   tally, tallySentence, criterionSummary, recordSentence, reviewMarkdown, hasVerdict,
 } from '../js/compare/review-model.js';
 import { reportNumbers, nameOf, displayColumns } from '../js/compare/blind.js';
-import { buildSections, sectionsOf } from '../js/compare/sections-panel.js';
+import { buildSections, sectionsOf, renderSections } from '../js/compare/sections-panel.js';
 import { deflateRawSync } from 'node:zlib';
 import {
   encodeComparison, decodeComparison, decodeFragment, COMPARISON_LINK_MAX, INFLATE_MAX_BYTES,
@@ -145,6 +145,30 @@ test('the Sections matrix finds present, renamed, moved and missing sections', (
   assert.deepEqual(data.extras.map((r) => [r.text, r.owner]), [['What went well', 'k1']]);
   assert.deepEqual(data.coverage, [{ colId: 'k1', covered: 3, renamed: 1, adds: 1, total: 5 }]);
   assert.deepEqual(data.unreadable, ['k3'], 'a column running its scripts is named, not counted as missing');
+});
+
+test('a base with no sections still lists the sections only other columns have', () => {
+  const h = (list) => list.map((text) => ({ text, level: 2 }));
+  const set = threeColumns();
+  const headings = { k1: h(['Summary', 'Impact']), k2: [], k3: h(['Impact', 'Timeline']) };
+  const data = buildSections('k2', set.columns, (id) => headings[id]);
+  assert.equal(data.rows.length, 0);
+  assert.deepEqual(data.extras.map((r) => [r.text, r.owner]), [['Summary', 'k1'], ['Impact', 'k1'], ['Timeline', 'k3']]);
+  assert.equal(data.extras[1].cells.k3.state, 'present', 'one row for a section two columns share');
+  // Drawn: the rows used to be dropped with the table when the base had none.
+  const host = { dataset: {}, innerHTML: '', contains: () => false, querySelector: () => null };
+  const hadDocument = 'document' in globalThis;
+  if (!hadDocument) globalThis.document = { activeElement: null };
+  try {
+    renderSections(host, set, 'k2', (id) => headings[id]);
+  } finally {
+    if (!hadDocument) delete globalThis.document;
+  }
+  assert.match(host.innerHTML, /B has no section headings to line up, so every section below is in another column only\./);
+  assert.match(host.innerHTML, /Only in other columns/);
+  assert.equal((host.innerHTML.match(/data-extra="\d"/g) || []).length, 6, 'three rows, each with its button');
+  assert.match(host.innerHTML, /<b>A<\/b> has 2 sections the base does not\./);
+  assert.ok(!/covers all 0/.test(host.innerHTML));
 });
 
 test('a comparison link round trips, and a long one says it does not fit', async () => {

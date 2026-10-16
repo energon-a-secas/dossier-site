@@ -1,7 +1,8 @@
 /**
  * The renderer: turn a model into DOM. Exactly one renderer, every export derives from it.
  *
- * renderReport: idempotent, replaces container content, no listeners
+ * renderReport: idempotent, replaces container content, no listeners; keeps
+ *   the current page tab in view in its row
  * blockHtml: one block to a string, pure, DOM-free outside the one call
  * outline: navigation structure
  */
@@ -39,6 +40,8 @@ export function renderReport(input, container, opts = {}) {
 
   const { page, print = false, allPages = print } = opts;
 
+  // Where the reader left the page tabs, so the rebuilt row starts there.
+  const lastTabScroll = container.querySelector(':scope > .report-shell > .report-tabs')?.scrollLeft;
   container.replaceChildren();
 
   if (!model.pages || !Array.isArray(model.pages) || model.pages.length === 0) {
@@ -54,10 +57,8 @@ export function renderReport(input, container, opts = {}) {
   const header = renderHeader(model, opts.titleLevel);
   shell.appendChild(header);
 
-  if (!allPages) {
-    const tabs = renderTabs(model, page);
-    if (tabs) shell.appendChild(tabs);
-  }
+  const tabs = allPages ? null : renderTabs(model, page);
+  if (tabs) shell.appendChild(tabs);
 
   const content = document.createElement('div');
   content.className = 'report-content';
@@ -76,6 +77,37 @@ export function renderReport(input, container, opts = {}) {
 
   shell.appendChild(content);
   container.appendChild(shell);
+  if (tabs) revealActiveTab(tabs, lastTabScroll);
+}
+
+/**
+ * Keep the current page's tab in sight. The row is rebuilt on every page
+ * change and a new row starts scrolled to its beginning, so on a sheet too
+ * narrow for every tab the current one sat under the faded edge, or past it.
+ * The row starts where the reader left it; if the current tab is not wholly
+ * inside the unfaded part (the row's inline padding is the fade), the row
+ * scrolls it to the middle. Only the row scrolls, never the page, and the
+ * motion is smooth only when the row was already on screen and the reader
+ * has not asked for reduced motion.
+ *
+ * @param {HTMLElement} row
+ * @param {number|undefined} from the previous row's scrollLeft
+ */
+function revealActiveTab(row, from) {
+  const tab = row.querySelector('.report-tab[aria-current="page"]');
+  if (!tab || !row.isConnected || row.scrollWidth <= row.clientWidth) return;
+  if (typeof from === 'number') row.scrollLeft = from;
+  const style = getComputedStyle(row);
+  const box = row.getBoundingClientRect();
+  const rect = tab.getBoundingClientRect();
+  const start = box.left + (parseFloat(style.paddingLeft) || 0);
+  const end = box.left + row.clientWidth - (parseFloat(style.paddingRight) || 0);
+  if (rect.left >= start - 1 && rect.right <= end + 1) return;
+  const room = row.scrollWidth - row.clientWidth;
+  const centre = row.scrollLeft + (rect.left - box.left) - (row.clientWidth - rect.width) / 2;
+  const still = typeof from !== 'number'
+    || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  row.scrollTo({ left: Math.max(0, Math.min(room, centre)), behavior: still ? 'instant' : 'smooth' });
 }
 
 function renderHeader(model, titleLevel = 1) {
@@ -280,11 +312,11 @@ export function blockHtml(block, ctx = {}) {
   const def = blockDef(type);
 
   if (!def) {
-    return errorHtml(`Unknown type: ${escHtml(String(type))}`, suggestType(type));
+    return errorHtml(`Unknown type: ${String(type)}`, suggestType(type));
   }
 
   if (block.__error) {
-    return errorHtml(`Malformed: ${escHtml(block.__error)}`);
+    return errorHtml(`Malformed: ${String(block.__error)}`);
   }
 
   let html;
@@ -390,10 +422,15 @@ function renderEvidenceMarker(evidence) {
   </details>`;
 }
 
+/**
+ * The card a block that cannot be drawn leaves in its place. Both arguments
+ * are plain text, escaped here and only here: the callers used to escape the
+ * type name first, so an unknown type `<b>` read `&lt;b&gt;` on the card.
+ */
 function errorHtml(message, hint = '') {
   let html = `<div class="block-error"><p>${escHtml(message)}</p>`;
   if (hint) {
-    html += `<p class="error-hint">${hint}</p>`;
+    html += `<p class="error-hint">${escHtml(hint)}</p>`;
   }
   html += '</div>';
   return html;

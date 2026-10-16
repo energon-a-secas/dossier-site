@@ -46,12 +46,10 @@ export const state = {
 };
 
 /** Only these keys are read back, and only when they still make sense. */
-export function loadSaved(s) {
-  const saved = preferences.load({});
+function validated(saved) {
   const ok = saved && typeof saved === 'object' && !Array.isArray(saved);
   const src = ok ? saved : {};
-
-  s.preferences = {
+  return {
     sourceTab: SOURCE_TABS.includes(src.sourceTab) ? src.sourceTab : 'form',
     showFindings: src.showFindings === true,
     lastReportId: typeof src.lastReportId === 'string' ? src.lastReportId : null,
@@ -60,17 +58,47 @@ export function loadSaved(s) {
     // enough to dock it. null means the visitor never chose: open by default.
     railOpen: typeof src.railOpen === 'boolean' ? src.railOpen : null,
   };
+}
+
+/** The preferences as they are stored now, which another tab may have changed. */
+function stored() {
+  return validated(preferences.load({}));
+}
+
+export function loadSaved(s) {
+  s.preferences = stored();
   return s.preferences;
 }
 
-/** False means this session works, but the preference could not be saved. */
-export function save(s) {
-  return preferences.save(s.preferences);
-}
-
-/** Set one preference and persist it, without caring whether that worked. */
+/**
+ * Set one preference and persist it, without caring whether that worked.
+ * False means this session works, but the preference could not be saved.
+ *
+ * Only this key is written over what is stored now. Saving this tab's whole
+ * memory of the preferences put back every value another tab had changed
+ * since this one loaded: a second tab's newer `lastReportId` was lost the
+ * moment this tab moved its rail.
+ */
 export function setPreference(s, key, value) {
   if (!Object.prototype.hasOwnProperty.call(s.preferences, key)) return false;
   s.preferences[key] = value;
-  return save(s);
+  return preferences.save({ ...stored(), [key]: value });
+}
+
+/**
+ * Clear a preference only where it still holds one of `values`: in this
+ * tab's memory, and in storage as it is now. A report deleted in another tab
+ * is forgotten here without wiping a newer value that tab wrote.
+ *
+ * @param {object} s
+ * @param {string} key
+ * @param {Array} values
+ * @returns {boolean} false only when a write was needed and failed
+ */
+export function forgetPreference(s, key, values) {
+  if (!Object.prototype.hasOwnProperty.call(s.preferences, key) || !Array.isArray(values)) return false;
+  if (values.includes(s.preferences[key])) s.preferences[key] = null;
+  const now = stored();
+  if (!values.includes(now[key])) return true;
+  return preferences.save({ ...now, [key]: null });
 }

@@ -12,9 +12,17 @@
  *
  * Escape closes a panel that lies over the columns and puts focus back on
  * the toggle that opened it. Design spec 7.3.13 and 7.3.14.
+ *
+ * An open panel follows the window across 700 px in both directions: beside
+ * or over the columns it becomes the phone sheet, and the sheet becomes the
+ * panel again, with what was focused in it still focused. Left to the wide
+ * layout's rules, a panel open when the window narrowed stayed in the page
+ * as a plain block that neither its close button nor Escape could close.
  */
 
-import { openPopover, closePopover, isPhone } from './popover.js';
+import {
+  openPopover, closePopover, isPhone, PHONE,
+} from './popover.js';
 import { setView } from './model.js';
 import { icon } from './icons.js';
 import { redrawRulers } from './ruler.js';
@@ -35,7 +43,13 @@ export function createPanel(api, content) {
   const refs = compare.refs;
   const root = refs.root;
   const panel = refs.panel;
-  const state = { pinned: false, opener: null, decidedFor: null, shown: null };
+  const state = {
+    pinned: false, opener: null, decidedFor: null, shown: null,
+    /** The layout last drawn was the phone's; null before the first. */
+    phone: null,
+    /** The sheet is closing to become the wide panel: it stays open. */
+    keep: false,
+  };
 
   /** Every column keeps the docking width beside the panel. */
   function fits() {
@@ -76,32 +90,83 @@ export function createPanel(api, content) {
     content.render(name, frame.querySelector('.panel__body'));
   }
 
+  /** The view is on screen (not the Reports view, not booting). */
+  const onScreen = () => root.isConnected && root.getClientRects().length > 0;
+
+  /** Take the panel out of the page. */
+  function hide() {
+    panel.hidden = true;
+    panel.replaceChildren();
+    state.shown = null;
+  }
+
+  /** The sheet closed by Escape, the scrim or its close button: the panel is closed. */
+  function sheetClosed() {
+    if (state.keep) return;
+    if (compare.set?.view.panel) api.commit(setView(compare.set, { panel: null }));
+  }
+
+  /**
+   * Open panel `name` as the phone sheet. Focus stays where it was inside
+   * the panel, or goes to its first control; closing the sheet puts it on
+   * the Options button, where the panel toggles live on a phone.
+   */
+  function openSheet(name, { focus = 'first', opener = null } = {}) {
+    draw(name);
+    openPopover(panel, root.querySelector('#cmpOptionsBtn') || opener, {
+      sheet: true,
+      scrim: refs.scrim,
+      focus,
+      onClose: sheetClosed,
+    });
+  }
+
   /** Put the panel where the set and the width say. Called after every render. */
   function layout() {
     const set = compare.set;
     if (!set) return;
     const name = set.view.panel;
+    const phone = isPhone();
+    const crossed = state.phone !== null && state.phone !== phone;
+    state.phone = phone;
     // A set just opened: its stored panel opens only where it would dock.
     if (state.decidedFor !== set.id && refs.body.clientWidth) {
       state.decidedFor = set.id;
-      if (name && (isPhone() || !fits())) {
+      if (name && (phone || !fits())) {
+        hide();
         api.commit(setView(set, { panel: null }), { save: false });
         return;
       }
     }
-    if (isPhone()) {
-      // Only a sheet the reader opened; anything else closes.
+    if (phone) {
+      root.classList.remove('panel-open', 'panel-docked', 'panel-overlay');
+      root.classList.toggle('is-review', name === 'review');
       if (name && !asSheet()) {
+        // The window narrowed under an open panel: it becomes the sheet.
+        if (crossed && onScreen()) {
+          const active = panel.contains(document.activeElement) ? document.activeElement : 'first';
+          openSheet(name, { focus: active });
+          return;
+        }
+        // Only a sheet the reader opened; anything else closes.
+        hide();
         api.commit(setView(set, { panel: null }), { save: false });
         return;
       }
       if (!name && asSheet()) closePopover({ restore: false });
-      root.classList.remove('panel-open', 'panel-docked', 'panel-overlay');
-      root.classList.toggle('is-review', name === 'review');
       if (name) draw(name);
+      else if (!panel.hidden) hide();
       return;
     }
-    if (asSheet()) closePopover({ restore: false });
+    let refocus = null;
+    if (asSheet()) {
+      // The window widened under the sheet: it stays open, as the panel.
+      if (name && panel.contains(document.activeElement)) refocus = document.activeElement;
+      state.keep = Boolean(name);
+      closePopover({ restore: false });
+      state.keep = false;
+      if (name) state.opener = root.querySelector(`.cmp-toolbar [data-action="cmp-panel"][data-panel="${name}"]`);
+    }
     const open = Boolean(name);
     const dock = open && docked();
     const was = `${root.classList.contains('panel-open')}|${root.classList.contains('panel-docked')}`;
@@ -113,7 +178,8 @@ export function createPanel(api, content) {
     if (open) draw(name);
     else panel.replaceChildren();
     state.shown = name;
-    if (was !== `${open}|${dock}`) {
+    if (refocus?.isConnected) refocus.focus({ preventScroll: true });
+    if (was !== `${open}|${dock}` || crossed) {
       // The columns changed width: headings and change ticks moved.
       requestAnimationFrame(() => {
         compare.sync.remeasure();
@@ -139,16 +205,7 @@ export function createPanel(api, content) {
       }
       // The toggle sat in the Options sheet, which has closed: focus comes
       // back to the Options button.
-      const back = root.querySelector('#cmpOptionsBtn') || opener;
-      draw(next);
-      openPopover(panel, back, {
-        sheet: true,
-        scrim: refs.scrim,
-        focus: 'first',
-        onClose: () => {
-          if (compare.set?.view.panel) api.commit(setView(compare.set, { panel: null }));
-        },
-      });
+      openSheet(next, { opener });
       api.commit(setView(set, { panel: next }));
       return;
     }
@@ -187,13 +244,21 @@ export function createPanel(api, content) {
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || event.defaultPrevented || !overlay()) return;
-    if (!root.isConnected || root.offsetParent === null) return;
+    if (!onScreen()) return;
     event.preventDefault();
     close();
   });
 
+  // Crossing 700 px either way, whatever caused it (a resize, a zoom, a
+  // rotated phone). js/compare/index.js also redraws on it, which lays the
+  // panel out again; `layout` sees the crossing once, whichever comes first.
+  if (typeof matchMedia === 'function') {
+    matchMedia(PHONE).addEventListener?.('change', () => {
+      if (compare.set) layout();
+    });
+  }
+
   return {
-    layout, toggle, close, pin, overlay, docked, asSheet,
-    get pinned() { return state.pinned; },
+    layout, toggle, close, pin, overlay, asSheet,
   };
 }

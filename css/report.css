@@ -12,6 +12,48 @@
   overflow: clip;
 }
 
+/* The reading measure, with a margin under 75 characters. --measure counts
+ * average advances of one English sample (css/tokens.css, js/display.js), but
+ * a line holds as many characters as its own letters allow, and a run of
+ * narrow ones (i, l, t, f, spaces, quotes, parentheses) fits several more than
+ * the average. So inside the sheet every measure (roman, italic and the UI
+ * face's) is 6 percent shorter at Narrow and Normal, and 9.5 percent shorter
+ * at Wide, where 6 percent still let prose set lines of 76 to 78 characters.
+ *
+ * What that holds, measured rather than promised: 3,710 paragraphs of English
+ * (the bundled reports and the fleet's READMEs, notes, plans and reviews), set
+ * in all ten elements that keep to a measure, in both faces, at every text
+ * size and at 1024, 1440 and 1920 px. In prose, Narrow sets a median line of
+ * 53 characters and a longest of 64, Normal 60 and 73, Wide 62 and 73. One
+ * paragraph reaches 75 at Wide: a list of quoted CSP keywords, which its
+ * source sets as inline code (wider letters) and the corpus as plain text.
+ * The longest line does not fall steadily with the factor: at Wide, .92 set
+ * 77, .91 and .90 each let two or three paragraphs reach 74 or 75, and .89,
+ * the first factor with no line past 73 in either face, leaves Wide one
+ * character wider than Normal at the median. A proportional measure cannot
+ * cap characters for text written to be narrow, so this is a bound on a
+ * corpus, not a guarantee. scripts/check-reports.mjs sets known worst cases
+ * and the bundled reports' prose at every option and fails on a line past 73.
+ *
+ * The root's value is carried one level down under another name because a
+ * custom property cannot refer to itself; the em in it still resolves on the
+ * element that uses the measure. */
+.report-shell {
+  --sheet-measure: var(--measure);
+  --sheet-measure-italic: var(--measure-italic);
+  --sheet-measure-ui: var(--measure-ui);
+}
+.report-shell > * {
+  --measure: calc(var(--sheet-measure) * .94);
+  --measure-italic: calc(var(--sheet-measure-italic) * .94);
+  --measure-ui: calc(var(--sheet-measure-ui) * .94);
+}
+:root[data-measure="wide"] .report-shell > * {
+  --measure: calc(var(--sheet-measure) * .905);
+  --measure-italic: calc(var(--sheet-measure-italic) * .905);
+  --measure-ui: calc(var(--sheet-measure-ui) * .905);
+}
+
 /* ── Cover ────────────────────────────────────────────────────────────── */
 .report-header { padding: 48px 56px 36px; }
 .report-title-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }

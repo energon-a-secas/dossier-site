@@ -16,252 +16,151 @@
  *
  * Never both tokens on one frame, and never a token changed on a live frame:
  * a mode change builds a new element.
+ *
+ * The documents the frames are handed are made in js/compare/static-copy.js
+ * and re-exported from here.
  */
 
 import { embedDocument } from '../embed-policy.js';
 import { safeHref } from '../render/url.js';
+import { staticCopy, scriptedCopy } from './static-copy.js';
+import { icon } from './icons.js';
 
-const META = /<meta\b[^>]*>/gi;
-const REFRESH = /http-equiv\s*=\s*["']?\s*refresh/i;
-const BASE = /<base\b[^>]*>/gi;
+export {
+  staticCopy, scriptedCopy, stripRefresh, remoteResources, blockedSentence,
+} from './static-copy.js';
 
-/**
- * `&#82;` and `&#x52;` as the characters they stand for, as a parser reads
- * them: `http-equiv="&#82;efresh"` is a refresh.
- */
-function decodeRefs(text) {
-  return text.replace(/&#(x[0-9a-f]+|\d+);?/gi, (ref, code) => {
-    const n = /^x/i.test(code) ? parseInt(code.slice(1), 16) : parseInt(code, 10);
-    return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ref;
-  });
-}
+/** How many times a frame is put back before it shows a notice instead. */
+const MAX_RESTORES = 3;
 
-/**
- * Remove `<meta http-equiv="refresh">`, which would navigate the frame, from
- * markup handed over as text (the interactive host writes it as given). A
- * pattern, so it is hygiene and not a boundary: the static copy also removes
- * refreshes from its parsed tree (`staticCopy`), and a report allowed to run
- * its scripts can move its own sealed frame anyway.
- */
-export function stripRefresh(html) {
-  return String(html || '').replace(META, (tag) => (REFRESH.test(decodeRefs(tag)) ? '' : tag));
-}
+/** What a frame that keeps leaving its report shows in its place. */
+const LEFT_NOTICE = embedDocument('<html lang="en"><head><title>Report not shown</title></head>'
+  + '<body style="font: 15px/1.5 system-ui, sans-serif; margin: 24px; color: #333">'
+  + '<p>This report kept opening other pages in its frame, so it is not shown here. Dossier format still shows its text.</p></body></html>', false);
 
-/**
- * Parse a report into an inert tree. A `<base>` is taken out first: even in
- * a DOMParser document this page's policy (`base-uri`) refuses it and logs
- * the refusal, once per parse, and nothing here needs it.
- */
-function inertDocument(html) {
+/** True while a frame shows its own srcdoc, false for any other page. */
+function showsSource(frame) {
   try {
-    return new DOMParser().parseFromString(String(html || '').replace(BASE, ''), 'text/html');
+    return frame.contentWindow?.location.href === 'about:srcdoc';
   } catch {
-    return null;
+    // Another origin's page: its address cannot even be read.
+    return false;
   }
 }
 
 /**
- * What a static frame's policy lets an image load: inline data and blobs,
- * and a fragment inside the document (an SVG `<use href="#icon">` or a CSS
- * `url(#gradient)`). Anything else, here or on another site, is refused.
- */
-const LOADS = /^\s*(?:data:|blob:|#)/i;
-const IMPORT = /@import\s+(?:url\(\s*)?["']?\s*([^"')\s;]*)[^;]*;?/gi;
-const URL_REF = /url\(\s*(["']?)\s*([^"')]*?)\s*\1\s*\)/gi;
-/** Attributes that fetch something, on the elements that carry them. */
-const FETCHES = [
-  ['img, source, video, audio, track, input', ['src', 'srcset', 'poster']],
-  ['image, use, feImage, feimage', ['href', 'xlink:href']],
-];
-
-/** A piece of CSS without the loads the frame would refuse. */
-function cssWithoutLoads(css) {
-  return String(css)
-    .replace(IMPORT, (rule, target) => (LOADS.test(target) ? rule : ''))
-    .replace(URL_REF, (ref, quote, target) => (LOADS.test(target) ? ref : 'none'));
-}
-
-/** Attributes that hold an address a click, a submit or a load would follow. */
-const URL_ATTRS = new Set([
-  'href', 'xlink:href', 'src', 'action', 'formaction', 'data', 'poster', 'background',
-  'cite', 'longdesc', 'ping', 'codebase', 'lowsrc', 'dynsrc',
-]);
-
-/**
- * A script address, as the URL parser reads it: it drops control characters,
- * spaces, tabs and line breaks, so `java&#9;script:` is still one.
- */
-function scriptUrl(value) {
-  return /^(?:javascript|vbscript):/i.test(String(value || '').replace(/[\u0000-\u0020\u007f]+/g, ''));
-}
-
-/**
- * Viewport-height units (`vh`, `dvh`, `svh`, `lvh`) as fixed pixels, for a
- * frame sized to its own document. There the viewport is the document, so a
- * `min-height: 100vh` hero grows with the frame, the frame grows to fit it,
- * and the two chase each other without end. A reader's screen height is
- * what the author meant by 100vh, so that is what it becomes. A number
- * glued to a name (`.h-100vh`, a class) is a selector, not a length.
- */
-const VH = /(?<![\w.-])(-?(?:\d+\.?\d*|\.\d+))(?:d|s|l)?vh\b/gi;
-function fixedViewport(css, height) {
-  if (!height) return String(css);
-  return String(css).replace(VH, (unit, n) => `${Math.round(Number(n) * height) / 100}px`);
-}
-
-/** Elements that only load something the frames' policy refuses. */
-const REFUSED = 'base, link, iframe, frame, frameset, object, embed, portal';
-
-/**
- * Take out of an inert tree the refresh and the fetching attributes both
- * kinds of frame would refuse: a `<meta http-equiv=refresh>`, and every
- * image, media or SVG source that is not inline.
- */
-function dropLoads(doc) {
-  // Parsed, so a refresh is found here however its tag is written; the
-  // pattern in `stripRefresh` reads text and can be talked past.
-  for (const el of doc.querySelectorAll('meta[http-equiv]')) {
-    if (/refresh/i.test(el.getAttribute('http-equiv') || '')) el.remove();
-  }
-  for (const [selector, names] of FETCHES) {
-    for (const el of doc.querySelectorAll(selector)) {
-      for (const name of names) {
-        const value = el.getAttribute(name);
-        if (value === null) continue;
-        // A srcset lists several sources, and every one would be fetched. A
-        // data URL has commas of its own, so the list is not split; a set
-        // that opens inline and names nothing on another site stays.
-        const loads = LOADS.test(value) && !(name === 'srcset' && /,\s*(?:https?:)?\/\//i.test(value));
-        if (!loads) el.removeAttribute(name);
-      }
-    }
-  }
-}
-
-/** Take out of an inert tree everything the static frame would refuse. */
-function cleanTree(doc, { viewportHeight = 0 } = {}) {
-  for (const el of doc.querySelectorAll(`script, ${REFUSED}`)) el.remove();
-  dropLoads(doc);
-  for (const style of doc.querySelectorAll('style')) {
-    style.textContent = fixedViewport(cssWithoutLoads(style.textContent || ''), viewportHeight);
-  }
-  for (const el of doc.querySelectorAll('*')) {
-    for (const attr of [...el.attributes]) {
-      const name = attr.name.toLowerCase();
-      if (name.startsWith('on')) el.removeAttribute(attr.name);
-      else if (URL_ATTRS.has(name) && scriptUrl(attr.value)) el.removeAttribute(attr.name);
-      else if (name === 'style' && /url\(|@import/i.test(attr.value)) el.setAttribute('style', fixedViewport(cssWithoutLoads(attr.value), viewportHeight));
-      else if (name === 'style' && viewportHeight && /vh\b/i.test(attr.value)) el.setAttribute('style', fixedViewport(attr.value, viewportHeight));
-    }
-  }
-}
-
-/** How many times a copy is parsed again before it is taken to be settled. */
-const SETTLE_PASSES = 4;
-
-/**
- * The document a static frame shows: the report's own markup, less what the
- * frame refuses anyway. Its scripts, handler attributes and script links
- * never run without `allow-scripts`, `<base>`, nested frames and linked
- * stylesheets are refused by the policy, and so is every image, font or
- * stylesheet that is not inline (a file beside the report, or another site).
- * Taking them out first changes nothing on screen and keeps the browser from
- * logging one refusal for each (the Alioth roadmap logged three, the hostile
- * fixture dozens). The column still says what was not loaded: it counts from
- * the source (`remoteResources`), not from this copy.
+ * Put a frame that left its srcdoc back on it. `location.replace` works on
+ * another origin's page too and adds no history entry of its own, so Back
+ * never steps into the stray page; setting the attribute again is the
+ * fallback.
  *
- * Read from an inert DOMParser tree, cleaned and serialised. Serialised
- * markup does not always parse back into the tree it came from: a `<style>`
- * that was text inside MathML in one parse holds a live `<img onerror>` in
- * the next. So the copy is parsed and cleaned again until a pass changes
- * nothing, which makes the cleaned tree the one the frame will build. Markup
- * that never settles is shown as its text alone. The sandbox, with no
- * `allow-scripts`, stops all of this from running anyway; this is so the
- * frame is never handed it.
- *
- * `opts.viewportHeight` (pixels) fixes viewport-height units for a frame
- * that is sized to its document (`fixedViewport`); without it they are left
- * alone, as a frame with its own scroll needs them.
- *
- * @param {string} html
- * @param {{viewportHeight?: number}} [opts]
- * @returns {string}
+ * The stray navigation itself made an entry, and nothing here can take it
+ * back: after a restore the first Back only returns the frame to the report.
+ * A fresh frame element does not help (tried in Chromium: the entry stays,
+ * pointing at a frame that is gone, and that Back does nothing at all). So
+ * where the browser has the Navigation API the navigation is stopped before
+ * it starts (`guardNavigation`) and this backstop is never reached; it is
+ * for the browsers without it.
  */
-export function staticCopy(html, opts = {}) {
-  const text = stripRefresh(html);
-  let doc = inertDocument(text);
-  if (!doc || !doc.documentElement) return text;
-  const clean = { viewportHeight: Math.max(0, Math.round(Number(opts.viewportHeight) || 0)) };
-  let out = '';
-  for (let pass = 0; pass < SETTLE_PASSES; pass += 1) {
-    cleanTree(doc, clean);
-    const next = `<!DOCTYPE html>${doc.documentElement.outerHTML}`;
-    if (next === out) return next;
-    out = next;
-    const again = inertDocument(next);
-    if (!again || !again.documentElement) break;
-    doc = again;
+function restoreSource(frame, source) {
+  try {
+    frame.contentWindow.location.replace('about:srcdoc');
+  } catch {
+    frame.setAttribute('srcdoc', source);
   }
-  return plainCopy(doc);
-}
-
-/**
- * The markup "Run the report's scripts" hands the sealed host: the report as
- * written, its scripts and handlers included, less what the host's policy
- * refuses to load anyway (linked and remote stylesheets, script files, remote
- * fonts and images, nested frames, `<base>`, a refresh). The browser would
- * log two refusals for each of them, which buried the report's own errors
- * under dozens of lines. Hygiene, not a boundary: the sealed frame
- * (`sandbox="allow-scripts"`, an opaque origin, no network) is the boundary,
- * so the copy is cleaned in one pass and keeps everything that runs.
- *
- * @param {string} html
- * @returns {string}
- */
-export function scriptedCopy(html) {
-  const text = stripRefresh(html);
-  const doc = inertDocument(text);
-  if (!doc || !doc.documentElement) return text;
-  for (const el of doc.querySelectorAll(`${REFUSED}, script[src]`)) el.remove();
-  dropLoads(doc);
-  for (const style of doc.querySelectorAll('style')) style.textContent = cssWithoutLoads(style.textContent || '');
-  for (const el of doc.querySelectorAll('[style]')) {
-    const value = el.getAttribute('style');
-    if (/url\(|@import/i.test(value)) el.setAttribute('style', cssWithoutLoads(value));
-  }
-  return `<!DOCTYPE html>${doc.documentElement.outerHTML}`;
-}
-
-/** A document of nothing but `doc`'s text, for markup that never settles. */
-function plainCopy(doc) {
-  const plain = document.implementation.createHTMLDocument(String(doc?.title || 'Report'));
-  const pre = plain.createElement('pre');
-  pre.textContent = String(doc?.body?.textContent || '').trim();
-  plain.body.append(pre);
-  return `<!DOCTYPE html>${plain.documentElement.outerHTML}`;
 }
 
 /**
  * @param {string} html
  * @param {{title: string, onBlockedLink?: (href: string) => void,
- *   onAnchor?: (el: Element) => void, className?: string,
- *   viewportHeight?: number}} opts
+ *   onAnchor?: (el: Element) => void, onRestored?: (left: boolean) => void,
+ *   contain?: boolean, className?: string, viewportHeight?: number}} opts
  *   `onAnchor` replaces the frame's own scroll for an in-page link, for a
  *   frame sized to its document, which has nothing to scroll (the Reports
  *   view scrolls the page instead). `viewportHeight` goes to `staticCopy`.
+ *   `onRestored` hears that the frame left the report and was put back
+ *   (`left` true once it kept leaving and shows a notice instead); without
+ *   it, the frame says so itself in a note above it (`restoredNote`). `contain` keeps a
+ *   frame that scrolls inside itself from scrolling this page at its ends
+ *   (a compare column; a frame sized to its document has no ends of its own).
  * @returns {HTMLIFrameElement}
  */
 export function staticFrame(html, {
-  title, onBlockedLink, onAnchor, className = 'col__frame', viewportHeight = 0,
+  title, onBlockedLink, onAnchor, onRestored, contain = false, className = 'col__frame', viewportHeight = 0,
 } = {}) {
   const frame = document.createElement('iframe');
   frame.className = className;
   frame.setAttribute('sandbox', 'allow-same-origin');
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.title = title || 'Report, original layout';
-  frame.srcdoc = embedDocument(staticCopy(html, { viewportHeight }), false);
-  frame.addEventListener('load', () => bindLinks(frame, onBlockedLink, onAnchor));
+  const source = embedDocument(staticCopy(html, { viewportHeight }), false);
+  frame.srcdoc = source;
+  // The backstop. Links are caught (`bindLinks`), what writes an address
+  // with no click is taken out (`staticCopy`) and any other navigation is
+  // stopped before it starts where the browser can (`guardNavigation`), so
+  // nothing should take the frame away from its report; if something does,
+  // the next load is another page, and the frame is put back on the report.
+  // That load is stopped here, registered first, so nothing else reads a
+  // page that is not the report.
+  let loads = 0;
+  let restores = 0;
+  frame.addEventListener('load', (event) => {
+    loads += 1;
+    if (loads > 1 && !showsSource(frame)) {
+      event.stopImmediatePropagation();
+      restores += 1;
+      const left = restores > MAX_RESTORES;
+      if (left) frame.setAttribute('srcdoc', LEFT_NOTICE);
+      else restoreSource(frame, source);
+      if (typeof onRestored === 'function') onRestored(left);
+      else restoredNote(frame, left);
+      return;
+    }
+    bindLinks(frame, onBlockedLink, onAnchor);
+    if (contain) containScroll(frame);
+  });
   return frame;
+}
+
+/**
+ * A static frame's own scroll stops at its ends instead of carrying on into
+ * this page: the Compare view's page scrolls only to reach the footer, and a
+ * column read to its end must not take the toolbar with it.
+ */
+function containScroll(frame) {
+  try {
+    frame.contentDocument?.documentElement?.style.setProperty('overscroll-behavior', 'contain');
+  } catch {
+    // Not the report's own page; the load that follows puts it back.
+  }
+}
+
+/**
+ * Say above a frame that it left the report and was put back, or that it
+ * kept leaving and is shown no more, for a caller with no place of its own to
+ * say it (the Reports view; a compare column passes `onRestored`). A status,
+ * so it is read out as it appears. In the Reports view the frame sits in a
+ * holder that also lays the outline's anchors over it at the frame's own
+ * coordinates, so the note goes before the holder and the anchors stay put.
+ */
+function restoredNote(frame, left) {
+  const holder = frame.parentElement;
+  const spot = holder && holder.classList.contains('block-embed__frame') ? holder : frame;
+  if (!spot.isConnected || !spot.parentNode) return;
+  let line = spot.previousElementSibling;
+  if (!line || !line.hasAttribute('data-embed-restored')) {
+    line = document.createElement('p');
+    line.className = 'embed-note';
+    line.setAttribute('role', 'status');
+    line.setAttribute('data-embed-restored', '');
+    spot.before(line);
+  }
+  const text = left
+    ? 'This report kept opening other pages in its frame, so it is not shown here. Dossier format still shows its text.'
+    : 'Something in this report opened another page in its frame, so the report was loaded again from the top.';
+  if (line.textContent === text) return;
+  line.innerHTML = `${icon('info')}<span></span>`;
+  line.lastElementChild.textContent = text;
 }
 
 /**
@@ -282,11 +181,29 @@ export function interactiveFrame(html, { title, className = 'col__frame col__fra
   return frame;
 }
 
+const XLINK = 'http://www.w3.org/1999/xlink';
+
+/**
+ * Everything a click could follow: HTML links and image map areas, and every
+ * SVG link, whether its address is `href`, `xlink:href` or an animation's.
+ */
+export const LINK_SELECTOR = 'a[href], a[*|href], area[href], svg a';
+
+/** The address a link follows now: an SVG link's animated one when it has one. */
+export function linkAddress(el) {
+  const animated = el && el.href && typeof el.href === 'object' ? el.href.animVal : '';
+  return String(animated || el?.getAttribute('href') || el?.getAttributeNS?.(XLINK, 'href') || '').trim();
+}
+
+/** The address of the frame's own document, as a navigation names it. */
+const SELF = 'about:srcdoc#';
+
 /**
  * Links in a static frame do what a reader expects without the report
  * deciding anything: an in-page link scrolls the frame, a web or mail
- * address opens in a new tab through `safeHref`, and anything else stays
- * put and says why. The listener is this page's, on the frame's document.
+ * address opens in a new tab through `safeHref` (on a click or a middle
+ * click), and anything else stays put and says why. The listener is this
+ * page's, on the frame's document.
  */
 function bindLinks(frame, onBlockedLink, onAnchor) {
   let doc = null;
@@ -297,24 +214,13 @@ function bindLinks(frame, onBlockedLink, onAnchor) {
   }
   if (!doc || doc.__dossierLinks) return;
   doc.__dossierLinks = true;
-  const handler = (event) => {
-    const closest = (selector) => (event.target && event.target.closest ? event.target.closest(selector) : null);
-    // A form in the report never submits (the sandbox has no allow-forms);
-    // cancelling the click first spares the console the refusal.
-    const submit = closest('button:not([type]), button[type="submit" i], input[type="submit" i], input[type="image" i]');
-    if (submit && submit.form) {
-      event.preventDefault();
-      return;
-    }
-    const target = closest('a[href], area[href]');
-    if (!target) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.type !== 'click') return;
-    const raw = (target.getAttribute('href') || '').trim();
-    if (raw.startsWith('#')) {
-      if (typeof onAnchor === 'function') onAnchor(anchorTarget(frame.contentDocument, raw.slice(1)));
-      else scrollToAnchor(frame, raw.slice(1));
+  /** What following `raw` does here: never a navigation of the frame. */
+  const follow = (raw, middle) => {
+    const key = raw.startsWith('#') ? raw.slice(1) : raw.startsWith(SELF) ? raw.slice(SELF.length) : null;
+    if (key !== null) {
+      if (middle) return;
+      if (typeof onAnchor === 'function') onAnchor(anchorTarget(frame.contentDocument, key));
+      else scrollToAnchor(frame, key);
       return;
     }
     const href = safeHref(raw);
@@ -324,8 +230,145 @@ function bindLinks(frame, onBlockedLink, onAnchor) {
     }
     if (typeof onBlockedLink === 'function') onBlockedLink(raw);
   };
+  const handler = (event) => {
+    // Read from the click's composed path, not with `closest`: inside a
+    // declarative shadow root (which the parser builds with no script) a
+    // listener on the document sees the click retargeted to the root's host.
+    // A closed root would hide its links from this path, so the static copy
+    // builds every root open (js/compare/static-copy.js).
+    const path = eventPath(event);
+    const closest = (selector) => path.find((node) => node && node.nodeType === 1 && node.matches(selector)) || null;
+    // A form in the report never submits (the sandbox has no allow-forms);
+    // cancelling the click first spares the console the refusal.
+    const submit = closest('button:not([type]), button[type="submit" i], input[type="submit" i], input[type="image" i]');
+    if (submit && submit.form) {
+      event.preventDefault();
+      return;
+    }
+    const target = closest(LINK_SELECTOR);
+    if (!target) {
+      // A link an SVG <use> draws lives in a copy no listener out here can
+      // read, so its address is unknown. A click there reaches the
+      // navigation guard; a middle click, or a click with a modifier key,
+      // would open a tab or window that no guard sees, so it does nothing.
+      if (opensElsewhere(event) && drawnByUse(path)) event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    // A middle click opens a web link in a new tab, as a click does; a right
+    // click follows nothing.
+    const middle = event.type === 'auxclick' && event.button === 1;
+    if (event.type !== 'click' && !middle) return;
+    const raw = linkAddress(target);
+    // An SVG <a> with no address is not a link.
+    if (raw) follow(raw, middle);
+  };
   doc.addEventListener('click', handler, true);
   doc.addEventListener('auxclick', handler, true);
+  guardNavigation(frame, follow);
+}
+
+/** The nodes an event passed through, innermost first, shadow roots included. */
+function eventPath(event) {
+  if (typeof event.composedPath === 'function') return event.composedPath();
+  const chain = [];
+  for (let node = event.target; node; node = node.parentNode) chain.push(node);
+  return chain;
+}
+
+/** A middle click, or a click that a modifier key sends to a new tab or window. */
+function opensElsewhere(event) {
+  if (event.type === 'auxclick') return event.button === 1;
+  return event.type === 'click' && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
+}
+
+/** True when the innermost element an event reached is an SVG `<use>`. */
+function drawnByUse(path) {
+  const inner = path.find((node) => node && node.nodeType === 1);
+  return Boolean(inner && inner.localName === 'use' && inner.namespaceURI === 'http://www.w3.org/2000/svg');
+}
+
+/** The frames' Navigation objects already guarded, one per document shown. */
+const guarded = new WeakSet();
+
+/**
+ * Stop a navigation of the frame before it starts, where the browser has the
+ * Navigation API (its `navigate` event fires in the frame's window for a
+ * navigation the report's document starts, and this page's listener can
+ * cancel it). Nothing should get this far, since links are caught first; a
+ * navigation that does is cancelled, so the frame keeps its report and the
+ * history gets no entry, which the load backstop in `staticFrame` cannot
+ * undo. A reader who clicked something gets what a caught link gives;
+ * anything else just does not happen. Back, Forward and a reload of the
+ * report itself are left alone.
+ */
+function guardNavigation(frame, follow) {
+  let nav = null;
+  try {
+    nav = frame.contentWindow?.navigation || null;
+  } catch {
+    nav = null;
+  }
+  if (!nav || guarded.has(nav)) return;
+  guarded.add(nav);
+  nav.addEventListener('navigate', (event) => {
+    if (!event.cancelable || event.navigationType === 'traverse' || event.navigationType === 'reload') return;
+    event.preventDefault();
+    if (!event.userInitiated) return;
+    const raw = String(event.destination?.url || '');
+    const written = asWritten(frame, raw);
+    if (written === null) follow(raw, false);
+    else if (written) follow(written, false);
+  });
+}
+
+/**
+ * A navigation's destination in the report's own terms, when the report
+ * wrote a relative address. A srcdoc document has no address of its own, so
+ * its relative links resolve against this page's: `other.html` arrives as
+ * this site's `/other.html` and `#notes` as this page's address with
+ * `#notes` on it. Opened as they arrive, they would load Dossier itself in a
+ * new tab. Back in the report's terms they are what a caught link is: `#key`
+ * for a place in the report, a relative path for a file beside it, or ''
+ * for the report itself (nothing to do). Null for an address elsewhere.
+ */
+function asWritten(frame, raw) {
+  let url = null;
+  let base = null;
+  try {
+    url = new URL(raw);
+    base = new URL(frame.contentDocument?.baseURI || document.baseURI);
+  } catch {
+    return null;
+  }
+  if (url.origin === 'null' || url.origin !== base.origin) return null;
+  const [where, ...hash] = url.href.split('#');
+  if (where === base.href.split('#')[0]) return hash.length && hash.join('#') ? `#${hash.join('#')}` : '';
+  const dir = new URL('.', base).href;
+  let rel = url.href.startsWith(dir) ? url.href.slice(dir.length) : `${url.pathname}${url.search}${url.hash}`;
+  try { rel = decodeURI(rel); } catch { /* keep it encoded */ }
+  // A first segment with a colon in it would read as a scheme.
+  if (!rel || /^[^/?#]*:/.test(rel)) rel = `./${rel}`;
+  return rel;
+}
+
+/** The longest link address a toast repeats; a longer one is cut short. */
+const LINK_SHOWN = 80;
+
+/**
+ * Why a link in a static frame did nothing, for `onBlockedLink`. A relative
+ * address names a file that sat beside the report; anything with a scheme of
+ * its own (`data:`, `file:`, `javascript:`) was refused, and the sentence
+ * says so without repeating it.
+ */
+export function blockedLinkSentence(href) {
+  const raw = String(href || '').trim();
+  if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//')) {
+    return 'That link was not opened: Dossier only opens web and mail links.';
+  }
+  const shown = raw.length > LINK_SHOWN ? `${raw.slice(0, LINK_SHOWN - 1)}\u2026` : raw;
+  return `That link points at ${shown}, a file beside the report that Dossier does not have.`;
 }
 
 /** The element an in-page link names, by id or by name, or null for the top. */
@@ -412,76 +455,4 @@ export function frameScroller(frame, headings) {
       return () => win.removeEventListener('scroll', fn);
     },
   };
-}
-
-// ── Remote resources ─────────────────────────────────────────────────────────
-
-function hostOf(src) {
-  try {
-    return new URL(src, 'https://invalid.invalid/').host || 'another site';
-  } catch {
-    return 'another site';
-  }
-}
-
-/**
- * Count what an Original frame will not load: images, fonts and stylesheets
- * on other sites. The frame's policy blocks every one of them; the column
- * says how many, so a reader knows the look is not quite the author's.
- *
- * @returns {{images: number, fonts: number, styles: number, hosts: string[]}}
- */
-export function remoteResources(html) {
-  const out = { images: 0, fonts: 0, styles: 0, hosts: [] };
-  const doc = inertDocument(html);
-  if (!doc) return out;
-  const hosts = new Set();
-  const remote = (value) => /^(https?:)?\/\//i.test(String(value || '').trim());
-  const note = (value) => hosts.add(hostOf(String(value).trim()));
-  for (const img of doc.querySelectorAll('img[src], img[srcset], image[href], source[srcset]')) {
-    const value = img.getAttribute('src') || img.getAttribute('href') || (img.getAttribute('srcset') || '').trim().split(/\s/)[0];
-    if (remote(value)) { out.images += 1; note(value); }
-  }
-  for (const link of doc.querySelectorAll('link[href]')) {
-    const value = link.getAttribute('href');
-    if (!remote(value)) continue;
-    const rel = (link.getAttribute('rel') || '').toLowerCase();
-    if (/fonts\.(googleapis|gstatic)\.com|use\.typekit|fonts\./i.test(value)) out.fonts += 1;
-    else if (rel.includes('stylesheet')) out.styles += 1;
-    else continue;
-    note(value);
-  }
-  const css = [...doc.querySelectorAll('style')].map((s) => s.textContent || '').join('\n')
-    + [...doc.querySelectorAll('[style]')].map((el) => el.getAttribute('style')).join('\n');
-  for (const match of css.matchAll(/@font-face[^}]*?url\(\s*['"]?((?:https?:)?\/\/[^'")\s]+)/gi)) {
-    out.fonts += 1;
-    note(match[1]);
-  }
-  for (const match of css.matchAll(/@import\s+(?:url\()?\s*['"]?((?:https?:)?\/\/[^'")\s;]+)/gi)) {
-    if (/font/i.test(match[1])) out.fonts += 1;
-    else out.styles += 1;
-    note(match[1]);
-  }
-  for (const match of css.matchAll(/url\(\s*['"]?((?:https?:)?\/\/[^'")\s]+)/gi)) {
-    if (/\.(woff2?|ttf|otf|eot)(\?|$)/i.test(match[1])) continue;
-    out.images += 1;
-    note(match[1]);
-  }
-  out.hosts = [...hosts].slice(0, 6);
-  return out;
-}
-
-/** The column sentence for what was not loaded, or '' when nothing was. */
-export function blockedSentence(counts) {
-  if (!counts) return '';
-  const parts = [];
-  const n = (v, one, many) => `${v} ${v === 1 ? one : many}`;
-  if (counts.fonts) parts.push(n(counts.fonts, 'web font', 'web fonts'));
-  if (counts.images) parts.push(n(counts.images, 'image', 'images'));
-  if (counts.styles) parts.push(n(counts.styles, 'stylesheet', 'stylesheets'));
-  if (!parts.length) return '';
-  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
-  const where = counts.hosts?.length ? ` from ${counts.hosts.join(', ')}` : '';
-  const total = (counts.fonts || 0) + (counts.images || 0) + (counts.styles || 0);
-  return `${list}${where} ${total === 1 ? 'was' : 'were'} not loaded. Dossier never fetches from other sites.`;
 }

@@ -84,7 +84,7 @@ export const RESULTS = [
           state: enom(TEST_STATES, { required: true, accepts: ['status', 'result'] }),
           duration: num(),
           suite: str({ maxLen: 120, accepts: ['classname'] }),
-          message: text({ maxLen: 2000, note: 'The failure output. Only read for a failure.' }),
+          message: text({ maxLen: 2000, note: 'The test output, shown whatever the state: the failure in full, or a warning or retry note on a test that passed.' }),
         }),
         { max: 2000, note: 'Omit on a clean run and give the counts instead.' },
       ),

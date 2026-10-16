@@ -28,6 +28,13 @@
  * opened from the welcome screen is drawn before the view shows) is marked
  * `unplaced` and worked out again at the first layout, or the counter read
  * "0 of 15" over a changed title at the top of the column.
+ *
+ * A change stays current while its top, tag and all, is inside the column.
+ * Once its top goes up under the column's edge, the next change takes over
+ * if it is already in the upper part of the column (above the reading
+ * line); if it is not, the reader is still inside the long change, which
+ * stays current with its tag held at the column's top edge. Its tag used to
+ * be cut off there, over a change outlined from somewhere above the column.
  */
 
 import { say } from '../share.js';
@@ -43,6 +50,10 @@ const CHANGE_OFFSET = 48;
 export const TICK_OFFSET = 40;
 /** While a step scrolls, the scroll position does not move the current change. */
 const STEP_LOCK_MS = 700;
+/** Room a change's "2 of 9" tag takes above it. */
+const TAG_ROOM = 22;
+/** Where sync reads a column, as a share of its height (js/compare/sync.js). */
+const READING_LINE = 0.3;
 
 /**
  * @param {{api: object, ui: object, planFor: Function, refOf: Function, baseId: Function}} ctx
@@ -118,6 +129,32 @@ export function createChanges({ api, ui, planFor, refOf, baseId }) {
       sr.dataset.text = sr.textContent;
       sr.textContent = `${sr.dataset.text.replace(/:\s*$/, '')}, change ${n} of ${total}: `;
     }
+    holdTag();
+  }
+
+  /**
+   * Keep the current change's tag inside its column: while the change's top
+   * is above the column's top edge, the tag moves down to that edge. When
+   * too little of the change is left in the column to hold it, the tag goes
+   * until the change comes back, rather than show cut in half.
+   */
+  function holdTag() {
+    const tag = root.querySelector('.cur-tag');
+    const scroller = scrollerEl(ui.current.colId);
+    if (!tag || !scroller || !scroller.getClientRects().length) return;
+    tag.style.top = '';
+    tag.classList.remove('is-held', 'is-out');
+    const edge = scroller.getBoundingClientRect().top + 2;
+    const box = tag.getBoundingClientRect();
+    const need = edge - box.top;
+    if (need <= 0) return;
+    const room = tag.parentElement.getBoundingClientRect().bottom - box.bottom - 2;
+    if (room < need) {
+      tag.classList.add('is-out');
+      return;
+    }
+    tag.style.top = `${(parseFloat(getComputedStyle(tag).top) || 0) + need}px`;
+    tag.classList.add('is-held');
   }
 
   function setCurrent(colId, n) {
@@ -143,17 +180,28 @@ export function createChanges({ api, ui, planFor, refOf, baseId }) {
   /**
    * The last change at or above the top of the column, from where it is
    * scrolled; null while the column is not laid out (the view is hidden).
+   * One whose top has gone up under the column's edge gives way to the next
+   * change when that one is above the reading line already.
    */
   function currentFromScroll(colId) {
     const scroller = scrollerEl(colId);
     if (!scroller || !scroller.getClientRects().length) return null;
-    const line = scroller.scrollTop + CHANGE_OFFSET + 12;
+    const top = scroller.scrollTop;
+    const line = top + CHANGE_OFFSET + 12;
     let at = 0;
+    let atY = 0;
+    let next = null;
     for (const el of scroller.querySelectorAll('[data-chg]')) {
       if (!el.getClientRects().length) continue;
-      if (offsetIn(scroller, el) <= line) at = Number(el.dataset.chg);
-      else break;
+      const y = offsetIn(scroller, el);
+      if (y > line) {
+        next = { n: Number(el.dataset.chg), y };
+        break;
+      }
+      at = Number(el.dataset.chg);
+      atY = y;
     }
+    if (at && atY < top + TAG_ROOM && next && next.y <= top + scroller.clientHeight * READING_LINE) return next.n;
     return at;
   }
 
@@ -233,13 +281,16 @@ export function createChanges({ api, ui, planFor, refOf, baseId }) {
   /** A column scrolled: the current change follows it, unless a step is still landing. */
   function follow() {
     const colId = changeColumn();
-    if (!colId || performance.now() <= ui.lockUntil) return;
-    const n = whereRead(colId);
-    if (n === null) return;
-    if (ui.current.unplaced || n !== ui.current.n || ui.current.colId !== colId || ui.current.setId !== compare.set.id) setCurrent(colId, n);
+    if (colId && performance.now() > ui.lockUntil) {
+      const n = whereRead(colId);
+      if (n !== null && (ui.current.unplaced || n !== ui.current.n || ui.current.colId !== colId || ui.current.setId !== compare.set.id)) {
+        setCurrent(colId, n);
+      }
+    }
+    holdTag();
   }
 
   return {
-    markedColumns, changeColumn, showCurrent, setCurrent, place, currentFromScroll, goTo, counter, step, follow,
+    changeColumn, showCurrent, place, goTo, counter, step, follow,
   };
 }

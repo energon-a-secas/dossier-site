@@ -61,7 +61,7 @@ export function reportNumbers(set) {
   return numbers;
 }
 
-export function isBlind(set) {
+function isBlind(set) {
   return Boolean(set?.view?.blind);
 }
 

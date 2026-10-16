@@ -11,7 +11,9 @@
  * lists, fenced and indented code, GFM tables, block quotes, rules; inline
  * bold, italic, code, links, images, autolinks, bare URLs, strikethrough (as
  * plain text), backslash escapes and hard breaks. Raw HTML is read as text
- * with its tags removed, never as markup.
+ * with its tags removed, never as markup, except `<script>` and `<style>`,
+ * which go with everything inside them: a browser shows none of it, so it is
+ * not part of what the report says.
  */
 
 import { safeHref, safeImageSrc } from '../render/url.js';
@@ -23,6 +25,13 @@ const SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
 const ITEM = /^( *)([-*+]|\d{1,9}[.)])(?:[ \t]+(.*)|[ \t]*$)/;
 const QUOTE = /^ {0,3}> ?(.*)$/;
 const TABLE_RULE = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+/** A line that opens a script or style block (CommonMark's HTML block, type 1). */
+const RAW_BLOCK = /^ {0,3}<(script|style)(?=[\s>/]|$)/i;
+/**
+ * A script or style element inside a paragraph, to its end tag or the end of
+ * the text; a code span is matched first so what it shows is left alone.
+ */
+const RAW_INLINE = /(`+)[\s\S]*?[^`]\1(?!`)|<(script|style)\b[^>]*>[\s\S]*?(?:<\/\2\s*>|$)/gi;
 
 /**
  * @param {string} source
@@ -86,6 +95,13 @@ function parseBlocks(lines, ctx) {
         i += 1;
       }
       out.push(fence[2] ? { t: 'pre', text: body.join('\n'), lang: fence[2] } : { t: 'pre', text: body.join('\n') });
+      continue;
+    }
+
+    const raw = RAW_BLOCK.exec(line);
+    if (raw) {
+      flush();
+      i = skipRawBlock(lines, i, raw[1], para);
       continue;
     }
 
@@ -160,6 +176,28 @@ function parseBlocks(lines, ctx) {
   }
   flush();
   return out;
+}
+
+/**
+ * Skip a script or style block from line `start`: it runs to the line that
+ * holds its end tag, or to the end of the document, as CommonMark reads it.
+ * Words after the end tag on that line are kept, as the start of `para`.
+ *
+ * @returns {number} the index of the block's last line
+ */
+function skipRawBlock(lines, start, name, para) {
+  const end = new RegExp(`</${name}\\s*>`, 'i');
+  for (let i = start; i < lines.length; i += 1) {
+    // The end tag is looked for after the opening tag on the first line.
+    const from = i === start ? lines[i].search(/>/) + 1 : 0;
+    const found = from > 0 || i > start ? end.exec(lines[i].slice(from)) : null;
+    if (found) {
+      const after = lines[i].slice(from + found.index + found[0].length);
+      if (after.trim()) para.push(after.trim());
+      return i;
+    }
+  }
+  return lines.length - 1;
 }
 
 function heading(level, raw, ctx) {
@@ -280,8 +318,11 @@ function link(inl, raw, ctx) {
  * autolinks, emphasis and the rest as text.
  */
 export function inlineRuns(source, ctx = { links: [] }) {
-  // Tags go, their words stay. An autolink (`<https://...>`) is not a tag.
-  const text = String(source || '').replace(/<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?\/?>/gi, (tag) => (/^<br\b/i.test(tag) ? '\n' : ''));
+  // Scripts and styles go with their contents; other tags go and their words
+  // stay. An autolink (`<https://...>`) is not a tag.
+  const text = String(source || '')
+    .replace(RAW_INLINE, (match, ticks) => (ticks ? match : ''))
+    .replace(/<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?\/?>/gi, (tag) => (/^<br\b/i.test(tag) ? '\n' : ''));
   return mergeText(scan(text, ctx));
 }
 

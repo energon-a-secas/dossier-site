@@ -17,6 +17,11 @@
  * last few changes never reach the line under the top, and read from the
  * scroll position alone `]` stopped short of them.
  *
+ * On a phone one column shows at a time, and the counter and the previous
+ * and next buttons act on that one, as in the app. They used to act on the
+ * column the counter showed on the desktop the file was made on, which a
+ * phone may not show at all.
+ *
  * @param {Document} doc
  */
 export function comparisonRuntime(doc) {
@@ -138,6 +143,14 @@ export function comparisonRuntime(doc) {
   var counter = doc.getElementById('xCounter');
   var marked = scrollers.filter(function (s) { return s.el && s.el.querySelector('[data-chg]'); });
   var active = marked.filter(function (s) { return s.col.hasAttribute('data-active'); })[0] || marked[0] || null;
+  var phone = doc.defaultView && doc.defaultView.matchMedia ? doc.defaultView.matchMedia('(max-width: 699px)') : null;
+
+  // The column the counter and the buttons act on: on a phone, the one shown.
+  function current() {
+    if (!phone || !phone.matches) return active;
+    var shown = root.querySelector('.col.is-focus');
+    return scrollers.filter(function (s) { return s.col === shown; })[0] || null;
+  }
 
   // The change last stepped to or shown, per the column being read.
   var last = null;
@@ -165,20 +178,23 @@ export function comparisonRuntime(doc) {
   }
   function count() {
     if (!counter) return;
-    var s = active;
+    var s = current();
     var list = changes(s);
-    var n = s ? here(s) : 0;
-    if (s) last = { s: s, n: n };
+    var n = s && s.el ? here(s) : 0;
+    if (s && s.el) last = { s: s, n: n };
     root.querySelectorAll('.u-current').forEach(function (el) { el.classList.remove('u-current'); });
-    var el = s && n ? s.el.querySelector('[data-chg="' + n + '"]') : null;
+    var el = s && s.el && n ? s.el.querySelector('[data-chg="' + n + '"]') : null;
     if (el) el.classList.add('u-current');
     counter.querySelector('.counter__main').textContent = list.length ? n + ' of ' + list.length : 'No changes';
     counter.querySelector('.counter__sub').textContent = s ? 'in ' + s.col.getAttribute('data-name') : '';
   }
   function step(dir) {
-    var s = active;
+    var s = current();
     var list = changes(s);
-    if (!list.length) return;
+    if (!list.length) {
+      if (s) say('No changes are marked in ' + s.col.getAttribute('data-name') + '.');
+      return;
+    }
     var name = s.col.getAttribute('data-name');
     var n = here(s) + dir;
     if (n < 1 || n > list.length) {
@@ -224,8 +240,17 @@ export function comparisonRuntime(doc) {
     } else if (t.getAttribute('role') === 'tab') {
       root.querySelectorAll('.focus-switch [role="tab"]').forEach(function (b) { b.setAttribute('aria-selected', String(b === t)); });
       cols.forEach(function (c) { c.classList.toggle('is-focus', c.getAttribute('data-col') === t.getAttribute('data-col')); });
+      // The column shown is the one the counter follows.
+      var shown = scrollers.filter(function (s) { return s.col.classList.contains('is-focus'); })[0];
+      if (shown && marked.indexOf(shown) >= 0) active = shown;
+      count();
     }
   });
+  if (phone) {
+    var crossed = function () { count(); };
+    if (phone.addEventListener) phone.addEventListener('change', crossed);
+    else if (phone.addListener) phone.addListener(crossed);
+  }
   var sync = doc.getElementById('xSync');
   if (sync) sync.addEventListener('change', function () { mode = sync.value; });
   doc.addEventListener('keydown', function (event) {

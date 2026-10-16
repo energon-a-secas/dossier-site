@@ -121,7 +121,8 @@ test('class suffixes from every enum fall back to a known value', () => {
     [{ type: 'checklist', items: [{ label: 'l', state: 'evil"' }] }, 'check-todo'],
     [{ type: 'timeline', items: [{ at: '1', label: 'a', tone: 'evil"' }, { at: '2', label: 'b' }] }, 'timeline-neutral'],
     [{ type: 'findings', items: [{ message: 'm', level: 'evil"' }] }, 'finding-level--note'],
-    [{ type: 'tests', items: [{ name: 'n', state: 'evil"' }] }, 'test-state--passed'],
+    // Unknown, never passed: a fallback to "passed" painted an unclassified test green.
+    [{ type: 'tests', items: [{ name: 'n', state: 'evil"' }] }, 'test-state--unknown'],
     [{ type: 'scorecard', criteria: [{ label: 'l', verdict: 'evil"' }] }, 'verdict--unknown'],
     [{ type: 'files', items: [{ path: 'p', state: 'evil"' }] }, '<td>modified</td>'],
   ];

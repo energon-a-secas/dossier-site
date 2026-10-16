@@ -12,19 +12,6 @@
  * DOM-free. Node imports this.
  */
 
-import { blockDef } from './registry/index.js';
-
-/**
- * Derive and nothing else: metric delta/deltaPct from baseline, metric direction
- * from delta and better, block and page id from title, files.totals, checklist.done,
- * scorecard.passed, diff.stats from patch, log.lines, chart.max to a round ceiling.
- *
- * @param {object} model
- * @returns {undefined}
- *
- * Mutates the model in place. Pure in the mathematical sense: same input always
- * produces the same mutations, no side effects beyond the model.
- */
 /**
  * Record that this object's field was computed here, not written by the author.
  *
@@ -53,23 +40,71 @@ export function wasDerived(obj, field) {
   return Boolean(obj && Array.isArray(obj.__derived) && obj.__derived.includes(field));
 }
 
-export function derive(model) {
-  if (!model?.dossier) return;
+/**
+ * Derive and nothing else: metric delta/deltaPct from baseline, metric direction
+ * from delta and better, block and page id from title, files.totals, checklist.done,
+ * scorecard.passed, diff.stats from patch, log.lines, chart.max to a round ceiling.
+ *
+ * Mutates the model in place. Pure in the mathematical sense: same input always
+ * produces the same mutations, no side effects beyond the model.
+ *
+ * Never throws, whatever the document holds. A block that is null or not an
+ * object, a log source or a patch that is not text, a metric that is not an
+ * object or whose numbers are not numbers: each is skipped, and when
+ * `findings` is given a finding says what was not derived and where. These
+ * used to throw out of parse(), which promises a fatal or findings and never
+ * an exception, so the editor and the Open dialog showed nothing at all.
+ *
+ * @param {object} model
+ * @param {Array} [findings] where to record what could not be derived
+ * @returns {undefined}
+ */
+export function derive(model, findings = null) {
+  const dossier = model?.dossier;
+  if (!isObject(dossier)) return;
 
-  const dossier = model.dossier;
+  // A note, not a warning: the validator already reports the wrong type as
+  // an error, and this only says what was left underived because of it, so
+  // the findings count does not count one mistake twice.
+  const note = (message, path) => {
+    if (Array.isArray(findings)) findings.push({ level: 'info', message, path, page: null, rule: null });
+  };
 
   derivePageIds(dossier);
-  deriveBlockIds(dossier);
+  deriveBlockIds(dossier, note);
 
-  if (dossier.pages && Array.isArray(dossier.pages)) {
-    for (const page of dossier.pages) {
-      if (page?.blocks && Array.isArray(page.blocks)) {
-        for (const block of page.blocks) {
-          deriveBlock(block);
-        }
-      }
-    }
+  if (Array.isArray(dossier.pages)) {
+    dossier.pages.forEach((page, pi) => {
+      if (!isObject(page) || !Array.isArray(page.blocks)) return;
+      page.blocks.forEach((block, bi) => {
+        if (isObject(block)) deriveBlock(block, `dossier.pages[${pi}].blocks[${bi}]`, note);
+      });
+    });
   }
+}
+
+/** A plain object: not null, not an array, not a primitive. */
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** A number that can take part in arithmetic. */
+function isNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/** Absent, in the sense the validator uses: undefined or null. */
+function absent(value) {
+  return value === undefined || value === null;
+}
+
+/** The value as the author wrote it, short, for a finding. */
+function shown(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'a list';
+  if (typeof value === 'object') return 'an object';
+  if (typeof value === 'string') return `"${value.length > 24 ? `${value.slice(0, 23)}\u2026` : value}"`;
+  return String(value);
 }
 
 /**
@@ -87,11 +122,11 @@ function derivePageIds(dossier) {
 
   const taken = new Set();
   for (const page of dossier.pages) {
-    if (page && page.id) taken.add(String(page.id));
+    if (isObject(page) && page.id) taken.add(String(page.id));
   }
 
   dossier.pages.forEach((page, index) => {
-    if (!page || typeof page !== 'object' || page.id) return;
+    if (!isObject(page) || page.id) return;
     // slugId keeps only [a-z0-9_-], so a derived id can never start with "~".
     const base = slugId(page.title) || `page-${index + 1}`;
     let id = base;
@@ -102,16 +137,23 @@ function derivePageIds(dossier) {
   });
 }
 
-function deriveBlockIds(dossier) {
+function deriveBlockIds(dossier, note) {
   if (!dossier.pages || !Array.isArray(dossier.pages)) return;
 
   const seen = new Set();
 
   for (let pi = 0; pi < dossier.pages.length; pi++) {
     const page = dossier.pages[pi];
-    if (page?.blocks && Array.isArray(page.blocks)) {
+    if (isObject(page) && Array.isArray(page.blocks)) {
       for (let bi = 0; bi < page.blocks.length; bi++) {
         const block = page.blocks[bi];
+        // A null, a number, a string or a list is not a block. Setting an id
+        // on one threw ("Cannot create property 'id' on number"), so it is
+        // skipped and named; the renderer draws an error card in its place.
+        if (!isObject(block)) {
+          note(`Block ${bi + 1} on page ${pi + 1} is ${shown(block)}, not a block object. It was skipped.`, `dossier.pages[${pi}].blocks[${bi}]`);
+          continue;
+        }
         if (!block.id) {
           let id = slugId(block.title);
           if (!id) id = `block-p${pi}b${bi}`;
@@ -135,16 +177,17 @@ function deriveBlockIds(dossier) {
   }
 }
 
-function deriveBlock(block) {
-  if (!block) return;
-
+function deriveBlock(block, path, note) {
   const type = block.type;
-  const def = blockDef(type);
 
   if (type === 'metrics' && block.items && Array.isArray(block.items)) {
-    for (const item of block.items) {
-      deriveMetric(item);
-    }
+    block.items.forEach((item, i) => {
+      if (isObject(item)) {
+        deriveMetric(item, `${path}.items[${i}]`, note);
+      } else {
+        note(`Metric ${i + 1} is ${shown(item)}, not a metric object. Nothing was derived for it.`, `${path}.items[${i}]`);
+      }
+    });
   }
 
   if (type === 'scorecard' && block.criteria && Array.isArray(block.criteria)) {
@@ -157,18 +200,26 @@ function deriveBlock(block) {
   }
 
   if (type === 'files' && block.items && Array.isArray(block.items)) {
-    block.totals = deriveFilesTotals(block.items);
+    block.totals = deriveFilesTotals(block.items, path, note);
     markDerived(block, 'totals');
   }
 
-  if (type === 'diff' && block.patch) {
-    block.stats = deriveDiffStats(block.patch);
-    markDerived(block, 'stats');
+  if (type === 'diff' && !absent(block.patch) && block.patch !== '') {
+    if (typeof block.patch === 'string') {
+      block.stats = deriveDiffStats(block.patch);
+      markDerived(block, 'stats');
+    } else {
+      note(`The diff "patch" is ${shown(block.patch)}, not text, so its added and removed lines were not counted.`, `${path}.patch`);
+    }
   }
 
-  if (type === 'log' && block.source) {
-    block.lines = (block.source.match(/\n/g) || []).length + 1;
-    markDerived(block, 'lines');
+  if (type === 'log' && !absent(block.source) && block.source !== '') {
+    if (typeof block.source === 'string') {
+      block.lines = (block.source.match(/\n/g) || []).length + 1;
+      markDerived(block, 'lines');
+    } else {
+      note(`The log "source" is ${shown(block.source)}, not text, so its lines were not counted.`, `${path}.source`);
+    }
   }
 
   if (type === 'chart') {
@@ -185,10 +236,18 @@ function deriveBlock(block) {
   }
 }
 
-function deriveMetric(metric) {
-  if (metric.value === undefined || metric.value === null) return;
+function deriveMetric(metric, path, note) {
+  if (absent(metric.value)) return;
 
-  if (metric.baseline !== undefined && metric.baseline !== null) {
+  if (!absent(metric.baseline)) {
+    // Arithmetic on a word ("n/a" - 3) is NaN, and a NaN delta renders as a
+    // measured change. Numeric strings were already turned into numbers by
+    // the parser, so what is left here is not a number at all.
+    if (!isNumber(metric.value) || !isNumber(metric.baseline)) {
+      const which = !isNumber(metric.value) ? ['value', metric.value] : ['baseline', metric.baseline];
+      note(`The metric "${which[0]}" is ${shown(which[1])}, not a number, so its change from the baseline was not derived.`, `${path}.${which[0]}`);
+      return;
+    }
     const delta = metric.value - metric.baseline;
     metric.delta = delta;
     markDerived(metric, 'delta');
@@ -216,23 +275,27 @@ function deriveMetric(metric) {
   }
 }
 
-function deriveFilesTotals(items) {
+function deriveFilesTotals(items, path, note) {
   const totals = {
     count: 0,
     added: 0,
     removed: 0,
   };
 
-  for (const item of items) {
-    if (!item) continue;
+  items.forEach((item, i) => {
+    if (!isObject(item)) {
+      if (!absent(item)) note(`File ${i + 1} is ${shown(item)}, not a file object. It is not in the totals.`, `${path}.items[${i}]`);
+      return;
+    }
     totals.count++;
-    if (item.added !== undefined && item.added !== null) {
-      totals.added += item.added;
+    // `+=` on a string concatenated: "abc" made the total "0abc".
+    for (const field of ['added', 'removed']) {
+      const value = item[field];
+      if (absent(value)) continue;
+      if (isNumber(value)) totals[field] += value;
+      else note(`File ${i + 1} "${field}" is ${shown(value)}, not a number. It is not in the totals.`, `${path}.items[${i}].${field}`);
     }
-    if (item.removed !== undefined && item.removed !== null) {
-      totals.removed += item.removed;
-    }
-  }
+  });
 
   return totals;
 }

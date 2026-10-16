@@ -66,13 +66,15 @@ export function bodyKey(set, col) {
 
 /**
  * "Fixes to B, edited by D. Whitfield". While blind, "Author hidden": the
- * role, the relation and the author all say who wrote it.
+ * role, the relation and the author all say who wrote it. An empty column
+ * says "Human, no report yet" in plain secondary text: the role word takes
+ * its ink only once there is a report to be the human's.
  */
 function whoLine(set, col) {
   if (set.view.blind) return col.source ? 'Author hidden' : 'No report yet';
+  if (!col.source) return `${escHtml(ROLE_WORDS[col.role])}, no report yet`;
   const role = `<span class="role-name">${escHtml(ROLE_WORDS[col.role])}</span>`;
   const author = col.author ? escHtml(col.author) : '';
-  if (!col.source) return `${role}, no report yet`;
   switch (col.role) {
     case 'human':
       return author ? `${role}, written by ${author}` : role;
@@ -105,8 +107,7 @@ export function headHtml(set, col, info = {}) {
       <button type="button" class="btn btn--quiet btn--sm btn--icon col__close" data-action="cmp-remove" data-col="${col.id}"
         aria-label="Remove ${what}" title="Remove column">${icon('x')}</button></div>
       <p class="col__who">${whoLine(set, col)}</p>
-      <p class="col__stats" aria-hidden="true">&#160;</p>
-      <div class="col__diff"><span>Differences appear once a report is in this column.</span></div>`;
+      <p class="col__stats" aria-hidden="true">&#160;</p>`;
   }
 
   const mode = effectiveMode(set, col);
@@ -209,10 +210,17 @@ export function renderBody(body, set, col, hooks = {}) {
       body.append(frame);
       return { kind: 'interactive', blocks: parsed.blocks, stats, scrollEl: null, headingEls: [], headings: [], frame };
     }
+    // Worded as the Reports view words it (js/render/embed.js): the frame
+    // counts the whole page, Dossier format only the images in its text.
     const blocked = blockedSentence(remoteResources(source.text));
-    if (blocked) notes.push(note(blocked));
+    if (blocked) notes.push(note(`Across the whole page and its styles, ${blocked}`));
     if (notes.length) body.insertAdjacentHTML('beforeend', `<div class="col__notes">${notes.join('')}</div>`);
-    const frame = staticFrame(source.text, { title, onBlockedLink: hooks.onBlockedLink });
+    const frame = staticFrame(source.text, {
+      title,
+      contain: true,
+      onBlockedLink: hooks.onBlockedLink,
+      onRestored: (left) => restoredNote(body, frame, left),
+    });
     const record = { kind: 'frame', blocks: parsed.blocks, stats, scrollEl: null, headingEls: [], headings: [], frame };
     frame.addEventListener('load', () => {
       record.loaded = true;
@@ -239,8 +247,9 @@ export function renderBody(body, set, col, hooks = {}) {
     blocks = parsed.blocks;
     if (parsed.info.looksLikeApp) notes.push(note('This looks like a saved web app: only its static text is shown.'));
     if (parsed.info.remoteImages) {
+      // One sentence in both views (js/render/embed.js `formatMarkup`).
       const n = parsed.info.remoteImages;
-      notes.push(note(`${n} remote image${n === 1 ? ' was' : 's were'} not loaded. Dossier never fetches from other sites.`));
+      notes.push(note(`${n} remote image${n === 1 ? '' : 's'} in the text below ${n === 1 ? 'was' : 'were'} not loaded. Dossier never fetches from other sites.`));
     }
   } else if (source.kind === 'markdown') {
     blocks = markdownToIr(source.text).blocks;
@@ -261,6 +270,35 @@ export function renderBody(body, set, col, hooks = {}) {
     // hidden "Changed heading:", which alignment must not read.
     headings: headingsOf(blocks).map(({ text, level }) => ({ text, level })),
   };
+}
+
+/**
+ * Say in the column, once, that its frame left the report and was put back
+ * (js/compare/frame.js `staticFrame`), or that it kept leaving and is shown
+ * no more. A status, so it is read out as it appears.
+ */
+function restoredNote(body, frame, left) {
+  if (!frame.isConnected) return;
+  let notes = body.querySelector(':scope > .col__notes');
+  if (!notes) {
+    notes = document.createElement('div');
+    notes.className = 'col__notes';
+    body.insertBefore(notes, frame);
+  }
+  const text = left
+    ? 'This report kept opening other pages in its column, so it is not shown here. Dossier format still shows its text.'
+    : 'Something in this report opened another page in its column, so the report was loaded again from the top.';
+  let line = notes.querySelector('[data-restored]');
+  if (!line) {
+    line = document.createElement('div');
+    line.dataset.restored = '';
+    line.setAttribute('role', 'status');
+    notes.append(line);
+  }
+  if (line.dataset.restored !== text) {
+    line.dataset.restored = text;
+    line.innerHTML = note(text);
+  }
 }
 
 /**

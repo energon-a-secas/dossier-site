@@ -18,7 +18,7 @@ import { headHtml, renderBody, bodyKey, labelBody } from './column.js';
 import {
   slotHtml, textFormHtml, textFormLabel, fillTextForm, detailsFormHtml,
 } from './slot.js';
-import { roleAttr } from './blind.js';
+import { roleAttr, displayColumns } from './blind.js';
 
 /**
  * Build the view's frame inside `#compareView`.
@@ -74,6 +74,101 @@ function columnElement(refs, col) {
 }
 
 /**
+ * Which of the columns already on the page can stay where they are: the
+ * heaviest run whose page positions already climb in the wanted order. A
+ * column holding a frame weighs more, because a plain `insertBefore` move
+ * reloads its report. Four columns at most, so a quadratic search is enough.
+ *
+ * @param {number[]} at each wanted column's position now, -1 when new
+ * @param {number[]} weight
+ * @returns {Set<number>} indexes into the wanted order
+ */
+function steadyRun(at, weight) {
+  const best = at.map(() => 0);
+  const prev = at.map(() => -1);
+  let top = -1;
+  for (let i = 0; i < at.length; i += 1) {
+    if (at[i] < 0) continue;
+    best[i] = weight[i];
+    for (let j = 0; j < i; j += 1) {
+      if (at[j] >= 0 && at[j] < at[i] && best[j] + weight[i] > best[i]) {
+        best[i] = best[j] + weight[i];
+        prev[i] = j;
+      }
+    }
+    if (top < 0 || best[i] > best[top]) top = i;
+  }
+  const keep = new Set();
+  for (let i = top; i >= 0; i = prev[i]) keep.add(i);
+  return keep;
+}
+
+/**
+ * Move `el` before `next` in `host`, its frame kept where the browser can.
+ *
+ * @returns {boolean} true when a frame inside it kept its page
+ */
+function moveColumn(host, el, next) {
+  if (el.parentNode === host && typeof host.moveBefore === 'function') {
+    try {
+      host.moveBefore(el, next);
+      return true;
+    } catch {
+      // Not movable in place here; the plain move below.
+    }
+  }
+  host.insertBefore(el, next);
+  return false;
+}
+
+/** A static frame's own scroll position, or 0 (an opaque frame says nothing). */
+function frameTop(frame) {
+  try {
+    return frame?.contentDocument?.scrollingElement?.scrollTop || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Put the column elements in `els` order, moving only the ones out of place.
+ * `moveBefore` keeps a moved column's frame and focus; where the browser
+ * lacks it, `insertBefore` reloads a frame, so the fewest frames move and a
+ * reloaded one is put back where it was read. Either way a reader's scroll
+ * position starts again at the top, so it is put back, and so is focus.
+ *
+ * @param {HTMLElement} host
+ * @param {HTMLElement[]} els
+ */
+function placeInOrder(host, els) {
+  const now = new Map([...host.children].map((el, i) => [el, i]));
+  const at = els.map((el) => (now.has(el) ? now.get(el) : -1));
+  const keep = steadyRun(at, els.map((el) => (el.querySelector('iframe') ? els.length + 1 : 1)));
+  for (let i = els.length - 1; i >= 0; i -= 1) {
+    if (keep.has(i)) continue;
+    const el = els[i];
+    const scroll = el.querySelector('.col__scroll');
+    const top = scroll ? scroll.scrollTop : 0;
+    const left = scroll ? scroll.scrollLeft : 0;
+    const frame = el.querySelector('iframe');
+    const read = frameTop(frame);
+    const focused = el.contains(document.activeElement) ? document.activeElement : null;
+    const kept = moveColumn(host, el, els[i + 1] || null);
+    if (scroll && (top || left)) scroll.scrollTo({ left, top, behavior: 'instant' });
+    if (frame && read && !kept) {
+      frame.addEventListener('load', () => {
+        try {
+          frame.contentDocument?.scrollingElement?.scrollTo({ top: read, behavior: 'instant' });
+        } catch {
+          // Not the report's own page any more; js/compare/frame.js puts it back.
+        }
+      }, { once: true });
+    }
+    if (focused && document.activeElement !== focused) focused.focus({ preventScroll: true });
+  }
+}
+
+/**
  * Bring the columns in line with the set.
  *
  * @param {object} refs from mountView
@@ -102,9 +197,13 @@ export function renderColumns(refs, set, ui, hooks = {}) {
   // column's, which exist only once the base's body is drawn. Drawn in one
   // pass, a column left of the base was headed without them after a reload.
   const drawn = [];
-  set.columns.forEach((col, index) => {
-    const el = columnElement(refs, col);
-    if (host.children[index] !== el) host.insertBefore(el, host.children[index] || null);
+  // In the order they are shown, report order while blind, so print, Tab
+  // and a screen reader meet the columns in the order the screen has them.
+  const order = displayColumns(set);
+  const els = order.map((col) => columnElement(refs, col));
+  placeInOrder(host, els);
+  order.forEach((col, index) => {
+    const el = els[index];
     // While blind, not the column's real role (js/compare/blind.js `roleAttr`).
     el.dataset.role = roleAttr(set, col);
     el.classList.toggle('col--empty', !col.source);

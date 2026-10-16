@@ -3,7 +3,10 @@
  *
  *   sections  matched headings line up: a position in the leader maps to the
  *             follower piecewise-linearly between aligned heading anchors
- *             (js/compare/align.js), read at the reading line, 30 % down
+ *             (js/compare/align.js), read at the reading line, 30 % down,
+ *             which slides in from the top edge as the leader leaves its
+ *             top and out to the bottom edge as it reaches its end
+ *             (`followerTarget`), so the mapping has no jump anywhere
  *   scroll    proportional: the same fraction of each column's length
  *   off       each column scrolls on its own
  *
@@ -63,6 +66,46 @@ export function elementScroller(el, headingEls) {
   };
 }
 
+/**
+ * Where a follower goes for a leader at `y`. Pure, so it is tested without
+ * a page.
+ *
+ * Sections mode reads the leader at a line `f` of its view down and puts the
+ * matching point the same `f` down the follower's view. A reader at the top
+ * is looking at the top, not 30 % down: with the line fixed at 30 %, a 1 px
+ * scroll of the leader sent the follower about 100 px down. So `f` is 0 at
+ * the leader's top and grows to READING_LINE over the first READING_LINE of
+ * a view of travel. The end had the same jump the other way (the follower
+ * leapt to its end on the leader's last pixel), so over the last READING_LINE
+ * of a view `f` grows on to 1, where the bottom edges meet. Every piece is
+ * continuous: 0 at the top, the follower's end at the leader's end, and the
+ * reading line itself everywhere between. A leader too short for both
+ * stretches gives each half of its range.
+ *
+ * Scroll mode, or a column with no headings: the same fraction of each range.
+ *
+ * @param {{y: number, leadView: number, leadHeight: number, followView: number,
+ *   followHeight: number, anchors?: Array<[number, number]>, sections?: boolean}} at
+ * @returns {number}
+ */
+export function followerTarget({
+  y, leadView, leadHeight, followView, followHeight, anchors = [], sections = true,
+}) {
+  const leadRange = Math.max(0, leadHeight - leadView);
+  const followRange = Math.max(0, followHeight - followView);
+  if (!leadRange || !followRange) return 0;
+  const pos = Math.max(0, Math.min(leadRange, Number(y) || 0));
+  if (!sections) return (pos / leadRange) * followRange;
+  const band = Math.min(READING_LINE * leadView, leadRange / 2);
+  const enter = band;
+  const exit = band;
+  let f = READING_LINE;
+  if (enter && pos < enter) f = READING_LINE * (pos / enter);
+  else if (exit && pos > leadRange - exit) f = READING_LINE + (1 - READING_LINE) * ((pos - (leadRange - exit)) / exit);
+  const mapped = mapPosition(pos + f * leadView, anchors, leadHeight, followHeight);
+  return Math.max(0, Math.min(followRange, mapped - f * followView));
+}
+
 export function reducedMotion() {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
@@ -82,17 +125,27 @@ export function createSync(hooks = {}) {
     return cols.get(colId) || null;
   }
 
+  /**
+   * Heading positions, measured at most every ANCHOR_TTL_MS. A column with
+   * no box (the view hidden, another tab in the focus layout) reads every
+   * heading at 0, so that reading is used once and never kept: kept, the
+   * example opened from the welcome screen said "8 of 8 headings" until the
+   * first scroll.
+   */
   function anchorsOf(col) {
     const now = performance.now();
-    if (!col.anchorCache || now - col.anchorAt > ANCHOR_TTL_MS) {
-      try {
-        col.anchorCache = col.scroller.anchors();
-      } catch {
-        col.anchorCache = [];
-      }
+    if (col.anchorCache && now - col.anchorAt <= ANCHOR_TTL_MS) return col.anchorCache;
+    let ys = [];
+    try {
+      ys = col.scroller.anchors();
+    } catch {
+      ys = [];
+    }
+    if (col.scroller.view() > 0) {
+      col.anchorCache = ys;
       col.anchorAt = now;
     }
-    return col.anchorCache;
+    return ys;
   }
 
   /** A column as one side of a cached pair: its id and the version registered. */
@@ -108,22 +161,18 @@ export function createSync(hooks = {}) {
   function targetFor(lead, follow) {
     const ls = lead.scroller;
     const fs = follow.scroller;
-    const leadRange = Math.max(0, ls.height() - ls.view());
-    const followRange = Math.max(0, fs.height() - fs.view());
-    if (mode === 'scroll' || !lead.headings.length || !follow.headings.length) {
-      return leadRange ? (ls.y() / leadRange) * followRange : 0;
+    const sections = mode !== 'scroll' && lead.headings.length > 0 && follow.headings.length > 0;
+    let anchors = [];
+    if (sections) {
+      const la = anchorsOf(lead);
+      const fa = anchorsOf(follow);
+      anchors = pairsBetween(lead, follow)
+        .map((p) => [la[p.a], fa[p.b]])
+        .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b));
     }
-    const la = anchorsOf(lead);
-    const fa = anchorsOf(follow);
-    const anchors = pairsBetween(lead, follow)
-      .map((p) => [la[p.a], fa[p.b]])
-      .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b));
-    const line = ls.y() + READING_LINE * ls.view();
-    const mapped = mapPosition(line, anchors, ls.height(), fs.height());
-    // At either end the follower is at its end too, whatever the mapping says.
-    if (ls.y() <= 1) return 0;
-    if (leadRange && ls.y() >= leadRange - 1) return followRange;
-    return Math.max(0, Math.min(followRange, mapped - READING_LINE * fs.view()));
+    return followerTarget({
+      y: ls.y(), leadView: ls.view(), leadHeight: ls.height(), followView: fs.view(), followHeight: fs.height(), anchors, sections,
+    });
   }
 
   function apply() {

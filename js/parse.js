@@ -36,7 +36,11 @@ let yamlModule = null;
  */
 export function parse(text, opts = {}) {
   const findings = [];
-  const format = opts.format || 'auto';
+  const format = opts?.format || 'auto';
+
+  if (typeof text !== 'string') {
+    return { model: null, fatal: makeFatal('There is no text to read: the document must be JSON or YAML text.', null, null, ''), findings };
+  }
 
   let raw;
   let fatal = null;
@@ -95,7 +99,9 @@ export function parse(text, opts = {}) {
   coerceSingleToArray(model, findings);
   deleteSuppliedDerived(model, findings);
 
-  derive(model);
+  // Anything derive() had to skip (a null block, a log source that is not
+  // text) comes back as a finding, never as an exception.
+  derive(model, findings);
 
   return { model, fatal: null, findings };
 }

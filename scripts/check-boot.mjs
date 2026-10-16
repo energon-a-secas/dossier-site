@@ -15,10 +15,23 @@ import assert from 'node:assert/strict';
  * Record every animation frame from navigation: how many header bars are
  * painted, and whether an empty report shell (the old build skeleton) or a
  * second toolbar is on screen. Installed before any page script runs.
+ *
+ * It also records every stylesheet or script element that fails to load. A
+ * shell on screen during boot is either a boot bug or a page whose
+ * css/shell.css never arrived (a request the dev server dropped), and the
+ * failure message has to say which.
  */
 export function recordFrames() {
   const frames = [];
   window.__dossierFrames = frames;
+  const failed = [];
+  window.__dossierLoadFailures = failed;
+  window.addEventListener('error', (event) => {
+    const el = event.target;
+    if (el instanceof HTMLLinkElement || el instanceof HTMLScriptElement) {
+      failed.push({ t: Math.round(performance.now()), url: el.href || el.src || el.outerHTML.slice(0, 120) });
+    }
+  }, true);
   const shown = (el) => Boolean(el) && el.getClientRects().length > 0
     && getComputedStyle(el).visibility !== 'hidden';
   const tick = () => {
@@ -38,14 +51,48 @@ export function recordFrames() {
 export async function checkFirstPaint(target, label) {
   await target.waitForFunction(() => (window.__dossierFrames || []).some((f) => f.t > 1500));
   const frames = await target.evaluate(() => window.__dossierFrames);
+  const why = loadReport(await target.evaluate(loadFailures));
   assert.ok(frames.length > 5, `${label}: too few frames sampled`);
   const two = frames.find((f) => f.bars > 1);
-  assert.equal(two, undefined, `${label}: a frame at ${two?.t} ms painted two header bars`);
+  assert.equal(two, undefined, `${label}: a frame at ${two?.t} ms painted two header bars${why}`);
   const skeleton = frames.find((f) => f.skeleton);
-  assert.equal(skeleton, undefined, `${label}: a frame at ${skeleton?.t} ms showed an empty report shell`);
+  assert.equal(skeleton, undefined, `${label}: a frame at ${skeleton?.t} ms showed an empty report shell${why}`);
   const editor = frames.find((f) => f.editor);
-  assert.equal(editor, undefined, `${label}: a frame at ${editor?.t} ms showed the editor in read mode`);
-  assert.equal(frames.at(-1).bars, 1, `${label}: the header is not on screen after boot`);
+  assert.equal(editor, undefined, `${label}: a frame at ${editor?.t} ms showed the editor in read mode${why}`);
+  assert.equal(frames.at(-1).bars, 1, `${label}: the header is not on screen after boot${why}`);
+}
+
+/**
+ * In the page: the load failures of this origin the recorder saw, and every
+ * stylesheet of this origin with no rules now (Chromium gives a link whose
+ * load failed an empty sheet). Other origins (the fleet CDN) are not this
+ * check's concern.
+ */
+function loadFailures() {
+  const own = (href) => {
+    try { return new URL(href).origin === location.origin; } catch { return false; }
+  };
+  return {
+    failed: (window.__dossierLoadFailures || []).filter((f) => own(f.url)),
+    unstyled: [...document.querySelectorAll('link[rel="stylesheet"]')]
+      .filter((link) => {
+        if (!own(link.href)) return false;
+        try { return !link.sheet || link.sheet.cssRules.length === 0; } catch { return true; }
+      })
+      .map((link) => new URL(link.href).pathname),
+  };
+}
+
+/**
+ * The clause a first-paint failure ends with: what did not load, or that
+ * all of it did, so a failure says whether the page or the server is at fault.
+ */
+function loadReport({ failed, unstyled }) {
+  if (!failed.length && !unstyled.length) return '. Every stylesheet and script from this server loaded.';
+  const parts = [];
+  if (failed.length) parts.push(`failed to load: ${failed.map((f) => `${f.url} at ${f.t} ms`).join(', ')}`);
+  if (unstyled.length) parts.push(`stylesheets with no rules: ${unstyled.join(', ')}`);
+  return `. A request to the server failed, so the page ran without its own files (${parts.join('; ')}).`;
 }
 
 /**

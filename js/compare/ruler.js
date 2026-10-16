@@ -107,7 +107,7 @@ export function attachRuler(colId, body, scrollEl, hooks) {
   return entry;
 }
 
-export function detachRuler(colId) {
+function detachRuler(colId) {
   const entry = rulers.get(colId);
   if (!entry) return;
   entry.off?.();

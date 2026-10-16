@@ -41,7 +41,13 @@ export function registerCompareActions(api) {
 
   // ── Switcher ───────────────────────────────────────────────────────────────
 
+  /**
+   * The list is read from storage, so a change still waiting for its save (a
+   * rename a moment ago) is written first: listed before it, the open set's
+   * row showed its old title.
+   */
   async function openSwitcher(opener) {
+    await api.flushSave();
     const s = set();
     const input = await fillSwitcher(refs.switcher, {
       currentId: compare.saved ? s?.id : null,
@@ -55,6 +61,7 @@ export function registerCompareActions(api) {
 
   async function refreshSwitcher() {
     if (refs.switcher.hidden) return;
+    await api.flushSave();
     const filter = refs.switcher.querySelector('#cmpSwitcherFilter')?.value || '';
     const s = set();
     await fillSwitcher(refs.switcher, {

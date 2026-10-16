@@ -335,16 +335,29 @@ export function createReview(api) {
       const before = set();
       const crit = before.review.criteria.find((c) => c.id === el.dataset.crit);
       if (!crit) return;
+      const at = before.review.criteria.indexOf(crit);
+      const marks = before.review.marks[crit.id] || {};
       api.commit(removeCriterion(before, crit.id));
       host?.querySelector('[data-action="cmp-crit-add"]')?.focus({ preventScroll: true });
       undoToast(refs.toast, sentence(`Removed the criterion "${crit.label}" and its marks`), () => {
+        // Only the criterion and its marks come back, at its old place: a
+        // note, a mark or a summary entered since stays. Putting the whole
+        // review back took those away.
+        const now = set();
+        if (now.review.criteria.some((c) => c.id === crit.id)) return null;
+        if (now.review.criteria.length >= LIMITS.criteria) {
+          say(`A review holds up to ${LIMITS.criteria} criteria, so "${crit.label}" could not come back.`);
+          return null;
+        }
+        const criteria = [...now.review.criteria];
+        criteria.splice(Math.min(at, criteria.length), 0, crit);
         // `repair` drops marks for a column removed in the meantime.
-        api.commit(repair({ ...set(), review: before.review }));
+        api.commit(repair({ ...now, review: { ...now.review, criteria, marks: { ...now.review.marks, [crit.id]: marks } } }));
         return () => host?.querySelector(`.crit[data-crit="${CSS.escape(crit.id)}"] > summary`) || null;
       });
     },
     'cmp-copy-review': () => copyReview(),
   });
 
-  return { render, copyReview };
+  return { render };
 }

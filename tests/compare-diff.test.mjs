@@ -179,7 +179,9 @@ test('marks number every change and put ghost rows in the container they stand i
   const col = md('## Steps\n\n- one\n- three and more\n\nClosing words here, a < b & c.');
   const r = diffBlocks(base, col);
   const html = renderIr(col, { colId: 'k2', marks: columnMarks(r, { colId: 'k2', baseRef: 'B' }) });
-  assert.match(html, /<li class="ghost" data-chg="1" data-d="del"><span class="ghost__what"><b>Removed from B:<\/b> 1 list item, 1 word<\/span>/);
+  // The base's name is a span of its own, renamed in place when Blind or a
+  // move renames the base (js/compare/analysis.js `relabel`).
+  assert.match(html, /<li class="ghost" data-chg="1" data-d="del"><span class="ghost__what"><b>Removed from <span data-base-ref>B<\/span>:<\/b> 1 list item, 1 word<\/span>/);
   assert.match(html, /data-chg="2" data-d="chg"/);
   assert.ok(!/a < b/.test(html), 'report text is escaped inside word marks');
   assert.match(html, /a &lt; b &amp; c/);
@@ -188,7 +190,9 @@ test('marks number every change and put ghost rows in the container they stand i
   const bars = renderIr(col, { colId: 'k2', marks: columnMarks(r, { colId: 'k2', baseRef: 'Report 3', bars: true }) });
   assert.ok(!/<ins>/.test(bars), 'margin bars only: no word marks');
   assert.match(bars, /u-bar-chg/);
-  assert.match(bars, /Removed from Report 3:/);
+  assert.match(bars, /Removed from <span data-base-ref>Report 3<\/span>:/);
+  const hostile = renderIr(col, { colId: 'k2', marks: columnMarks(r, { colId: 'k2', baseRef: '<b>x</b>' }) });
+  assert.match(hostile, /<span data-base-ref>&lt;b&gt;x&lt;\/b&gt;<\/span>/, 'the base name is escaped');
 });
 
 test('a changed table row is marked cell by cell, with its label inside the first cell', () => {

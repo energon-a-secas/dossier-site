@@ -4,18 +4,21 @@
  * Reading and committing are separate on purpose. `readText` is pure: it
  * detects the format, converts it, parses it and validates it, and touches no
  * state, so a failed import can never replace what is on screen and another
- * view (a Compare column) can read a file without opening it here.
- * `applyRead` is the commit. Every open path below is copy-then-commit.
+ * view (a Compare column) can read a file without opening it here. It lives
+ * in js/read.js with `readRecord`. `applyRead` is the commit. Every open path
+ * below is copy-then-commit.
  *
  * Every open also takes a ticket (`beginOpen`). Boot compares tickets before
  * committing the initial report, so a file dropped while the stored report is
- * still loading is not replaced by it a moment later.
+ * still loading is not replaced by it a moment later. An open that fails
+ * gives its ticket back (`releaseOpen`) and leaves a drawn stage behind.
  */
 
 import { showToast } from './neorgon-dom.js';
-import { parse, initYaml } from './parse.js';
-import { validate } from './validate.js';
+import { initYaml } from './parse.js';
 import { detect } from './adapters/index.js';
+import { htmlHasScripts } from './adapters/html.js';
+import { HTML_MAX_CHARS, htmlTooLargeMessage } from './embed-policy.js';
 import { authored, commitModel, rerender } from './pipeline.js';
 import { persistCurrent, refreshLibrary, readStored } from './library.js';
 import { setPreference } from './state.js';
@@ -29,7 +32,10 @@ import {
 import { readUrlPayload, say, sentence } from './share.js';
 import { parseRoute, routeFor } from './router.js';
 import { reportOf } from './render/index.js';
-import { derivedFields } from './registry/index.js';
+import { readText, readRecord } from './read.js';
+
+// The pure half lives in js/read.js; these names stay importable from here.
+export { readText, readRecord, carriesDerived } from './read.js';
 
 // ── Tickets ──────────────────────────────────────────────────────────────────
 
@@ -46,75 +52,29 @@ export function openGeneration() {
   return generation;
 }
 
-// ── Reading (pure) ───────────────────────────────────────────────────────────
+/**
+ * Give a ticket back after an open that failed, when nothing has opened
+ * since. A failed open is not an open: holding on to its ticket told the
+ * open it superseded (the stored report boot was loading) that it had lost,
+ * and nothing was left to draw the stage. Tickets are taken one at a time,
+ * so the one before `ticket` is the open that was current before it.
+ *
+ * @param {number} ticket
+ */
+export function releaseOpen(ticket) {
+  if (generation === ticket) generation = ticket - 1;
+}
 
 /**
- * Read any text the Open dialog accepts, with no side effects.
- *
- * @param {string} text
- * @returns {{ok: boolean, document: object|null, model: object|null,
- *   findings: Array, label: string|null, adapter: string|null,
- *   fatal: object|null, text: string}}
- *   `document` is the authored document, `model` the derived one, `text` the
- *   source to show in the editor, `label` the format name when an adapter
- *   converted it (null for a Dossier document).
+ * The end of every failed open: the ticket goes back, and a stage that has
+ * nothing on it is drawn, so the reader gets the empty state (the welcome
+ * screen) instead of a blank page. While boot is still loading the stage is
+ * hidden, and boot draws its own report over this.
  */
-export function readText(text) {
-  if (typeof text !== 'string' || !text.trim()) {
-    return failed(String(text || ''), 'There was nothing to read in that.', null);
-  }
-
-  const adapter = detect(text);
-  if (adapter && adapter.toDossier) {
-    let converted = null;
-    try {
-      converted = adapter.toDossier(text);
-    } catch (err) {
-      return failed(text, `This looks like ${adapter.label}, but it could not be converted: ${err && err.message ? err.message : 'no reason given'}.`, adapter);
-    }
-    if (converted && converted.document) {
-      const read = parsed(JSON.stringify(converted.document, null, 2), adapter);
-      if (read.ok) read.findings = [...read.findings, ...(converted.findings || [])];
-      return read;
-    }
-  }
-  return parsed(text, null);
-}
-
-function parsed(text, adapter) {
-  const result = parse(text, { format: 'auto' });
-  if (result.fatal || !result.model) {
-    const fatal = result.fatal || {
-      message: 'The document could not be read, and the reader gave no reason.',
-      line: null,
-      column: null,
-      snippet: '',
-    };
-    return { ...failed(text, fatal.message, adapter), fatal, findings: result.findings || [] };
-  }
-  return {
-    ok: true,
-    document: authored(result.model),
-    model: result.model,
-    findings: [...(result.findings || []), ...validate(result.model)],
-    label: adapter ? adapter.label : null,
-    adapter: adapter ? adapter.id : null,
-    fatal: null,
-    text,
-  };
-}
-
-function failed(text, message, adapter) {
-  return {
-    ok: false,
-    document: null,
-    model: null,
-    findings: [],
-    label: adapter ? adapter.label : null,
-    adapter: adapter ? adapter.id : null,
-    fatal: { message, line: null, column: null, snippet: '' },
-    text,
-  };
+function openFailed(state, els, ticket) {
+  if (ticket !== undefined) releaseOpen(ticket);
+  if (!state.model && !state.lastGood) rerender(state, els);
+  return false;
 }
 
 /**
@@ -234,53 +194,6 @@ function syncRoute(state) {
 }
 
 /**
- * Whether a stored document still carries a field that is derived, in the
- * places parse.js strips one from: a page id, a block id, or a field the
- * block's registry entry marks derived. Decided from the document's shape
- * rather than from a warning's wording, so rewording a message cannot quietly
- * stop old records from being rewritten.
- *
- * @param {object} document a stored, wrapped `{dossier: {...}}` document
- * @returns {boolean}
- */
-export function carriesDerived(document) {
-  const pages = document?.dossier?.pages;
-  if (!Array.isArray(pages)) return false;
-  return pages.some((page) => {
-    if (!page || typeof page !== 'object') return false;
-    if (supplies(page, 'id')) return true;
-    const blocks = Array.isArray(page.blocks) ? page.blocks : [];
-    return blocks.some((block) => {
-      if (!block || typeof block !== 'object') return false;
-      if (supplies(block, 'id')) return true;
-      return typeof block.type === 'string'
-        && derivedFields(block.type).some((field) => supplies(block, field));
-    });
-  });
-}
-
-function supplies(obj, field) {
-  return Object.prototype.hasOwnProperty.call(obj, field) && obj[field] !== undefined;
-}
-
-/**
- * Read a stored record. A record saved before stored documents were
- * authored-only still carries derived ids, and parse.js warns about each one.
- * Such a record is read a second time from its authored document, so the
- * editor and the findings show the clean version, and `stale` tells the
- * caller to save it once so the record itself is rewritten.
- *
- * @param {{document: object}} record
- * @returns {{read: object, stale: boolean}}
- */
-export function readRecord(record) {
-  const read = readText(JSON.stringify(record.document, null, 2));
-  if (!read.ok || !carriesDerived(record.document)) return { read, stale: false };
-  const clean = readText(JSON.stringify(read.document, null, 2));
-  return clean.ok ? { read: clean, stale: true } : { read, stale: false };
-}
-
-/**
  * A report from the library.
  *
  * @param {{announce?: string|false}} [opts] passed to finishOpen
@@ -288,11 +201,12 @@ export function readRecord(record) {
 export async function openStored(state, els, id, { announce } = {}) {
   const ticket = beginOpen();
   const record = await readStored(id);
-  if (!record || ticket !== openGeneration()) return false;
+  if (ticket !== openGeneration()) return false;
+  if (!record) return openFailed(state, els, ticket);
   const { read, stale } = readRecord(record);
   if (!read.ok) {
     say(`That saved report could not be read: ${read.fatal.message}`);
-    return false;
+    return openFailed(state, els, ticket);
   }
   applyRead(state, read);
   state.reportId = id;
@@ -317,15 +231,16 @@ export async function loadFixture(state, els, path) {
     if (!res.ok) throw new Error(String(res.status));
     text = await res.text();
   } catch {
+    if (ticket !== openGeneration()) return false;
     // A failed fetch is not an empty report, and must not look like one.
     showToast(`Could not load ${path}. The example is missing, not empty.`);
-    return false;
+    return openFailed(state, els, ticket);
   }
   if (ticket !== openGeneration()) return false;
   const read = readText(text);
   if (!read.ok) {
     say(`The example ${path} could not be read: ${read.fatal.message}`);
-    return false;
+    return openFailed(state, els, ticket);
   }
   applyRead(state, read);
   state.isExample = true;
@@ -437,7 +352,8 @@ export function applyLink(state, link) {
 export async function openLink(state, els) {
   const ticket = beginOpen();
   const link = await readLink();
-  if (!link.found || ticket !== openGeneration()) return false;
+  if (ticket !== openGeneration()) return false;
+  if (!link.found) return openFailed(state, els, ticket);
   if (!link.ok) {
     say(link.reason);
     // The report on screen stays, so the address goes back to naming it.
@@ -446,7 +362,7 @@ export async function openLink(state, els) {
       const back = state.model && state.page ? routeFor({ page: state.page }) : '';
       history.replaceState(null, '', location.pathname + location.search + back);
     }
-    return false;
+    return openFailed(state, els, ticket);
   }
   applyLink(state, link);
   keepMode(state, { fromLink: true });
@@ -468,9 +384,32 @@ export function describeDetected(els, text) {
     return;
   }
   els.importDetected.textContent = adapter?.id === 'html'
-    ? 'HTML report. Opens in its original layout, with inline controls enabled.'
+    ? htmlSentence(text)
     : adapter ? `Looks like ${adapter.label}. It will be turned into a report.`
       : 'Looks like a Dossier document.';
+}
+
+let lastHtml = { text: null, sentence: '' };
+
+/**
+ * What opening this HTML does now: a static copy in its own layout, with
+ * nothing in it running. The old sentence promised "inline controls enabled"
+ * for every HTML file, which stopped being true when imports became static by
+ * default. Over the size cap it is the refusal itself, before Open is
+ * pressed. One entry of memory, because this runs on every keystroke in the
+ * paste box and a large report is parsed to find its scripts.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function htmlSentence(text) {
+  if (text.length > HTML_MAX_CHARS) return htmlTooLargeMessage(text.length);
+  if (lastHtml.text === text) return lastHtml.sentence;
+  const sentence = htmlHasScripts(text)
+    ? 'HTML report. It opens as a static copy in its own layout, with its scripts off. You can run them from the report.'
+    : 'HTML report. It opens as a static copy in its own layout. You can also read it in Dossier format.';
+  lastHtml = { text, sentence };
+  return sentence;
 }
 
 export function blankReport() {

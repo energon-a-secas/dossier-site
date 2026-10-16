@@ -15,6 +15,9 @@
  * js/appearance.js writes the first two before the first paint, from the
  * address and the stored preference, so the first frame has the right shape.
  *
+ * Also here: the rail's small behaviours (a cut outline link's title, the
+ * filter's key hint) and opening a report's closed disclosures for print.
+ *
  * NeoKeys owns `H`, the `?` sheet, the `G` switcher and the WCAG 2.1.4 remap
  * panel. We register through it and never write `if (e.key === 'h')`: a bare
  * letter binding with no way to turn it off or move it is an accessibility
@@ -131,11 +134,13 @@ export function initialRail({ fromLink = false, preference = null } = {}) {
 
 /**
  * Keep the rail sensible across a resize: leaving the docked width closes the
- * drawer it would become, and reaching it restores the stored choice.
+ * drawer it would become, and reaching it restores the stored choice. An
+ * outline link cut short by the rail's width shows its full text as a title.
  *
  * @param {() => boolean|null} preference the stored `railOpen`
  */
 export function followRailWidth(preference) {
+  titleCutLinks(document.getElementById('rail'));
   const mq = window.matchMedia(DOCKED);
   mq.addEventListener('change', () => {
     if (mq.matches) setRail(preference() !== false);
@@ -149,12 +154,33 @@ export function followRailWidth(preference) {
   });
 }
 
+/**
+ * A heading longer than the rail is wide ends in an ellipsis (css/shell.css,
+ * the outline). Its full text goes in a title when the pointer or focus
+ * reaches the link, and only on a link that is actually cut, so the tooltip
+ * follows the rail's width and never repeats text that is already shown.
+ * The outline is rebuilt on every render (js/pipeline.js), which is why this
+ * listens on the rail rather than setting titles on the links.
+ */
+function titleCutLinks(rail) {
+  if (!rail) return;
+  const update = (event) => {
+    const link = event.target instanceof Element ? event.target.closest('.ds-outline a') : null;
+    if (!link) return;
+    if (link.scrollWidth > link.clientWidth + 1) link.title = link.textContent.trim();
+    else link.removeAttribute('title');
+  };
+  rail.addEventListener('pointerover', update);
+  rail.addEventListener('focusin', update);
+}
+
 // ── Footer ───────────────────────────────────────────────────────────────────
 
 /**
  * Publish the footer's height as `--ds-footer-h` on <html>. The sticky rail
- * and side column subtract it (css/shell.css --pane-max) so that at the end
- * of the page they still fit above the footer and keep their headings in the
+ * and side column take it off their height (css/shell.css --ds-pane-cut, which
+ * grows to it while the footer scrolls into view) so that at the end of the
+ * page they still fit above the footer and keep their headings in the
  * window. The footer belongs to the kit and its height is the kit's (and the
  * site may tune its padding), so it is measured rather than assumed.
  */
@@ -170,6 +196,9 @@ export function followFooterHeight() {
 }
 
 // ── Shortcuts ────────────────────────────────────────────────────────────────
+
+/** The key that focuses the rail's filter, unless the visitor remaps it. */
+const FILTER_KEY = '/';
 
 /**
  * Register this page's shortcuts with the kit.
@@ -194,7 +223,7 @@ export function registerShortcuts(actions) {
   }
 
   const defs = [
-    { key: '/', label: 'Find a saved report', hint: 'Opens the side panel first if it is closed', run: actions.filter },
+    { key: FILTER_KEY, label: 'Find a saved report', hint: 'Opens the side panel first if it is closed', run: actions.filter },
     { key: 's', label: 'Copy a share link', hint: 'The report travels inside the link', run: actions.share },
     { key: 'e', label: 'Share and export', hint: 'A link, one HTML file, JSON, YAML, print or a deck', run: actions.export },
     { key: '[', label: 'Previous page', run: actions.prev },
@@ -202,5 +231,57 @@ export function registerShortcuts(actions) {
     { key: 'r', label: 'Edit or done', hint: 'Open the editor, or put it away', run: actions.toggleMode },
   ].filter((d) => typeof d.run === 'function');
 
-  return keys.register(defs);
+  const result = keys.register(defs);
+  showFilterKey(keys);
+  if (typeof keys.onChange === 'function') keys.onChange(() => showFilterKey(keys));
+  return result;
+}
+
+/**
+ * The key hint inside the rail's filter says the key that focuses it now:
+ * the visitor can remap it or turn single-key shortcuts off in the kit's
+ * panel (WCAG 2.1.4), and a hint naming a dead key would be wrong. The hint
+ * is decoration (aria-hidden); the field's aria-keyshortcuts carries it.
+ */
+function showFilterKey(keys) {
+  const hint = document.getElementById('reportFilterKey');
+  const field = document.getElementById('reportFilter');
+  if (!hint || !field) return;
+  const entry = (keys.list?.() || []).find((e) => e.owner === 'site' && e.defaultKey === FILTER_KEY);
+  const key = entry && !keys.isDisabled?.() ? (keys.activeKey?.(entry) || entry.key) : '';
+  hint.textContent = key;
+  hint.hidden = !key;
+  if (key) field.setAttribute('aria-keyshortcuts', key);
+  else field.removeAttribute('aria-keyshortcuts');
+}
+
+// ── Print ────────────────────────────────────────────────────────────────────
+
+/**
+ * A closed disclosure prints open: on paper nobody can open it. Chromium
+ * keeps a closed <details> element's content in a slot that the print
+ * stylesheet cannot reach with `details > *` (css/shell.css keeps that rule,
+ * and a `::details-content` one, as the fallback), so every closed disclosure
+ * in a report is opened just before printing and closed again afterwards.
+ * Only a report's: the editor's form sections build themselves when opened.
+ * Installed when this module loads, because a reader can print at any time,
+ * boot included.
+ */
+const openedForPrint = new Set();
+
+function openDisclosuresForPrint() {
+  for (const details of document.querySelectorAll('.report-shell details:not([open])')) {
+    details.open = true;
+    openedForPrint.add(details);
+  }
+}
+
+function closeDisclosuresAfterPrint() {
+  for (const details of openedForPrint) details.open = false;
+  openedForPrint.clear();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeprint', openDisclosuresForPrint);
+  window.addEventListener('afterprint', closeDisclosuresAfterPrint);
 }
