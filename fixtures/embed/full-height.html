@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Storage migration plan, full-height layout</title>
+  <style>
+    /* The root and body are as tall as the window, and the plan overflows
+       them: a frame measured at its own height reads the frame back, so it
+       could grow and never shrink. */
+    html, body { height: 100%; }
+    body { margin: 0; display: flex; flex-direction: column; gap: 24px; background: #f6f4ef; color: #1f2430; font: 17px/1.55 Georgia, serif; }
+    .deck { padding: 32px clamp(16px, 5vw, 56px) 48px; display: flex; flex-direction: column; gap: 24px; }
+    h1 { margin: 0; font-size: clamp(28px, 5vw, 44px); line-height: 1.15; }
+    h2 { margin: 0 0 8px; font-size: 24px; }
+    section { max-width: 72ch; }
+    p { margin: 0 0 12px; }
+    details { padding: 8px 12px; border: 1px solid #c9c4b8; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <h1>Storage migration plan</h1>
+    <section id="goal">
+      <h2>Goal</h2>
+      <p>Move the order history tables from the shared cluster to a dedicated one before the holiday freeze, with no more than five minutes of read-only time for the order pages.</p>
+      <p>The shared cluster runs at 78 percent of its disk at peak. Order history is 61 percent of that, grows by about 4 percent a month, and is read by three services that each assume it is local.</p>
+    </section>
+    <section id="steps">
+      <h2>Steps</h2>
+      <p>First, the dedicated cluster is created from the nightly snapshot and kept in step by logical replication. Replication lag is watched for a full week of normal traffic, including one month-end close, before anything is switched.</p>
+      <p>Second, the three readers move one at a time behind a feature flag. Each move is reversible by the flag alone, and each runs for two days before the next starts. The order pages move last, because they are the only reader a customer sees.</p>
+      <p>Third, writes switch during the agreed window. The old tables become read-only, the last changes replicate, the writer's connection string changes, and the old tables are kept for thirty days before they are dropped.</p>
+      <details>
+        <summary>What could go wrong</summary>
+        <p>Replication can fall behind during the month-end close. If lag passes thirty seconds the switch waits for the next window rather than shortening the read-only time.</p>
+        <p>A reader that caches connections may keep talking to the old cluster after its flag changes. Each reader's move therefore includes a restart.</p>
+      </details>
+    </section>
+    <section id="costs">
+      <h2>Costs</h2>
+      <p>The dedicated cluster adds about 2,400 a month at today's size. The shared cluster's next disk upgrade, which this plan avoids for at least a year, would have cost about 1,900 a month and a maintenance window of its own.</p>
+      <p>Engineering time is estimated at three weeks for one person, most of it watching rather than building, plus one evening for the write switch.</p>
+    </section>
+    <section id="decision">
+      <h2>Decision needed</h2>
+      <p>Approve the write switch for the second Tuesday of November, between 21:00 and 21:30, and the thirty-day retention of the old tables.</p>
+    </section>
+  </div>
+</body>
+</html>

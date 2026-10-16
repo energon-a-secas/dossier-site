@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- A refresh would navigate a frame away from the report. The static copy removes it. -->
+  <meta http-equiv="refresh" content="1; url=https://example.invalid/moved">
+  <title>Checkout latency review, as exported</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&amp;display=swap">
+  <style>
+    body { margin: 0; background: #fbfaf7; color: #22262e; font: 17px/1.6 Georgia, serif; }
+    /* A hero as tall as the screen: in a frame sized to its document this is
+       the case that grows without end unless vh is fixed first. */
+    .hero { min-height: 100vh; padding: 48px 40px; box-sizing: border-box; background: #1f2a3a; color: #f4f1ea; }
+    .hero h1 { margin: 0 0 16px; font-size: 44px; line-height: 1.1; }
+    .h-100vh { outline: 0; }
+    nav { padding: 12px 40px; background: #eceae4; }
+    nav a { margin-right: 16px; }
+    section { padding: 24px 40px; max-width: 720px; }
+    table { border-collapse: collapse; }
+    td, th { padding: 4px 12px; border-bottom: 1px solid #ccc; text-align: left; }
+  </style>
+</head>
+<body>
+  <nav><a href="#timeline">Timeline</a><a href="#costs">Costs</a><a href="#follow-up">Follow-up</a></nav>
+  <header class="hero h-100vh">
+    <h1>Checkout latency review</h1>
+    <p>Payments, week 41. The p99 of the checkout call rose from 420 ms to 2.4 s for 38 minutes.</p>
+  </header>
+  <main>
+    <section id="summary">
+      <h2>Summary</h2>
+      <p>A connection pool limit on the payments gateway was reached during the 14:00 batch. Requests queued behind the batch and timed out at the edge. The fix raised the pool and split the batch.</p>
+      <p>Read the full <a href="https://example.invalid/runbook" target="_blank">payments runbook</a>, the <a href="appendix.html">appendix beside this file</a>, or <a href="javascript:alert(1)">this script link</a>, which never runs.</p>
+      <img src="https://example.invalid/latency.png" alt="Latency over the incident window">
+    </section>
+    <section id="timeline">
+      <h2>Timeline</h2>
+      <p>14:00 The nightly settlement batch starts and opens 180 connections.</p>
+      <p>14:04 Checkout p99 crosses 1 s. The on-call engineer is paged.</p>
+      <p>14:17 The pool limit is identified from the gateway dashboard.</p>
+      <p>14:31 The batch is paused. Latency recovers within two minutes.</p>
+      <p>14:38 The pool is raised from 200 to 400 and the batch resumes in two halves.</p>
+      <p>15:10 The incident is closed. No payment was lost; 1,204 checkouts were retried by clients.</p>
+    </section>
+    <section id="impact">
+      <h2>Impact</h2>
+      <p>For 38 minutes, roughly one checkout in six took longer than two seconds. Mobile clients retried automatically. Web clients showed a spinner, and support received 41 tickets.</p>
+      <table>
+        <thead><tr><th>Measure</th><th>Before</th><th>During</th></tr></thead>
+        <tbody>
+          <tr><td>p50</td><td>140 ms</td><td>610 ms</td></tr>
+          <tr><td>p99</td><td>420 ms</td><td>2.4 s</td></tr>
+          <tr><td>Errors</td><td>0.1%</td><td>2.8%</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="causes">
+      <h2>Why it happened</h2>
+      <p>The settlement batch and live checkout share one connection pool. The batch was sized when it opened 60 connections; it has grown with the merchant count and now opens three times as many.</p>
+      <p>Nothing alerted on pool saturation. The first signal was latency at the edge, eleven minutes after the batch started.</p>
+      <details>
+        <summary>The gateway configuration, before and after</summary>
+        <p>Before: one pool of 200 connections for all callers, no per-caller limit.</p>
+        <p>After: a pool of 400, with the batch capped at 120 and checkout guaranteed 200.</p>
+        <p>The batch now runs in two halves, 20 minutes apart, so its peak is half what it was.</p>
+        <p>A saturation alert fires at 80% of the pool for two minutes.</p>
+      </details>
+    </section>
+    <section id="costs">
+      <h2>Costs</h2>
+      <p>Support time for 41 tickets, about six engineer hours of incident work, and an estimated 0.4% of the hour's checkouts abandoned. No refunds were issued.</p>
+      <p>The larger pool costs nothing extra on the current gateway plan.</p>
+    </section>
+    <section id="follow-up">
+      <h2>Follow-up</h2>
+      <p>Separate pools for the batch and for live traffic, owned by the payments team, due at the end of the month.</p>
+      <p>A load test that runs the batch and peak checkout together, owned by platform, due in two weeks.</p>
+      <p>Back to the <a href="#summary">summary</a>.</p>
+    </section>
+    <section id="appendix">
+      <h2>Appendix: the queries</h2>
+      <pre><code>SELECT count(*) FROM pg_stat_activity WHERE application_name = 'settlement';</code></pre>
+      <p>Every number in this report comes from the gateway dashboard and the support queue export for that afternoon.</p>
+    </section>
+  </main>
+  <footer><p>Exported from the incident tracker.</p></footer>
+  <script>document.body.dataset.ran = 'true';</script>
+</body>
+</html>

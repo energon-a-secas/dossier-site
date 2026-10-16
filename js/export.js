@@ -13,6 +13,8 @@ import { renderReport } from './render/index.js';
 import { reportOf } from './render/model.js';
 import { bindComparisons } from './comparison-controls.js';
 import { authored } from './pipeline.js';
+import { embedViewFor } from './embeds.js';
+import { fitEmbedFrames } from './embed-fit.js';
 
 /**
  * Export the document as JSON.
@@ -46,7 +48,12 @@ export async function exportStandaloneHtml(model) {
   try {
     const container = document.createElement('div');
     container.id = 'export-container';
-    renderReport(model, container, { allPages: true, interactive: true, standalone: true });
+    // An imported HTML report goes out in the view the reader has on screen:
+    // a static frame (fitted to its document by the inline script below), the
+    // report running its scripts in a sealed srcdoc frame, or Dossier format.
+    renderReport(model, container, {
+      allPages: true, interactive: true, standalone: true, embedView: embedViewFor,
+    });
     const html = container.innerHTML;
     const css = collectStylesheets();
     if (!css) {
@@ -157,9 +164,14 @@ function extractTokens() {
     + `:root {\n${lines.join('\n')}\n}\n`;
 }
 
-/** Native disclosures and the shared comparison controls work offline. */
+/**
+ * Native disclosures and the shared comparison controls work offline, and an
+ * imported HTML report's static frame is sized to its document and keeps
+ * working links. Both functions travel as their own source; neither reaches
+ * outside its body.
+ */
 function generateInlineScript() {
-  return `<script>(${bindComparisons.toString()})(document);</script>`;
+  return `<script>(${bindComparisons.toString()})(document);\n(${fitEmbedFrames.toString()})(document, { links: true });</script>`;
 }
 
 

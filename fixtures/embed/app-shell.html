@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Release dashboard, saved as a page</title>
+  <style>
+    /* An app shell: it fills whatever window it gets and its panes scroll.
+       It has no height of its own, so a frame sized to it is held at most of
+       the window's height and scrolls inside, as the page would in a tab. */
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body { display: grid; grid-template-columns: 220px 1fr; background: #fff; color: #1d232c; font: 15px/1.5 system-ui, sans-serif; }
+    nav, main { overflow: auto; padding: 16px 20px; }
+    nav { background: #eef1f5; }
+    main h1 { margin: 0 0 12px; font-size: 26px; }
+    main p { margin: 0 0 12px; max-width: 70ch; }
+  </style>
+</head>
+<body>
+  <nav>
+    <p><a href="#r12">Release 12</a></p>
+    <p><a href="#r11">Release 11</a></p>
+  </nav>
+  <main>
+    <h1 id="r12">Release 12</h1>
+    <p>Shipped to every region on Monday. The payment retry change is behind a flag that is on for a tenth of traffic.</p>
+    <p>Crash-free sessions held at 99.6 percent on Android and 99.8 percent on iOS through the first three days.</p>
+    <p>One rollback: the search ranking change, which lowered add-to-cart from search by 2 percent in the first hour.</p>
+    <p>The rollback took eleven minutes from the alert to the old ranking serving everywhere.</p>
+    <p>Release 13 is planned for the week after next and will carry the ranking change again with the regression fixed.</p>
+    <p>Its notes go to support two days ahead, as agreed after release 10.</p>
+    <h1 id="r11">Release 11</h1>
+    <p>Shipped late by one day, waiting on a store review. No rollbacks. Crash-free sessions 99.5 percent on Android.</p>
+    <p>The new checkout address form cut abandoned checkouts at that step by 9 percent over the following two weeks.</p>
+    <p>The form's error messages were rewritten after support saw the same three questions forty times in a week.</p>
+    <p>Accessibility review found two unlabelled buttons, fixed in a patch on the Thursday.</p>
+  </main>
+</body>
+</html>
