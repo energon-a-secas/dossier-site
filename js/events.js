@@ -18,12 +18,11 @@ import {
 } from './library.js';
 import { openCatalog, isExampleFile } from './catalog.js';
 import { bindComparisons } from './comparison-controls.js';
-import { bindComposer, showComposer } from './compose.js';
 import { bindEmbeds } from './embeds.js';
 import { bindDisplay, openDisplay } from './display.js';
 import { registerActions, runAction } from './actions.js';
 import {
-  openText, openStored, openBlank, openDocument, loadFixture, replaceDeleted,
+  openText, openStored, openBlank, loadFixture, replaceDeleted,
   describeDetected,
 } from './open.js';
 import {
@@ -79,7 +78,6 @@ export function bindEvents(state, els) {
   });
   bindComparisons(document);
   bindEmbeds();
-  bindComposer((document) => openDocument(state, els, document));
   document.addEventListener('dossier-opened', () => syncEditor(state));
 
   // No fallback of their own: js/dialogs.js returns focus to the kit's menu
@@ -137,12 +135,11 @@ export function bindEvents(state, els) {
     if (!reading) showSourceTab(state, els, state.preferences.sourceTab);
   });
 
-  // Until the Compare view exists, the Compare button shows the response
-  // composer. It is part of the compare view, so it follows the view.
+  // Focus left in the view that just hid moves somewhere visible. The
+  // Compare view (js/compare/index.js) shows and hides itself.
   document.addEventListener('dossier-view', (event) => {
     const { view: next, previous } = event.detail || {};
-    showComposer(next === 'compare');
-    if (next === 'reports' && previous === 'compare') keepFocusVisible();
+    if (next !== previous) keepFocusVisible(next);
   });
 
   // A drawer rail closes once its link has done its job: it covers the report.
@@ -153,15 +150,24 @@ export function bindEvents(state, els) {
 }
 
 /**
- * Focus left inside a region that just hid falls back to a view button (on a
- * narrow phone only one of the two is shown), then to the page itself.
+ * Focus left inside a region that just hid (the welcome screen's "Compare
+ * reports", an example card) moves into the view now shown: its own header
+ * button, which says it is the current page. On a narrow phone only the
+ * other view's button shows, and that one leads back out, so Compare falls
+ * to its first toolbar control instead; then the page itself.
+ *
+ * @param {'reports'|'compare'} next the view now shown
  */
-function keepFocusVisible() {
+function keepFocusVisible(next) {
   const active = document.activeElement;
   if (active && active !== document.body && active.getClientRects().length) return;
-  const target = ['viewReports', 'viewCompare', 'main']
-    .map((id) => document.getElementById(id))
-    .find((el) => el && el.getClientRects().length);
+  const byId = (id) => document.getElementById(id);
+  const toolbar = byId('cmpToolbar');
+  const candidates = next === 'compare'
+    ? [byId('viewCompare'), ...(toolbar ? [...toolbar.querySelectorAll('button, select')].filter((el) => el.tabIndex >= 0) : [])]
+    : [byId('viewReports'), byId('viewCompare')];
+  const target = [...candidates, byId('main')]
+    .find((el) => el && !el.disabled && el.getClientRects().length);
   target?.focus({ preventScroll: true });
 }
 
@@ -179,7 +185,6 @@ function registerReportActions(state, els) {
     'import-confirm': () => {
       if (openText(state, els, els.importText?.value || '', 'Pasted text')) els.importDialog?.close();
     },
-    'compose-cancel': () => goToView(state, 'reports'),
     'new-report': () => openBlank(state, els),
     example: (el) => {
       const file = el.dataset.file;

@@ -4,6 +4,8 @@
  * Inbound:
  *   #d1=<base64url(json)>              uncompressed, forward compatible
  *   #dz=<base64url(deflate-raw(json))> the one we emit
+ *   #dc=<base64url(deflate-raw(json))> a comparison bundle, for the Compare
+ *                                      view (js/compare/export.js)
  *   ?src=<https url>                   fetch a hosted document, any format the
  *                                      Open dialog reads (js/open.js readText)
  *
@@ -17,6 +19,19 @@
 
 import { showToast, copyText } from './neorgon-dom.js';
 import { parseRoute } from './router.js';
+import { HTML_MAX_CHARS } from './embed-policy.js';
+
+/**
+ * The most a `#dz=` or `#dc=` link may inflate to, in bytes: four columns
+ * of the largest report Dossier opens, at up to three UTF-8 bytes a
+ * character, and a megabyte for the rest of the bundle. Deflate packs about
+ * a thousand to one, so a crafted link of a few hundred kilobytes could
+ * otherwise unpack to gigabytes in the visitor's tab before any cap on the
+ * reports themselves is checked.
+ */
+export const INFLATE_MAX_BYTES = 4 * HTML_MAX_CHARS * 3 + 1000000;
+/** Input is fed to the inflater this many bytes at a time (see below). */
+const INFLATE_SLICE = 1024;
 
 
 function toBase64url(bytes) {
@@ -71,28 +86,43 @@ async function compressDeflateRaw(text) {
   }
 }
 
-async function decompressDeflateRaw(bytes) {
+/**
+ * Inflate a link's bytes, or null when they are damaged or would inflate
+ * past `maxBytes`.
+ *
+ * The input goes in a slice at a time, each written only once the last has
+ * been read out: an inflater handed everything at once unpacks all of it
+ * into its queue before the first read, so a budget checked while reading
+ * would come too late. A slice unpacks to about a megabyte at most.
+ */
+async function decompressDeflateRaw(bytes, maxBytes = INFLATE_MAX_BYTES) {
   try {
     if (typeof DecompressionStream === 'undefined') {
       return null;
     }
     const stream = new DecompressionStream('deflate-raw');
     const writer = stream.writable.getWriter();
-    // A damaged link errors the stream, which rejects these two promises as
-    // well as the read below. Only the read is awaited (and caught), so the
+    const reader = stream.readable.getReader();
+    // A damaged link errors the stream, which rejects these writes as well
+    // as the read below. Only the read is awaited (and caught), so the
     // writer's rejections are handled here, or a broken link raised an
     // unhandled "Compressed input was truncated." on top of its own message.
-    writer.write(bytes).catch(() => {});
-    writer.close().catch(() => {});
-    const reader = stream.readable.getReader();
+    (async () => {
+      for (let at = 0; at < bytes.length; at += INFLATE_SLICE) {
+        await writer.write(bytes.subarray(at, at + INFLATE_SLICE));
+      }
+      await writer.close();
+    })().catch(() => {});
     const chunks = [];
+    let totalLength = 0;
     let result;
     while (!(result = await reader.read()).done) {
+      totalLength += result.value.length;
+      if (totalLength > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
       chunks.push(result.value);
-    }
-    let totalLength = 0;
-    for (const chunk of chunks) {
-      totalLength += chunk.length;
     }
     const combined = new Uint8Array(totalLength);
     let offset = 0;
@@ -149,6 +179,45 @@ export async function encodeDocument(document) {
       bytes: jsonBytes,
       tier: getTier(payload),
     };
+  } catch {
+    return null;
+  }
+}
+
+/** The longest comparison link Dossier offers, in characters of payload. */
+export const COMPARISON_LINK_MAX = 32000;
+
+/**
+ * Encode a comparison bundle (`{dossierCompare: {...}}`) for a `#dc=` link.
+ * Deflated like `#dz=`; a browser without CompressionStream gets no link
+ * rather than an uncompressed one that would rarely fit.
+ *
+ * @param {object} bundle
+ * @returns {Promise<{payload: string, fragment: string, fits: boolean}|null>}
+ */
+export async function encodeComparison(bundle) {
+  try {
+    const compressed = await compressDeflateRaw(JSON.stringify(bundle));
+    if (!compressed) return null;
+    const payload = toBase64url(compressed);
+    return { payload, fragment: `#dc=${payload}`, fits: payload.length < COMPARISON_LINK_MAX };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decode a `#dc=` fragment into the bundle it carries, or null.
+ *
+ * @param {string} hash
+ * @returns {Promise<object|null>}
+ */
+export async function decodeComparison(hash) {
+  try {
+    const keyed = /^#?dc=(.+)$/s.exec(String(hash || ''));
+    if (!keyed) return null;
+    const json = await decompressDeflateRaw(fromBase64url(keyed[1]));
+    return json ? JSON.parse(json) : null;
   } catch {
     return null;
   }

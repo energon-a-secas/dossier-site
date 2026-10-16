@@ -7,6 +7,10 @@
  * the derived model, so a recipient who opens it sees no warnings about fields
  * they did not write. The HTML file and the print view are renders, so they
  * take the model.
+ *
+ * In the Compare view the same dialog offers the comparison's own choices
+ * (js/compare/export.js): its link, one HTML file, the comparison file and
+ * the review as Markdown.
  */
 
 import { showToast } from './neorgon-dom.js';
@@ -17,6 +21,8 @@ import {
 } from './export.js';
 import { registerActions } from './actions.js';
 import { STAGE_TITLE_LEVEL } from './pipeline.js';
+import { view as currentView } from './chrome.js';
+import { comparisonChoices } from './compare/export.js';
 
 const CHOICES = [
   ['copy-link', 'Copy link', ''],
@@ -65,7 +71,57 @@ export async function shareCurrent(state) {
   return copyShareLink(state.document);
 }
 
+/** One choice button: a name, and a sentence under it. */
+function choiceButton(action, name, note, disabled = false) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ds-export__choice';
+  btn.dataset.action = action;
+  btn.disabled = Boolean(disabled);
+  const h = document.createElement('strong');
+  h.textContent = name;
+  const p = document.createElement('span');
+  p.textContent = note;
+  btn.append(h, p);
+  return btn;
+}
+
+/** The Compare view's choices: the open comparison, not the open report. */
+async function showComparisonChoices(els, opener) {
+  const choices = await comparisonChoices();
+  if (!choices.length) {
+    showToast('There is no comparison open to export.');
+    return;
+  }
+  if (els.exportBody) {
+    const list = document.createElement('div');
+    list.className = 'ds-export__choices';
+    for (const choice of choices) {
+      if (!choice.disabled) {
+        list.append(choiceButton(choice.action, choice.name, choice.note));
+        continue;
+      }
+      // Why a choice is not offered is said outside it: a disabled button
+      // is dimmed and skipped by Tab, so a sentence inside it was hard to
+      // read and never reached by the keyboard.
+      const button = choiceButton(choice.action, choice.name, 'Not available for this comparison.', true);
+      const why = document.createElement('p');
+      why.className = 'ds-export__why';
+      why.id = `exportWhy-${choice.action}`;
+      why.textContent = choice.note;
+      button.setAttribute('aria-describedby', why.id);
+      list.append(button, why);
+    }
+    els.exportBody.replaceChildren(list);
+  }
+  openDialog(els.exportDialog, opener);
+}
+
 export async function showExportChoices(state, els, opener) {
+  if (currentView() === 'compare') {
+    await showComparisonChoices(els, opener);
+    return;
+  }
   if (!state.model || !state.document) {
     showToast('There is no report open to export.');
     return;

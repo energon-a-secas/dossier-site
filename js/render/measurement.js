@@ -26,9 +26,9 @@ export function renderMeasurementBlock(block, ctx) {
     case 'metrics':
       return renderMetrics(block);
     case 'chart':
-      return renderChart(block);
+      return renderChart(block, ctx);
     case 'gauge':
-      return renderGauge(block);
+      return renderGauge(block, ctx);
     case 'scorecard':
       return renderScorecard(block);
     case 'table':
@@ -108,22 +108,28 @@ function renderMetricTile(metric) {
   return `<div class="viz-stat metric-tile">${parts.join('')}</div>`;
 }
 
-function renderChart(block) {
-  return renderChartBlock(block);
+function renderChart(block, ctx = {}) {
+  return renderChartBlock(block, ctx);
+}
+
+function gaugeUid(block, ctx) {
+  const base = block.id ? `g-${safeDomId(block.id)}` : 'g-gauge';
+  return ctx.idPrefix ? `${safeDomId(ctx.idPrefix)}-${base}` : base;
 }
 
 /**
  * One value against its range, drawn by the kit. `bands` turns the ring into
  * a banded meter, which is what a budget or a threshold wants.
  */
-function renderGauge(block) {
+function renderGauge(block, ctx = {}) {
   const value = Number(block.value);
   if (!Number.isFinite(value)) {
     return emptyFrame('Gauge: add a numeric "value".');
   }
   const max = Number.isFinite(Number(block.max)) ? Number(block.max) : 100;
   const opts = {
-    uid: block.id ? `g-${safeDomId(block.id)}` : 'g-gauge',
+    // An `idPrefix` (a Compare column) keeps two reports' gauges apart.
+    uid: gaugeUid(block, ctx),
     max,
     title: block.title || '',
     scale: block.unit ? String(block.unit) : '',

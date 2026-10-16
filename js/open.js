@@ -130,8 +130,27 @@ export function applyRead(state, read) {
 
 // ── Opening ──────────────────────────────────────────────────────────────────
 
+// ── Comparison bundles ───────────────────────────────────────────────────────
+
+let bundleOpener = null;
+
+/**
+ * The Compare view registers how a comparison bundle opens. A bundle given
+ * to the Open dialog, or dropped on the page, is a whole comparison rather
+ * than a report, so it goes there instead of being read here.
+ *
+ * @param {(text: string, label: string) => unknown} fn
+ */
+export function onComparisonBundle(fn) {
+  bundleOpener = typeof fn === 'function' ? fn : null;
+}
+
 /** Pasted text, a chosen file or a dropped file. */
 export function openText(state, els, text, label) {
+  if (bundleOpener && detect(text)?.bundle) {
+    bundleOpener(text, label);
+    return true;
+  }
   const read = readText(text);
   if (!read.ok) {
     const message = read.fatal.message;
@@ -321,8 +340,8 @@ export function openBlank(state, els) {
 }
 
 /**
- * A document object from elsewhere in the app (the response composer, a new
- * blank report). It may be a derived model; only its authored fields are read.
+ * A document object from elsewhere in the app (a new blank report). It may be
+ * a derived model; only its authored fields are read.
  */
 export function openDocument(state, els, document, { mode = 'read', announce } = {}) {
   const read = readText(JSON.stringify(authored(document), null, 2));
@@ -444,6 +463,10 @@ export function describeDetected(els, text) {
     return;
   }
   const adapter = detect(text);
+  if (adapter?.bundle) {
+    els.importDetected.textContent = 'A Dossier comparison. It opens in the Compare view.';
+    return;
+  }
   els.importDetected.textContent = adapter?.id === 'html'
     ? 'HTML report. Opens in its original layout, with inline controls enabled.'
     : adapter ? `Looks like ${adapter.label}. It will be turned into a report.`

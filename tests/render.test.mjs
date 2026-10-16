@@ -230,29 +230,79 @@ test('an ordinary https link in markdown still works', () => {
   );
 });
 
-test('an embed that asks for scripts is not also same origin', () => {
+/** Every iframe tag in rendered markup, with its sandbox tokens. */
+function frames(html) {
+  return [...html.matchAll(/<iframe\b[^>]*>/g)].map(([tag]) => {
+    const sandbox = /\ssandbox="([^"]*)"/.exec(tag);
+    return { tag, sandbox: sandbox ? sandbox[1].split(/\s+/).filter(Boolean) : null };
+  });
+}
+
+test('no embed frame is ever both scripted and same origin, in any render', () => {
   // These two sandbox tokens together are not a sandbox. A srcdoc frame
   // inherits the parent origin, so allow-same-origin leaves it able to reach
   // parent.document and remove its own sandbox attribute.
-  const html = blockHtml(
-    { type: 'embed', html: '<p>hi</p>', scripts: true },
-    {},
-  );
-  const sandbox = /sandbox="([^"]*)"/.exec(html);
-  assert.ok(sandbox, `the embed frame has no sandbox attribute: ${html}`);
-  const tokens = sandbox[1].split(/\s+/).filter(Boolean);
-  assert.ok(tokens.includes('allow-scripts'), 'scripts were requested and not allowed');
-  assert.ok(
-    !tokens.includes('allow-same-origin'),
-    'allow-scripts and allow-same-origin together defeat the sandbox',
-  );
+  const block = { type: 'embed', html: '<p onclick="x()">hi</p><script>1</script>', scripts: true };
+  const contexts = [{}, { interactive: false }, { interactive: true }, { print: true }, { standalone: true },
+    ...['original', 'format', 'interactive'].map((view) => ({ standalone: true, embedView: () => view }))];
+  for (const ctx of contexts) {
+    for (const frame of frames(blockHtml(block, ctx))) {
+      assert.ok(frame.sandbox, `a frame has no sandbox attribute: ${frame.tag.slice(0, 120)}`);
+      assert.ok(
+        !(frame.sandbox.includes('allow-scripts') && frame.sandbox.includes('allow-same-origin')),
+        `allow-scripts and allow-same-origin together defeat the sandbox (${JSON.stringify(ctx)})`,
+      );
+    }
+  }
 });
 
-test('an embed with scripts off needs no sandbox allowances at all', () => {
-  const html = blockHtml({ type: 'embed', html: '<p>hi</p>' }, {});
-  const sandbox = /sandbox="([^"]*)"/.exec(html);
-  assert.ok(sandbox, 'no sandbox attribute');
-  assert.strictEqual(sandbox[1].trim(), '', `expected an empty sandbox, got "${sandbox[1]}"`);
+test('an imported HTML report is static by default, scripts or not', () => {
+  for (const scripts of [true, false]) {
+    const html = blockHtml({ type: 'embed', html: '<h1>Report</h1><script>run()</script>', scripts }, {});
+    const found = frames(html);
+    assert.equal(found.length, 1);
+    assert.deepEqual(found[0].sandbox, ['allow-same-origin'], `a static frame allows exactly same origin: ${found[0].tag}`);
+    assert.ok(!html.includes('embed.html'), 'a static frame was sent to the scripted host');
+    // The policy inside the frame refuses scripts, whatever the sandbox says.
+    assert.ok(html.includes('script-src &#39;none&#39;'), 'the static frame lost its script policy');
+  }
+});
+
+test('the live app gets the view controls, and the source only as escaped text', () => {
+  const html = blockHtml({ type: 'embed', id: 'imp', html: '<h1>Plan</h1><img src=x onerror="alert(1)">', scripts: true }, { interactive: true });
+  assert.equal(frames(html).length, 0, 'the live shell draws no frame of its own; js/embeds.js builds the view');
+  assert.match(html, /data-action="embed-view" data-view="original"/);
+  assert.match(html, /data-action="embed-view" data-view="format"/);
+  assert.match(html, /data-view="interactive"[^>]*>.*Run the report/s, 'a report with scripts offers to run them');
+  assert.match(html, /data-embed-prefix="imp"/);
+  assert.ok(!/<img\b/.test(html), 'source markup reached the page as markup');
+  const passive = blockHtml({ type: 'embed', html: '<h1>Plan</h1>', scripts: false }, { interactive: true });
+  assert.ok(!passive.includes('data-view="interactive"'), 'a report without scripts offered to run them');
+});
+
+test('the export follows the view on screen, and never asks for the hosted viewer', () => {
+  const block = { type: 'embed', html: '<h1>Plan</h1><button onclick="a()">Go</button>', scripts: true };
+  const original = blockHtml(block, { standalone: true, embedView: () => 'original' });
+  assert.deepEqual(frames(original).map((f) => f.sandbox), [['allow-same-origin']]);
+  assert.ok(original.includes('data-embed-fit'), 'the exported static frame is not marked to fit its document');
+  const scripted = blockHtml(block, { standalone: true, embedView: () => 'interactive' });
+  assert.deepEqual(frames(scripted).map((f) => f.sandbox), [['allow-scripts']]);
+  assert.ok(!scripted.includes('src="embed.html"'), 'an export cannot depend on the hosted viewer');
+  assert.ok(scripted.includes('connect-src &#39;none&#39;'));
+  const format = blockHtml(block, { standalone: true, embedView: () => 'format' });
+  assert.equal(frames(format).length, 0);
+  assert.match(format, /block-embed-reader/);
+  // A view the source cannot have falls back to Original.
+  const passive = blockHtml({ type: 'embed', html: '<p>x</p>' }, { standalone: true, embedView: () => 'interactive' });
+  assert.deepEqual(frames(passive).map((f) => f.sandbox), [['allow-same-origin']]);
+});
+
+test('print and Compare columns read an embed in Dossier format', () => {
+  for (const ctx of [{ print: true }, { interactive: false }]) {
+    const html = blockHtml({ type: 'embed', html: '<h1>Plan</h1>', scripts: true }, ctx);
+    assert.equal(frames(html).length, 0, `${JSON.stringify(ctx)} framed the report`);
+    assert.match(html, /block-embed-reader/);
+  }
 });
 
 test('an embed pointing at another site is a link, not a frame', () => {

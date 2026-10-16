@@ -66,6 +66,18 @@ export const ADAPTERS = [
   },
 ];
 
+/**
+ * A comparison bundle (`{"dossierCompare": {...}}`, the Compare view's
+ * portable file). Not a report and not converted: the Open dialog hands it to
+ * the Compare view, which opens it as a whole comparison. Kept out of
+ * ADAPTERS, which lists the formats that become a report.
+ */
+export const COMPARISON_BUNDLE = Object.freeze({
+  id: 'dossier-compare',
+  label: 'Dossier comparison',
+  bundle: true,
+});
+
 export function detect(source) {
   if (!source || typeof source !== 'string') return null;
 
@@ -74,6 +86,7 @@ export function detect(source) {
   if (/^\s*[\[{]/.test(source)) {
     try {
       const value = JSON.parse(source);
+      if (value?.dossierCompare && typeof value.dossierCompare === 'object') return COMPARISON_BUNDLE;
       if (value?.dossier || Array.isArray(value?.pages)) return null;
     } catch { return null; }
   }

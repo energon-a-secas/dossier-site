@@ -1,0 +1,301 @@
+/**
+ * Synchronised scrolling between compare columns.
+ *
+ *   sections  matched headings line up: a position in the leader maps to the
+ *             follower piecewise-linearly between aligned heading anchors
+ *             (js/compare/align.js), read at the reading line, 30 % down
+ *   scroll    proportional: the same fraction of each column's length
+ *   off       each column scrolls on its own
+ *
+ * The leader is the column the reader is scrolling: the one under the
+ * pointer or with focus, and any column that scrolls without having been
+ * driven from here. Writes to the followers happen in one animation frame,
+ * instantly (never smooth, which would replay as a stream of scroll events),
+ * and a follower ignores its own scroll events within 2 px or 150 ms of a
+ * write, so two columns never chase each other. Focus is never moved.
+ *
+ * A jump can also place every column itself (`jump` with `matches`: the
+ * Sections panel names each column's own heading for a row, moved sections
+ * included, which the alignment sync follows does not pair). Those columns
+ * are held for a moment, so the leader's own scroll event does not pull
+ * them back to where the alignment would put them.
+ *
+ * A scroller is anything with `y()`, `set(y, smooth)`, `height()`, `view()`,
+ * `anchors()` and `listen(fn)`: a column's own scrolling element
+ * (`elementScroller`) or a static Original frame (js/compare/frame.js).
+ */
+
+import { alignHeadings, mapPosition } from './align.js';
+
+/** Where a reader's eye rests, as a fraction of the column's height. */
+export const READING_LINE = 0.3;
+const ECHO_PX = 2;
+const ECHO_MS = 150;
+/** Heading positions are re-measured at most this often while scrolling. */
+const ANCHOR_TTL_MS = 500;
+/** A jump puts the heading this far under the top of the column. */
+export const JUMP_OFFSET = 16;
+/** How long a column placed by a jump is left where it was put. */
+const HOLD_MS = 300;
+const HOLD_SMOOTH_MS = 1200;
+
+/**
+ * A light-DOM scroller: a column's scrolling element and its heading elements.
+ *
+ * @param {HTMLElement} el
+ * @param {HTMLElement[]} headingEls in document order
+ */
+export function elementScroller(el, headingEls) {
+  return {
+    element: el,
+    y: () => el.scrollTop,
+    set: (y, smooth = false) => el.scrollTo({ top: y, behavior: smooth ? 'smooth' : 'instant' }),
+    height: () => el.scrollHeight,
+    view: () => el.clientHeight,
+    anchors: () => {
+      const origin = el.getBoundingClientRect().top - el.scrollTop;
+      return headingEls.map((h) => h.getBoundingClientRect().top - origin);
+    },
+    listen: (fn) => {
+      el.addEventListener('scroll', fn, { passive: true });
+      return () => el.removeEventListener('scroll', fn);
+    },
+  };
+}
+
+export function reducedMotion() {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * @param {{onScroll?: (colId: string) => void}} [hooks] called after any
+ *   column scrolls (the view updates the section counter from it)
+ */
+export function createSync(hooks = {}) {
+  const cols = new Map();
+  const pairCache = new Map();
+  let mode = 'sections';
+  let leader = null;
+  let frame = 0;
+
+  function entry(colId) {
+    return cols.get(colId) || null;
+  }
+
+  function anchorsOf(col) {
+    const now = performance.now();
+    if (!col.anchorCache || now - col.anchorAt > ANCHOR_TTL_MS) {
+      try {
+        col.anchorCache = col.scroller.anchors();
+      } catch {
+        col.anchorCache = [];
+      }
+      col.anchorAt = now;
+    }
+    return col.anchorCache;
+  }
+
+  /** A column as one side of a cached pair: its id and the version registered. */
+  const sideOf = (col) => `${col.id}:${col.version}`;
+
+  function pairsBetween(a, b) {
+    const key = `${sideOf(a)}|${sideOf(b)}`;
+    if (!pairCache.has(key)) pairCache.set(key, alignHeadings(a.headings, b.headings));
+    return pairCache.get(key);
+  }
+
+  /** Where the follower should be, given the leader's position. */
+  function targetFor(lead, follow) {
+    const ls = lead.scroller;
+    const fs = follow.scroller;
+    const leadRange = Math.max(0, ls.height() - ls.view());
+    const followRange = Math.max(0, fs.height() - fs.view());
+    if (mode === 'scroll' || !lead.headings.length || !follow.headings.length) {
+      return leadRange ? (ls.y() / leadRange) * followRange : 0;
+    }
+    const la = anchorsOf(lead);
+    const fa = anchorsOf(follow);
+    const anchors = pairsBetween(lead, follow)
+      .map((p) => [la[p.a], fa[p.b]])
+      .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b));
+    const line = ls.y() + READING_LINE * ls.view();
+    const mapped = mapPosition(line, anchors, ls.height(), fs.height());
+    // At either end the follower is at its end too, whatever the mapping says.
+    if (ls.y() <= 1) return 0;
+    if (leadRange && ls.y() >= leadRange - 1) return followRange;
+    return Math.max(0, Math.min(followRange, mapped - READING_LINE * fs.view()));
+  }
+
+  function apply() {
+    frame = 0;
+    const lead = entry(leader);
+    if (!lead || mode === 'off') return;
+    const now = performance.now();
+    for (const col of cols.values()) {
+      if (col === lead || col.hold > now) continue;
+      const y = targetFor(lead, col);
+      if (!Number.isFinite(y) || Math.abs(col.scroller.y() - y) < 1) continue;
+      col.driven = { y, at: now };
+      col.scroller.set(y, false);
+    }
+  }
+
+  function onScroll(col) {
+    const driven = col.driven;
+    if (driven) {
+      const y = col.scroller.y();
+      if (Math.abs(y - driven.y) <= ECHO_PX || performance.now() - driven.at < ECHO_MS) {
+        if (typeof hooks.onScroll === 'function') hooks.onScroll(col.id);
+        return;
+      }
+      col.driven = null;
+    }
+    leader = col.id;
+    col.hold = 0;
+    if (mode !== 'off' && !frame) frame = requestAnimationFrame(apply);
+    if (typeof hooks.onScroll === 'function') hooks.onScroll(col.id);
+  }
+
+  return {
+    /**
+     * Add or replace a column.
+     *
+     * @param {string} colId
+     * @param {object} scroller
+     * @param {Array<{text: string, level: number}>} headings same order as anchors()
+     * @param {HTMLElement} [element] the column, for pointer and focus
+     */
+    register(colId, scroller, headings, element) {
+      this.unregister(colId);
+      if (!scroller) return;
+      const col = {
+        id: colId, scroller, headings: headings || [], version: Math.random().toString(36).slice(2),
+        driven: null, hold: 0, anchorCache: null, anchorAt: 0, offs: [],
+      };
+      col.offs.push(scroller.listen(() => onScroll(col)));
+      if (element) {
+        const lead = () => { leader = colId; };
+        element.addEventListener('pointerenter', lead);
+        element.addEventListener('focusin', lead);
+        col.offs.push(() => {
+          element.removeEventListener('pointerenter', lead);
+          element.removeEventListener('focusin', lead);
+        });
+      }
+      cols.set(colId, col);
+    },
+    unregister(colId) {
+      const col = cols.get(colId);
+      if (!col) return;
+      for (const off of col.offs) off();
+      cols.delete(colId);
+      if (leader === colId) leader = null;
+      // Its pairs were cached under a version no column carries any more:
+      // a redrawn column registers with a new one, so they would only pile up.
+      const side = sideOf(col);
+      for (const key of [...pairCache.keys()]) {
+        if (key.startsWith(`${side}|`) || key.endsWith(`|${side}`)) pairCache.delete(key);
+      }
+    },
+    clear() {
+      for (const id of [...cols.keys()]) this.unregister(id);
+      pairCache.clear();
+    },
+    has: (colId) => cols.has(colId),
+    setMode(next) {
+      mode = ['sections', 'scroll', 'off'].includes(next) ? next : 'sections';
+    },
+    get mode() { return mode; },
+    get leader() { return leader; },
+    setLeader(colId) { if (cols.has(colId)) leader = colId; },
+    /** Heading positions moved (a resize, a font, a reading size): measure again. */
+    remeasure() {
+      for (const col of cols.values()) col.anchorCache = null;
+    },
+    /** Bring every follower to the leader now, for example after a layout change. */
+    follow(colId = leader) {
+      if (colId && cols.has(colId)) leader = colId;
+      if (mode !== 'off' && !frame) frame = requestAnimationFrame(apply);
+    },
+    headings: (colId) => entry(colId)?.headings || [],
+    anchors: (colId) => {
+      const col = entry(colId);
+      return col ? anchorsOf(col) : [];
+    },
+    scroller: (colId) => entry(colId)?.scroller || null,
+    /**
+     * Put heading `index` of `colId` just under the top of its column, or on
+     * its reading line with `line`, and every other column at its matching
+     * heading the same way.
+     *
+     * `matches` (colId to heading index) names each other column's heading,
+     * and those columns are placed directly, whatever the sync mode; a
+     * column it leaves out follows through sync, or stays put with sync off.
+     * Without `matches`, the others follow through sync when it is on, and
+     * are placed at their aligned heading when it is off.
+     *
+     * @param {{smooth?: boolean, line?: boolean, matches?: Map<string, number>|null}} [opts]
+     */
+    jump(colId, index, { smooth = !reducedMotion(), line = false, matches = null } = {}) {
+      const col = entry(colId);
+      if (!col) return false;
+      const ys = anchorsOf(col);
+      if (!Number.isFinite(ys[index])) return false;
+      const at = (c, y) => {
+        const top = y - (line ? READING_LINE * c.scroller.view() : JUMP_OFFSET);
+        return Math.max(0, Math.min(Math.max(0, c.scroller.height() - c.scroller.view()), top));
+      };
+      leader = colId;
+      col.driven = null;
+      col.hold = 0;
+      col.scroller.set(at(col, ys[index]), smooth);
+      let targets = matches;
+      if (!targets && mode === 'off') {
+        targets = new Map();
+        for (const other of cols.values()) {
+          const pair = other === col ? null : pairsBetween(col, other).find((p) => p.a === index);
+          if (pair) targets.set(other.id, pair.b);
+        }
+      }
+      if (!targets) return true;
+      const now = performance.now();
+      for (const other of cols.values()) {
+        // A column not on screen (another tab in the focus layout) has no
+        // positions to read.
+        if (other === col || !targets.has(other.id) || !other.scroller.view()) continue;
+        const oy = anchorsOf(other)[targets.get(other.id)];
+        if (!Number.isFinite(oy)) continue;
+        const y = at(other, oy);
+        other.driven = { y, at: now };
+        other.hold = now + (smooth ? HOLD_SMOOTH_MS : HOLD_MS);
+        other.scroller.set(y, false);
+      }
+      return true;
+    },
+    /**
+     * The heading at the reading line of a column, or -1 above the first.
+     * By default the line sits near the top, where a jump puts a heading;
+     * with `line` it is the reading line itself, 30 % down.
+     */
+    currentHeading(colId, { line: atReading = false } = {}) {
+      const col = entry(colId);
+      if (!col) return -1;
+      const ys = anchorsOf(col);
+      const line = col.scroller.y() + (atReading
+        ? READING_LINE * col.scroller.view() + 8
+        : Math.max(JUMP_OFFSET + 8, READING_LINE * col.scroller.view() * 0.25));
+      let at = -1;
+      for (let i = 0; i < ys.length; i += 1) {
+        if (ys[i] <= line) at = i;
+        else break;
+      }
+      return at;
+    },
+    /** The pairs between two columns' headings, for the Sections panel. */
+    pairs(a, b) {
+      const ca = entry(a);
+      const cb = entry(b);
+      return ca && cb ? pairsBetween(ca, cb) : [];
+    },
+  };
+}

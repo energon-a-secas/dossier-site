@@ -7,11 +7,12 @@
  */
 
 import { escHtml } from '../neorgon-dom.js';
-import { blockDef, blockTypes } from '../registry/index.js';
+import { blockDef, blockTypes, STATUSES } from '../registry/index.js';
 import { renderBlock } from './dispatch.js';
 import { reportOf } from './model.js';
 import { inlineMarkdown as markdownToHtml, safeLink } from './markdown.js';
 import { safeHref } from './url.js';
+import { safeDomId } from './ids.js';
 import { pick, TONES, WIDTHS, CHECKED_BY } from './enums.js';
 
 // One implementation of each thing. outline lives in outline.js and is
@@ -22,11 +23,15 @@ export { reportOf } from './model.js';
 /**
  * @param {object} input the wrapped document, or the report inside it
  * @param {HTMLElement} container
- * @param {object} [opts] { page, print, interactive, titleLevel }
+ * @param {object} [opts] { page, print, interactive, titleLevel, allPages, idPrefix }
  *   `titleLevel` is the report title's heading level, 1 by default. A page
  *   that already has an h1 of its own (the app, whose Header Kit bar carries
  *   the site name as its h1) passes 2, so the page keeps one h1. An exported
  *   file has no other heading, so its title stays the h1.
+ *   `idPrefix` goes in front of every id this render writes (block wrappers,
+ *   chart and gauge `<defs>`), so two reports on one page, as Compare columns
+ *   are, never share an id or cross-wire a gradient. Without it the output is
+ *   exactly what it always was.
  */
 export function renderReport(input, container, opts = {}) {
   const model = reportOf(input);
@@ -94,46 +99,107 @@ function renderHeader(model, titleLevel = 1) {
   }
   titleRow.appendChild(titles);
 
-  const meta = document.createElement('div');
-  meta.className = 'report-meta';
-  if (model.kind) {
-    const kindEl = document.createElement('span');
-    kindEl.className = 'meta-kind';
-    kindEl.textContent = model.kind;
-    meta.appendChild(kindEl);
+  const label = renderFileLabel(model);
+  if (label) {
+    titleRow.appendChild(label);
+    titleRow.classList.add('report-title-row--label');
   }
-  if (model.status) {
-    const statusEl = document.createElement('span');
-    statusEl.className = `meta-status meta-status--${model.status}`;
-    statusEl.textContent = model.status.replaceAll('-', ' ');
-    meta.appendChild(statusEl);
-  }
-  if (model.owner) {
-    const ownerEl = document.createElement('span');
-    ownerEl.className = 'meta-owner';
-    ownerEl.textContent = model.owner;
-    meta.appendChild(ownerEl);
-  }
-  if (model.period && (model.period.from || model.period.to)) {
-    const periodEl = document.createElement('span');
-    periodEl.className = 'meta-period';
-    periodEl.textContent = `${model.period.from || '?'} to ${model.period.to || '?'}`;
-    meta.appendChild(periodEl);
-  }
-  const sourceHref = safeHref(model.source?.href);
-  if (sourceHref) {
-    const sourceEl = document.createElement('a');
-    sourceEl.className = 'meta-source';
-    sourceEl.href = sourceHref;
-    sourceEl.textContent = 'View source';
-    sourceEl.target = '_blank';
-    sourceEl.rel = 'noopener noreferrer';
-    meta.appendChild(sourceEl);
-  }
-  titleRow.appendChild(meta);
 
   header.appendChild(titleRow);
   return header;
+}
+
+const sentenceCase = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * One date in the file label, kept whole on a line (`.file-label__date`): a
+ * window wrapped as "2026-10-01 to 2026-10-" over "09" in the 146 px column.
+ */
+function labelDate(text) {
+  const span = document.createElement('span');
+  span.className = 'file-label__date';
+  span.textContent = String(text);
+  return span;
+}
+
+/**
+ * The report's metadata as a case-file label beside the title: a band with
+ * the kind and the short commit, then a definition list (Status, Owner, Date
+ * or Window, Source). Every value is text from the document, set with
+ * textContent; the only link goes through safeHref. No label when the
+ * document carries none of these fields.
+ */
+function renderFileLabel(model) {
+  const rows = [];
+  // The status becomes a class modifier, so only a value the format knows is
+  // used: "x shipped" would add two class tokens. An unknown status is left
+  // out of the label, as the validator already reports it.
+  const statusValue = pick(model.status, STATUSES, '');
+  if (statusValue) {
+    const status = document.createElement('span');
+    status.className = `meta-status meta-status--${statusValue}`;
+    status.textContent = sentenceCase(statusValue.replaceAll('-', ' '));
+    rows.push(['Status', status]);
+  }
+  if (model.owner) rows.push(['Owner', String(model.owner)]);
+  const from = model.period?.from;
+  const to = model.period?.to;
+  if (from || to) {
+    const one = !from || !to || from === to;
+    if (one) {
+      rows.push(['Date', labelDate(from || to)]);
+    } else {
+      const period = document.createDocumentFragment();
+      period.append(labelDate(from), ' to ', labelDate(to));
+      rows.push(['Window', period]);
+    }
+  }
+  const source = model.source && typeof model.source === 'object' ? model.source : {};
+  const sourceHref = safeHref(source.href);
+  if (source.repo || sourceHref) {
+    const words = source.repo ? `${source.repo}${source.branch ? ` (${source.branch})` : ''}` : 'View source';
+    let value = String(words);
+    if (sourceHref) {
+      value = document.createElement('a');
+      value.className = 'meta-source';
+      value.href = sourceHref;
+      value.textContent = words;
+      value.target = '_blank';
+      value.rel = 'noopener noreferrer';
+    }
+    rows.push(['Source', value]);
+  }
+  if (!rows.length && !model.kind) return null;
+
+  const label = document.createElement('div');
+  label.className = 'file-label';
+  const band = document.createElement('div');
+  band.className = 'file-label__band';
+  const kind = document.createElement('span');
+  kind.className = 'file-label__kind';
+  kind.textContent = model.kind ? sentenceCase(String(model.kind)) : 'Report';
+  band.appendChild(kind);
+  if (source.commit) {
+    const ref = document.createElement('span');
+    ref.className = 'file-label__ref';
+    ref.title = `Commit ${source.commit}`;
+    ref.textContent = String(source.commit).slice(0, 7);
+    band.appendChild(ref);
+  }
+  label.appendChild(band);
+
+  if (rows.length) {
+    const list = document.createElement('dl');
+    for (const [term, value] of rows) {
+      const dt = document.createElement('dt');
+      dt.textContent = term;
+      const dd = document.createElement('dd');
+      dd.append(value);
+      list.append(dt, dd);
+    }
+    label.appendChild(list);
+  }
+  return label;
 }
 
 function renderTabs(model, activePage) {
@@ -158,7 +224,7 @@ function renderTabs(model, activePage) {
     const number = document.createElement('span');
     number.className = 'report-tab__number';
     number.setAttribute('aria-hidden', 'true');
-    number.textContent = String(model.pages.indexOf(page) + 1).padStart(2, '0');
+    number.textContent = String(model.pages.indexOf(page) + 1);
     tab.append(number, document.createTextNode(page.title));
     if (page.summary) {
       tab.title = page.summary;
@@ -240,8 +306,13 @@ function renderEmpty(def) {
   return `<div class="block-empty">${escHtml(def.name || 'Block')}: no content provided</div>`;
 }
 
+/** A block id, behind the render's `idPrefix` when it has one. */
+function prefixedId(id, ctx = {}) {
+  return ctx.idPrefix ? `${safeDomId(ctx.idPrefix)}-${id}` : id;
+}
+
 function wrapBlock(html, block, ctx) {
-  const id = block.id ? ` id="${escHtml(block.id)}"` : '';
+  const id = block.id ? ` id="${escHtml(prefixedId(block.id, ctx))}"` : '';
   // Both come from the document and both used to reach the class raw.
   const toneValue = pick(block.tone, TONES, '');
   const widthValue = pick(block.width, WIDTHS, '');

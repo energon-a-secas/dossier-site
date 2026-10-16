@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=https://example.invalid/refreshed">
+<!-- The same refresh with its first letter written as a character reference. -->
+<meta http-equiv="&#82;efresh" content="0; url=https://example.invalid/refreshed-encoded">
+<base href="https://example.invalid/base/">
+<title>Hostile report fixture</title>
+<link rel="stylesheet" href="https://example.invalid/remote.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">
+<style>
+  @import url("https://example.invalid/imported.css");
+  @font-face { font-family: Remote; src: url("https://example.invalid/font.woff2") format("woff2"); }
+  body { background: url("https://example.invalid/background.png"); font-family: Remote, sans-serif; }
+</style>
+<script>
+  // Every path below tries to mark the page that holds this report. The
+  // browser check asserts none of the marks is ever set.
+  try { top.__dossierPwned = 'script'; } catch (e) { /* cross origin */ }
+  try { parent.__dossierPwned = 'script'; } catch (e) { /* cross origin */ }
+  try { localStorage.setItem('dossier-pwned', 'script'); } catch (e) { /* no storage */ }
+</script>
+</head>
+<body>
+<main>
+  <h1>Hostile report</h1>
+  <p>This fixture tries every way an imported report could run code, reach the page, leave localhost or navigate. A reader should see these words and nothing else happen.</p>
+
+  <h2>Images and drawings</h2>
+  <img src="x" alt="Broken image" onerror="top.__dossierPwned = 'onerror'">
+  <img src="https://example.invalid/pixel.png" alt="Remote pixel">
+  <svg width="120" height="40" onload="top.__dossierPwned = 'svg onload'" aria-label="A hostile drawing">
+    <script>top.__dossierPwned = 'svg script';</script>
+    <rect width="120" height="40" fill="#c33"/>
+    <foreignObject width="120" height="40"><div onclick="top.__dossierPwned = 'foreign'">foreign</div></foreignObject>
+    <a href="javascript:top.__dossierPwned='svg link'"><text x="10" y="25">svg link</text></a>
+  </svg>
+
+  <!-- Text inside a style in this parse, a live image in the next one: a copy
+       that is serialised and parsed again must be cleaned again. -->
+  <math><mtext><table><mglyph><style><img src="x" alt="reparsed" onerror="top.__dossierPwned = 'reparsed onerror'"></style></mglyph></table></mtext></math>
+
+  <h2>Links</h2>
+  <ul>
+    <li><a id="jsLink" href="javascript:top.__dossierPwned='javascript link'">A javascript: link</a></li>
+    <li><a id="dataLink" href="data:text/html,%3Cscript%3Etop.__dossierPwned%3D'data link'%3C/script%3E">A data:text/html link</a></li>
+    <li><a id="topLink" href="https://example.invalid/top" target="_top">A link that targets the top window</a></li>
+    <li><a id="relLink" href="other-report.html">A link to a file beside the report</a></li>
+    <li><a id="localLink" href="#forms">A link to the Forms section</a></li>
+  </ul>
+
+  <h2 id="forms">Forms and frames</h2>
+  <form action="https://example.invalid/collect" method="post">
+    <label>Name <input name="name" value="reader"></label>
+    <button type="submit" id="hostileSubmit">Send</button>
+  </form>
+  <iframe src="https://example.invalid/framed" title="A remote frame"></iframe>
+  <iframe srcdoc="&lt;script&gt;top.__dossierPwned='nested srcdoc'&lt;/script&gt;" title="A nested frame"></iframe>
+
+  <h2>Hidden content</h2>
+  <p hidden>Hidden paragraph that must not be shown.</p>
+  <p style="display: none">Invisible paragraph that must not be shown.</p>
+  <p onmouseover="top.__dossierPwned = 'mouseover'">Hover over this paragraph.</p>
+</main>
+</body>
+</html>

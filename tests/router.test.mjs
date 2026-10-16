@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseRoute, routeFor, isPayload } from '../js/router.js';
+import { parseRoute, routeFor, isPayload, isAnchor } from '../js/router.js';
 
 test('page routes', () => {
   assert.deepEqual(parseRoute('#/results'), { view: 'reports', page: 'results' });
@@ -12,8 +12,14 @@ test('page routes', () => {
   assert.deepEqual(parseRoute('#/'), { view: 'reports' });
 });
 
-test('a bare anchor names a place, not a page', () => {
-  assert.deepEqual(parseRoute('#main'), { view: 'reports', anchor: 'main' });
+test('a bare anchor names a place, not a page or a view', () => {
+  // The skip link pressed in the Compare view must not switch to Reports, so
+  // an anchor carries no view at all and the current one stays.
+  assert.deepEqual(parseRoute('#main'), { anchor: 'main' });
+  assert.equal(isAnchor('#main'), true);
+  assert.equal(isAnchor('#/~compare'), false);
+  assert.equal(isAnchor('#/results'), false);
+  assert.equal(isAnchor('#dc=abc'), false);
 });
 
 test('compare routes', () => {

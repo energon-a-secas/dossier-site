@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout slowdown, 8 October (illustrative example)</title>
+<style>
+  body { margin: 0; background: #f4f1ea; color: #222; font: 16px/1.6 Georgia, "Times New Roman", serif; }
+  .masthead { padding: 14px 32px; background: #2b4a6f; color: #fff; font: 600 14px/1.4 Helvetica, Arial, sans-serif; letter-spacing: .04em; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 32px 64px; background: #fff; }
+  h1 { margin: 0 0 4px; color: #2b4a6f; font-size: 30px; line-height: 1.2; }
+  .byline { margin: 0 0 24px; color: #6b6b6b; font: 14px/1.4 Helvetica, Arial, sans-serif; }
+  h2 { margin: 32px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #d9cfb8; color: #8a4b12; font-size: 20px; }
+  table { width: 100%; border-collapse: collapse; font: 14px/1.4 Helvetica, Arial, sans-serif; }
+  th { background: #2b4a6f; color: #fff; text-align: left; padding: 6px 10px; }
+  td { padding: 6px 10px; border-bottom: 1px solid #e5e0d4; }
+  .callout { padding: 12px 16px; border-left: 4px solid #8a4b12; background: #fbf4e6; }
+  code { font-size: 14px; background: #f0ece2; padding: 1px 4px; }
+</style>
+</head>
+<body>
+<div class="masthead">Payments platform: incident notes. Illustrative example, invented data.</div>
+<main>
+  <h1>Checkout slowdown, 8 October</h1>
+  <p class="byline">Draft by D. Whitfield, on-call engineer. Not yet reviewed.</p>
+
+  <h2>Summary</h2>
+  <p>Between 14:04 and 14:51 UTC checkout was slow enough that about one attempt in sixteen timed out. The <code>cart-api</code> 4.18 deploy shrank the database connection pool, and client retries made it worse. We rolled back, and latency recovered seven minutes later.</p>
+
+  <h2>Customer impact</h2>
+  <ul>
+    <li>1,940 of 31,300 checkout attempts timed out (6.2%).</li>
+    <li>1,712 of those customers retried and finished their order.</li>
+    <li>p95 latency peaked at 2.9 s against a usual 420 ms.</li>
+    <li>Support logged 37 contacts about slow checkout.</li>
+  </ul>
+
+  <h2>Timeline of events</h2>
+  <table>
+    <thead><tr><th>UTC</th><th>Event</th></tr></thead>
+    <tbody>
+      <tr><td>14:02</td><td>Deploy of 4.18 starts</td></tr>
+      <tr><td>14:04</td><td>p95 latency passes 800 ms</td></tr>
+      <tr><td>14:13</td><td>Latency alert pages on-call</td></tr>
+      <tr><td>14:27</td><td>Incident declared</td></tr>
+      <tr><td>14:44</td><td>Rollback to 4.17 starts</td></tr>
+      <tr><td>14:51</td><td>p95 back under 800 ms</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Root causes</h2>
+  <p>The release copied a staging profile that sets the pool to 12 connections instead of 50. At peak the pool ran out in about two minutes, and each timed-out call was retried up to five times, which tripled the requests waiting for a connection.</p>
+  <p class="callout">The staging profile was never meant to ship. The deploy config review does not look at pool sizes today.</p>
+
+  <h2>What we did</h2>
+  <p>Rolled back to 4.17 at 14:44 and watched the pool drain. Latency was normal by 14:51. We kept 4.18 off the canary list until the profile was fixed.</p>
+
+  <h2>What went well</h2>
+  <p>The rollback was one command and took seven minutes. Support had a status note up within twenty minutes of the page.</p>
+  <p>Nobody was charged twice: the payment provider deduplicated every retried order.</p>
+
+  <h2>Follow-up actions</h2>
+  <ol>
+    <li>Add pool size to the deploy config review. Owner: checkout team, due 22 October.</li>
+    <li>Cap client retries at two, with backoff. Owner: web team, due 29 October.</li>
+    <li>Alert on pool saturation, not only on latency. Owner: SRE, due 29 October.</li>
+  </ol>
+</main>
+</body>
+</html>

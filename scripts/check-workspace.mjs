@@ -1,6 +1,6 @@
 /**
  * Browser regressions for the workspace: one header, the welcome screen, the
- * report bar, the rail, editing, Check report, the composer, keys, sharing,
+ * report bar, the rail, editing, Check report, the Compare view, keys, sharing,
  * persistence and offline export.
  */
 import assert from 'node:assert/strict';
@@ -15,6 +15,25 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 1000
 const page = await context.newPage();
 page.on('pageerror', (error) => errors.push(error.message));
 await fs.mkdir('.verify', { recursive: true });
+
+/** What the retired response composer used to make: a saved report holding a comparison block. */
+const PASTED_COMPARISON = {
+  dossier: {
+    version: 1,
+    title: 'Review of two responses',
+    kind: 'comparison',
+    status: 'draft',
+    pages: [{
+      title: 'Responses',
+      blocks: [{
+        type: 'compare', kind: 'text', mode: 'side', highlightChanges: false,
+        prompt: 'Summarize a change.',
+        left: { label: 'Response A', value: 'First line\n\nKeep this paragraph.' },
+        right: { label: 'Response B', value: 'First line\n\nA revised paragraph.' },
+      }],
+    }],
+  },
+};
 
 async function noOverflow(target, label) {
   assert.equal(await target.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `${label} overflows the viewport`);
@@ -134,26 +153,32 @@ try {
   await page.locator('#stage .block-table').waitFor();
   assert.match(await page.locator('#stage .block-table').innerText(), /Failed checks\s+0\s+0/);
 
-  // ── Compare shows the composer for now; Reports and the result leave it ───
+  // ── Compare is a view of its own; Reports brings the report back ─────────
   await page.locator('#viewCompare').click();
-  await page.locator('#comparisonForm').waitFor();
+  await page.locator('#compareView .cmp-toolbar').waitFor();
   assert.equal(await page.locator('html').getAttribute('data-dossier-view'), 'compare');
+  assert.match(await page.evaluate(() => location.hash), /^#\/~compare/);
   assert.equal(await page.locator('#viewCompare').getAttribute('aria-current'), 'page');
   assert.equal(await page.locator('#viewReports').getAttribute('aria-current'), null);
   assert.equal(await page.locator('#shell').isVisible(), false);
+  assert.equal(await page.locator('#welcome').isVisible(), false);
+  assert.equal(await page.locator('#compareView [data-action="cmp-choose-file"]').count(), 2, 'A new comparison starts with two empty columns');
+  assert.equal(await page.locator('#comparisonComposer').count(), 0, 'The retired composer is still in the page');
+  await oneHeader(page, 'Compare view');
+  // The skip link is an anchor, not a route: it never leaves the Compare view.
+  await page.evaluate(() => { location.hash = '#main'; });
+  await page.waitForTimeout(100);
+  assert.equal(await page.locator('html').getAttribute('data-dossier-view'), 'compare', 'The skip link switched views');
+  assert.match(await page.evaluate(() => location.hash), /^#\/~compare/, 'The skip link left its anchor in the address');
   await page.locator('#viewReports').click();
   await page.waitForFunction(() => document.documentElement.dataset.dossierView === 'reports');
-  assert.equal(await page.locator('#comparisonForm').isVisible(), false);
+  assert.equal(await page.locator('#compareView').isVisible(), false);
   assert.match(await page.locator('.report-title').innerText(), /A faster run/);
 
-  // The no-JSON path preserves both texts and produces a saved report.
-  await page.locator('#viewCompare').click();
-  const form = page.locator('#comparisonForm');
-  await form.locator('[name="title"]').fill('Review of two responses');
-  await form.locator('[name="prompt"]').fill('Summarize a change.');
-  await form.locator('[name="left"]').fill('First line\n\nKeep this paragraph.');
-  await form.locator('[name="right"]').fill('First line\n\nA revised paragraph.');
-  await form.getByRole('button', { name: 'Create comparison' }).click();
+  // A pasted Dossier document with a comparison block opens and is saved.
+  await page.locator('#openReport').click();
+  await page.locator('#importText').fill(JSON.stringify(PASTED_COMPARISON));
+  await page.locator('#importDialog [data-action="import-confirm"]').click();
   await page.locator('.report-title').filter({ hasText: 'Review of two responses' }).waitFor();
   await page.waitForFunction(() => document.getElementById('reportOrigin').textContent === 'Saved in this browser');
   assert.equal(await page.locator('html').getAttribute('data-dossier-view'), 'reports');
@@ -483,8 +508,8 @@ try {
       // The other view is one tap away on a phone; the current one steps aside.
       assert.equal(await narrow.locator('#viewCompare').isVisible(), true);
       await narrow.locator('#viewCompare').click();
-      await narrow.locator('#comparisonForm').waitFor();
-      await noOverflow(narrow, 'Mobile composer');
+      await narrow.locator('#compareView .cmp-toolbar').waitFor();
+      await noOverflow(narrow, 'Mobile Compare view');
       assert.equal(await narrow.locator('#viewReports').isVisible(), true);
       // Open, Share and Display wait in the kit's menu.
       await narrow.locator('.header-overflow-toggle').click();
@@ -508,7 +533,7 @@ try {
     await narrow.close();
   }
   assert.deepEqual(errors, [], 'Page raised JavaScript errors');
-  console.log('Passed: one header from first paint and after H, welcome front door, report bar, rail, Edit and Done, Check report beside the editor and in the window at the page end, composer view, examples from Open and the block catalog, focus back from the phone menu, share and export dialog and keys, delete to welcome, shared links and broken links, slow and failed boots, persistence, rapid report switches, import recovery, YAML export, offline HTML, print, the phone menu over the drawer and 4 viewport sizes.');
+  console.log('Passed: one header from first paint and after H, welcome front door, report bar, rail, Edit and Done, Check report beside the editor and in the window at the page end, the Compare view and the skip link inside it, examples from Open and the block catalog, focus back from the phone menu, share and export dialog and keys, delete to welcome, shared links and broken links, slow and failed boots, persistence, rapid report switches, import recovery, YAML export, offline HTML, print, the phone menu over the drawer and 4 viewport sizes.');
 } finally {
   await browser.close();
 }

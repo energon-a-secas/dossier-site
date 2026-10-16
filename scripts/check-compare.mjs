@@ -1,0 +1,589 @@
+/**
+ * Browser checks for the Compare view: building a comparison from files,
+ * sections sync, stepping, the focus layout and the phone switcher, saving
+ * and reopening, the Comparisons switcher (rename, delete, undo), the
+ * bundled example, and a hostile report that must not run, reach this page,
+ * navigate anything or leave localhost, in every render mode.
+ *
+ * Run against the dev server: `node scripts/check-compare.mjs`
+ * (DOSSIER_URL overrides http://127.0.0.1:8899).
+ */
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
+
+const base = process.env.DOSSIER_URL || 'http://127.0.0.1:8899';
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const file = (rel) => path.join(root, rel);
+const browser = await chromium.launch();
+const errors = [];
+await fs.mkdir(file('.verify'), { recursive: true });
+
+function watch(page) {
+  page.on('pageerror', (error) => errors.push(`${page.url()}: ${error.message}`));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') errors.push(`${page.url()}: console: ${msg.text()}`);
+  });
+}
+
+async function noOverflow(page, label) {
+  const over = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  assert.ok(over <= 1, `${label}: the page scrolls sideways by ${over}px`);
+}
+
+/**
+ * The page itself never scrolls in Compare: only the columns do. A wheel over
+ * the toolbar used to scroll the page by the footer's height and slide the
+ * toolbar under the sticky header.
+ */
+async function pageStill(page, label) {
+  for (const target of ['#cmpToolbar', '#compareView .col__head:visible']) {
+    await page.locator(target).first().hover();
+    await page.mouse.wheel(0, 400);
+  }
+  await page.waitForTimeout(150);
+  const state = await page.evaluate(() => ({
+    y: scrollY,
+    taller: document.documentElement.scrollHeight - innerHeight,
+    toolbar: document.querySelector('#cmpToolbar').getBoundingClientRect().top,
+    header: document.querySelector('.header-bar').getBoundingClientRect().bottom,
+  }));
+  assert.equal(state.y, 0, `${label}: a wheel over the toolbar or a column head scrolled the page`);
+  assert.ok(state.taller <= 0, `${label}: the page is ${state.taller}px taller than the window`);
+  assert.ok(Math.abs(state.toolbar - state.header) <= 1, `${label}: the toolbar is at ${state.toolbar}px, not under the header at ${state.header}px`);
+}
+
+/** Wait until focus is on an element matching `selector`; fail with `why`. */
+async function focusOn(page, selector, why) {
+  try {
+    await page.waitForFunction((sel) => Boolean(document.activeElement?.matches?.(sel)), selector, { timeout: 2000 });
+  } catch {
+    const at = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el ? `${el.localName}${el.id ? `#${el.id}` : ''}${el.className ? `.${String(el.className).trim().split(/\s+/).join('.')}` : ''}` : 'nothing';
+    });
+    assert.fail(`${why}: focus is on ${at}, not ${selector}`);
+  }
+}
+
+/** Put a file into a column through its "Choose a file" button. */
+async function chooseFile(page, colId, rel) {
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.locator(`#cmp-col-${colId} [data-action="cmp-choose-file"]`).click(),
+  ]);
+  await chooser.setFiles(file(rel));
+  await page.locator(`#cmp-col-${colId} .col__scroll, #cmp-col-${colId} .col__frame`).first().waitFor();
+}
+
+/** A heading's distance from the top of its column's scroller. */
+function headingTop(page, colId, text) {
+  return page.evaluate(([id, wanted]) => {
+    // The heading as the report wrote it: without the difference marks'
+    // hidden words ("Changed heading:"), removed words or "Added" label.
+    const plain = (h) => {
+      const c = h.cloneNode(true);
+      c.querySelectorAll('.visually-hidden, del, .u-label, .cur-tag').forEach((e) => e.remove());
+      return c.textContent.replace(/\s+/g, ' ').trim();
+    };
+    const scroller = document.querySelector(`#cmp-col-${id} .col__scroll`);
+    const heading = [...scroller.querySelectorAll('.r-h')].find((h) => plain(h) === wanted);
+    return heading ? heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
+  }, [colId, text]);
+}
+
+try {
+  // ── A new comparison, built from two files ─────────────────────────────────
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  watch(page);
+  // From the welcome screen: its button hides with it, so focus moves to the
+  // Compare view's own header button, not to the one that leads back.
+  await page.goto(`${base}/?check=compare`, { waitUntil: 'networkidle' });
+  await page.locator('#welcome [data-action="view"][data-view="compare"]').click();
+  await page.locator('#compareView .cmp-toolbar').waitFor();
+  await page.waitForFunction(() => location.hash === '#/~compare');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'viewCompare', 'Entering Compare left focus behind');
+  assert.equal(await page.locator('html').getAttribute('data-dossier-view'), 'compare');
+  assert.equal(await page.locator('#viewCompare').getAttribute('aria-current'), 'page');
+  assert.equal(await page.locator('#shell').isVisible(), false);
+  assert.equal(await page.locator('#compareView .col').count(), 2);
+  assert.equal(await page.locator('#compareView .col--empty').count(), 2);
+  assert.match(await page.locator('#cmp-col-k1 .drop').innerText(), /Drop a report here/);
+
+  await chooseFile(page, 'k1', 'reports/compare/human-draft.html');
+  await chooseFile(page, 'k2', 'reports/compare/agent-output.md');
+  await page.waitForFunction(() => /^#\/~compare\/c-[a-z0-9]+$/.test(location.hash));
+  const setRoute = await page.evaluate(() => location.hash);
+  assert.match(await page.locator('#cmp-col-k1 .col__kind').innerText(), /HTML/);
+  assert.match(await page.locator('#cmp-col-k2 .col__kind').innerText(), /Markdown/);
+  assert.match(await page.locator('#cmp-col-k1 .col__stats').innerText(), /words/);
+  // The human draft's own styling is gone in Dossier format: same typography.
+  const fonts = await page.evaluate(() => ['k1', 'k2'].map((id) => getComputedStyle(document.querySelector(`#cmp-col-${id} .r-h2`)).fontFamily));
+  assert.equal(fonts[0], fonts[1], 'Both columns read in one typeface');
+  assert.equal(await page.locator('#cmp-col-k1 .reader').getByText('Payments platform: incident notes').count(), 0, 'Page chrome outside main was kept');
+  await pageStill(page, '1440px');
+
+  // The skip link moves focus and adds no history entry for Back to undo.
+  const historyBefore = await page.evaluate(() => history.length);
+  await page.locator('.skip-link').focus();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'main', 'The skip link did not move focus');
+  assert.equal(await page.evaluate(() => history.length), historyBefore, 'The skip link added a history entry');
+  assert.equal(await page.locator('html').getAttribute('data-dossier-view'), 'compare');
+
+  // ── Sections sync: A's third heading brings B's matching one along ─────────
+  await page.locator('#cmp-col-k1 .col__scroll').hover();
+  await page.evaluate(() => {
+    const scroller = document.querySelector('#cmp-col-k1 .col__scroll');
+    const third = scroller.querySelectorAll('.r-h')[2];
+    scroller.scrollTop += third.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16;
+  });
+  await page.waitForTimeout(250);
+  assert.equal(Math.round(await headingTop(page, 'k1', 'Customer impact')), 16);
+  const impact = await headingTop(page, 'k2', 'Impact');
+  const viewB = await page.locator('#cmp-col-k2 .col__scroll').evaluate((el) => el.clientHeight);
+  assert.ok(impact > -24 && impact < viewB * 0.35, `B's "Impact" should be near the reading line, not at ${impact}px`);
+
+  // With sync off, scrolling one column leaves the other where it was.
+  await page.locator('select[data-change="cmp-sync"]').selectOption('off');
+  const before = await page.locator('#cmp-col-k2 .col__scroll').evaluate((el) => el.scrollTop);
+  await page.locator('#cmp-col-k1 .col__scroll').hover();
+  await page.mouse.wheel(0, 400);
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('#cmp-col-k2 .col__scroll').evaluate((el) => el.scrollTop), before, 'Sync off still moved B');
+  await page.locator('select[data-change="cmp-sync"]').selectOption('sections');
+
+  // With differences off, `]` steps to the next heading of the column being
+  // read. (With them on it steps through changes: see the analysis checks.)
+  await page.locator('.cmp-toolbar [data-action="cmp-toggle-diff"]').click();
+  assert.equal(await page.locator('.cmp-toolbar [data-action="cmp-toggle-diff"]').getAttribute('aria-pressed'), 'false');
+  await page.locator('#cmp-col-k1 .col__scroll').focus();
+  const counterBefore = await page.locator('.counter__main').innerText();
+  await page.keyboard.press(']');
+  await page.waitForFunction((text) => document.querySelector('.counter__main').textContent !== text, counterBefore, { timeout: 3000 });
+  // The counter counts headings (the stats line counts sections, a smaller
+  // set) and is not a live region; the step itself is announced, once.
+  assert.match(await page.locator('.counter__sub').innerText(), /headings in A/);
+  assert.equal(await page.locator('.counter').getAttribute('aria-live'), null, 'The counter would be read out on every scroll');
+  assert.match(await page.locator('#cmpLive').innerText(), /^Heading \d+ of \d+ in A: /);
+  await page.locator('.cmp-toolbar [data-action="cmp-toggle-diff"]').click();
+  await page.screenshot({ path: file('.verify/compare-1440.png') });
+
+  // ── Focus layout from the column menu, and back ────────────────────────────
+  await page.locator('#cmp-col-k2 .col__menu').click();
+  assert.equal(await page.locator('#cmpColumnMenu').isVisible(), true);
+  assert.match(await page.evaluate(() => document.activeElement.textContent), /Edit source/, 'The menu takes focus');
+  // The three render modes are one named group, so "Original layout" is heard
+  // as a choice of "Show as".
+  assert.equal(await page.locator('#cmpColumnMenu [role="group"][aria-label^="Show as"] [role="menuitemradio"]').count(), 3, 'The render modes are not one labelled group');
+  await page.locator('#cmpColumnMenu [data-action="cmp-focus-col"]').click();
+  assert.equal(await page.locator('#cmp-col-k1').isVisible(), false);
+  assert.equal(await page.locator('#cmp-col-k2').isVisible(), true);
+  assert.equal(await page.locator('.focus-switch [role="tab"]').count(), 2);
+  await page.locator('.focus-switch [data-col="k1"]').click();
+  assert.equal(await page.locator('#cmp-col-k1').isVisible(), true);
+  assert.equal(await page.locator('#cmp-col-k2').isVisible(), false);
+  // Under the tabs a column is the panel its tab names.
+  assert.equal(await page.locator('#cmp-col-k1').getAttribute('role'), 'tabpanel');
+  assert.equal(await page.locator('#cmp-col-k1').getAttribute('aria-labelledby'), 'cmp-tab-k1');
+  await page.locator('.cmp-toolbar [data-action="cmp-layout"]').click();
+  assert.equal(await page.locator('#cmp-col-k2').isVisible(), true);
+  assert.equal(await page.locator('#cmp-col-k1').getAttribute('aria-labelledby'), 'cmp-col-k1-label');
+  // "All columns" hides itself: focus goes to the column being read.
+  await focusOn(page, '#cmp-col-k1 .col__menu', 'All columns dropped focus');
+
+  // ── Original mode is a static frame: never scripts with same-origin ────────
+  // B, read at its "Impact", keeps its place; A is rebuilt as a frame and
+  // catches up with it instead of waiting at its top for the next scroll.
+  await page.locator('#cmp-col-k2 .col__scroll').hover();
+  await page.evaluate(() => {
+    const scroller = document.querySelector('#cmp-col-k2 .col__scroll');
+    const plain = (h) => { const c = h.cloneNode(true); c.querySelectorAll('.visually-hidden, del, .u-label, .cur-tag').forEach((e) => e.remove()); return c.textContent.trim(); };
+    const impactB = [...scroller.querySelectorAll('.r-h')].find((h) => plain(h) === 'Impact');
+    scroller.scrollTop += impactB.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16;
+  });
+  await page.waitForTimeout(250);
+  await page.locator('.cmp-toolbar [data-action="cmp-set-mode"][data-value="original"]').click();
+  await page.locator('#cmp-col-k1 .col__frame').waitFor();
+  await page.waitForFunction(() => document.querySelector('#cmp-col-k1 .col__frame')?.contentWindow?.scrollY > 0, null, { timeout: 3000 });
+  await page.waitForTimeout(150);
+  const caught = await page.evaluate(() => {
+    const frame = document.querySelector('#cmp-col-k1 .col__frame');
+    const heading = [...frame.contentDocument.querySelectorAll('h1, h2, h3')].find((h) => h.textContent.trim() === 'Customer impact');
+    return { top: heading.getBoundingClientRect().top, view: frame.contentWindow.innerHeight };
+  });
+  assert.ok(caught.top > -24 && caught.top < caught.view * 0.35, `A's frame did not catch up with B: its "Customer impact" is at ${caught.top}px`);
+  assert.equal(await page.locator('#cmp-col-k1 .col__frame').getAttribute('sandbox'), 'allow-same-origin');
+  assert.equal(await page.locator('#cmp-col-k2 .col__frame').count(), 0, 'Markdown has no original layout');
+  await page.locator('.cmp-toolbar [data-action="cmp-set-mode"][data-value="format"]').click();
+  await page.locator('#cmp-col-k1 .col__scroll').waitFor();
+
+  // ── Saved: a reload reopens the same comparison ────────────────────────────
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.locator('#cmp-col-k2 .col__scroll').waitFor();
+  assert.equal(await page.evaluate(() => location.hash), setRoute);
+  assert.equal(await page.locator('#compareView .col').count(), 2);
+  // Leaving for Reports and coming back keeps each column where it was.
+  await page.locator('#cmp-col-k1 .col__scroll').evaluate((el) => { el.scrollTop = 300; });
+  await page.locator('#viewReports').click();
+  await page.waitForFunction(() => document.documentElement.dataset.dossierView === 'reports');
+  await page.locator('#viewCompare').click();
+  await page.waitForFunction(() => document.documentElement.dataset.dossierView === 'compare');
+  await page.waitForTimeout(100);
+  assert.ok(Math.abs(await page.locator('#cmp-col-k1 .col__scroll').evaluate((el) => el.scrollTop) - 300) < 2, 'Scroll position was lost');
+  assert.equal(await page.evaluate(() => location.hash), setRoute, 'Coming back changed the comparison');
+
+  // `/` in Compare opens the Comparisons switcher at its filter.
+  await page.locator('#cmpHeading').evaluate((el) => el.closest('#main')?.focus());
+  await page.keyboard.press('/');
+  await page.waitForFunction(() => document.activeElement?.id === 'cmpSwitcherFilter');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#cmpSwitcher').isVisible(), false);
+
+  // ── Rename, a second set, delete with undo ─────────────────────────────────
+  await page.locator('.cmp-toolbar .set-title').click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('Checkout review');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('.cmp-toolbar .set-title__text').innerText(), 'Checkout review');
+  await page.waitForTimeout(600);
+  await page.locator('#cmpSwitcherBtn').click();
+  // The list is read from storage first, then focus lands in the filter.
+  await page.waitForFunction(() => document.activeElement?.id === 'cmpSwitcherFilter');
+  await page.locator('#cmpSwitcher [data-action="cmp-new-set"]').click();
+  assert.equal(await page.locator('#compareView .col--empty').count(), 2);
+  await chooseFile(page, 'k1', 'reports/compare/fixes.html');
+  await page.waitForTimeout(600);
+  await page.locator('#cmpSwitcherBtn').click();
+  await page.waitForFunction(() => document.activeElement?.id === 'cmpSwitcherFilter');
+  assert.equal(await page.locator('#cmpSwitcher .sw__row[data-set-id]').count(), 2);
+  const target = page.locator('#cmpSwitcher .sw__row', { hasText: 'Checkout review' });
+  await target.locator('[data-action="cmp-delete-set"]').click();
+  await page.locator('#cmpToast').getByRole('button', { name: 'Undo' }).waitFor();
+  assert.equal(await page.locator('#cmpSwitcher .sw__row[data-set-id]').count(), 1);
+  await page.locator('#cmpToast').getByRole('button', { name: 'Undo' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('#cmpSwitcher .sw__row[data-set-id]').length === 2);
+  // The Undo button takes itself away; focus lands on the comparison it brought back.
+  await focusOn(page, '#cmpSwitcher .sw__row .sw__open', 'Undoing a deletion dropped focus');
+  assert.match(await page.evaluate(() => document.activeElement.textContent), /Checkout review/);
+  // Rename from the switcher row.
+  await page.locator('#cmpSwitcher .sw__row', { hasText: 'Checkout review' }).locator('[data-action="cmp-rename-row"]').click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('Checkout review, renamed');
+  await page.keyboard.press('Enter');
+  await page.locator('#cmpSwitcher .sw__title', { hasText: 'Checkout review, renamed' }).waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#cmpSwitcher').isVisible(), false);
+
+  // Removing a column offers an undo.
+  await page.locator('#cmp-col-k1 .col__menu').click();
+  await page.locator('#cmpColumnMenu [data-action="cmp-remove"]').click();
+  assert.equal(await page.locator('#cmp-col-k1').count(), 0);
+  await page.locator('#cmpToast').getByRole('button', { name: 'Undo' }).click();
+  await page.locator('#cmp-col-k1 .col__scroll').waitFor();
+  await focusOn(page, '#cmp-col-k1 .col__menu', 'Undoing a removal dropped focus');
+
+  // ── The bundled example, from the Open dialog ──────────────────────────────
+  await page.locator('#openReport').click();
+  await page.locator('#openExamples [data-action="cmp-example"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('#compareView .col .reader').length === 3);
+  assert.equal(await page.locator('.cmp-toolbar .set-title__text').innerText(), 'Illustrative example: checkout latency incident');
+  assert.equal(await page.evaluate(() => location.hash), '#/~compare', 'The example is not saved until it is changed');
+  assert.match(await page.locator('#cmp-col-k3 .col__who').innerText(), /Fixes to B/);
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.waitForTimeout(150);
+    await noOverflow(page, `Example at ${width}px`);
+  }
+  // A phone shows one column at a time, chosen with the tabs.
+  assert.equal(await page.locator('#compareView .col:visible').count(), 1);
+  assert.equal(await page.locator('.focus-switch').isVisible(), true);
+  await page.locator('.focus-switch [data-col="k2"]').click();
+  assert.equal(await page.locator('#cmp-col-k2').isVisible(), true);
+  assert.equal(await page.locator('#compareView .col:visible').count(), 1);
+  // On a phone the columns are the tabs' panels whatever the layout says.
+  assert.equal(await page.locator('#cmp-col-k2').getAttribute('aria-labelledby'), 'cmp-tab-k2');
+  // Reading the example (a tab tap is a view change) does not save it.
+  await page.waitForTimeout(600);
+  assert.equal(await page.evaluate(() => location.hash), '#/~compare', 'Choosing a tab saved the example');
+  const savedTitles = await page.evaluate(async () => (await (await import('/js/compare/store.js')).listSets()).map((item) => item.title));
+  assert.ok(!savedTitles.includes('Illustrative example: checkout latency incident'), 'Choosing a tab saved a copy of the example');
+  await pageStill(page, '390px');
+  await page.locator('#cmpOptionsBtn').click();
+  assert.equal(await page.locator('#cmpOptions').isVisible(), true);
+  assert.equal(await page.locator('#cmpScrim').isVisible(), true, 'Options opens as a sheet over a scrim');
+  // The sheet and its scrim start right under the 56 px bar, and the set's
+  // title ends in an ellipsis inside the sheet (measured once it has slid in).
+  const sheet = await page.evaluate(async () => {
+    await Promise.all(document.getElementById('cmpOptions').getAnimations().map((animation) => animation.finished.catch(() => {})));
+    const box = (el) => el.getBoundingClientRect();
+    const title = document.querySelector('#cmpOptions .opt__title');
+    return {
+      header: box(document.querySelector('.header-bar')).bottom,
+      top: box(document.getElementById('cmpOptions')).top,
+      scrim: box(document.getElementById('cmpScrim')).top,
+      right: box(title).right,
+      limit: box(document.getElementById('cmpOptions')).right - parseFloat(getComputedStyle(document.getElementById('cmpOptions')).paddingRight),
+    };
+  });
+  assert.equal(sheet.top, sheet.header, `The Options sheet starts at ${sheet.top}px, not under the bar at ${sheet.header}px`);
+  assert.equal(sheet.scrim, sheet.header, `The scrim starts at ${sheet.scrim}px, not under the bar at ${sheet.header}px`);
+  assert.ok(sheet.right <= sheet.limit + 0.5, `The set title in Options runs ${sheet.right - sheet.limit}px past the sheet's padding`);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'cmpOptionsBtn');
+  // A tap on the scrim closes the sheet too, and focus goes back the same way.
+  await page.locator('#cmpOptionsBtn').click();
+  await page.mouse.click(195, 800);
+  assert.equal(await page.locator('#cmpOptions').isVisible(), false);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'cmpOptionsBtn');
+  await page.screenshot({ path: file('.verify/compare-390.png') });
+
+  // ── Options on a wide screen: Tab past its end closes it ───────────────────
+  await page.setViewportSize({ width: 1024, height: 844 });
+  await page.locator('#cmpOptionsBtn').click();
+  assert.equal(await page.locator('#cmpScrim').isVisible(), false, 'Options at 1024px is a popover, not a sheet');
+  let closed = false;
+  for (let i = 0; i < 12 && !closed; i += 1) {
+    await page.keyboard.press('Tab');
+    closed = !(await page.locator('#cmpOptions').isVisible());
+    if (!closed) assert.ok(await page.evaluate(() => document.getElementById('cmpOptions').contains(document.activeElement)), 'Tab left Options while it stayed open');
+  }
+  assert.ok(closed, 'Tab never left Options');
+  assert.ok(await page.evaluate(() => Boolean(document.activeElement?.closest('#compareView'))), 'Tab out of Options went past the comparison');
+  assert.equal(await page.locator('#cmpOptionsBtn').getAttribute('aria-expanded'), 'false');
+  // Shift+Tab before its first control lands on the Options button.
+  await page.locator('#cmpOptionsBtn').click();
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.locator('#cmpOptions').isVisible(), false);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'cmpOptionsBtn');
+
+  // ── A Dossier document in a column, pasted, then edited in place ───────────
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('.cmp-toolbar [data-action="cmp-add-menu"]').click();
+  await page.locator('#cmpAddMenu [data-action="cmp-add-column"][data-role="other"]').click();
+  await page.locator('#cmp-col-k4 [data-action="cmp-paste"]').click();
+  const incident = await fs.readFile(file('reports/incident.json'), 'utf8');
+  await page.locator('#cmp-col-k4 textarea').fill(incident);
+  await page.locator('#cmp-col-k4 form').getByRole('button', { name: 'Use this text' }).click();
+  await page.locator('#cmp-col-k4 .reader--dossier .report-title').waitFor();
+  assert.match(await page.locator('#cmp-col-k4 .col__kind').innerText(), /Dossier/);
+  await page.waitForFunction(() => /^#\/~compare\/c-/.test(location.hash));
+  const ids = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('[id]')].map((el) => el.id);
+    return { dupes: all.filter((id, i) => all.indexOf(id) !== i), prefixed: [...document.querySelectorAll('#cmp-col-k4 .col__body [id]')].map((el) => el.id).filter((id) => !id.startsWith('cmp-k4-')) };
+  });
+  assert.deepEqual(ids.dupes, [], 'Two elements share an id');
+  assert.deepEqual(ids.prefixed, [], 'A Dossier column wrote an id without its prefix');
+  await page.locator('#cmp-col-k4 .col__menu').click();
+  await page.locator('#cmpColumnMenu [data-action="cmp-edit-source"]').click();
+  const edited = incident.replace(/"title":\s*"[^"]*"/, '"title": "Edited in the column"');
+  await page.locator('#cmp-col-k4 textarea').fill(edited);
+  await page.locator('#cmp-col-k4 form').getByRole('button', { name: 'Save' }).click();
+  await page.locator('#cmp-col-k4 .report-title', { hasText: 'Edited in the column' }).waitFor();
+  // A broken edit is refused in place, with the reason, and nothing is lost.
+  await page.locator('#cmp-col-k4 .col__menu').click();
+  await page.locator('#cmpColumnMenu [data-action="cmp-edit-source"]').click();
+  await page.locator('#cmp-col-k4 textarea').fill('{"dossier": ');
+  await page.locator('#cmp-col-k4 form').getByRole('button', { name: 'Save' }).click();
+  await page.locator('#cmp-col-k4 .col-form__error').waitFor();
+  await page.locator('#cmp-col-k4 form').getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('#cmp-col-k4 .report-title', { hasText: 'Edited in the column' }).waitFor();
+  // A Dossier column's headings sit under its label (an h2), as an HTML or
+  // Markdown column's do: the report title at level 3, its pages at 4.
+  assert.equal(await page.locator('#cmp-col-k4 .report-title').getAttribute('aria-level'), '3');
+  assert.deepEqual([...new Set(await page.locator('#cmp-col-k4 .report-page__head h2').evaluateAll((els) => els.map((el) => el.getAttribute('aria-level'))))], ['4']);
+
+  // Move: the bodies are not drawn again, and their names follow the letters.
+  await page.locator('#cmp-col-k4 .col__menu').click();
+  await page.locator('#cmpColumnMenu [data-action="cmp-move"][data-dir="-1"]').click();
+  assert.equal(await page.locator('#cmp-col-k4 .col__scroll').getAttribute('aria-label'), 'Column C text');
+  assert.equal(await page.locator('#cmp-col-k3 .col__scroll').getAttribute('aria-label'), 'Column D text');
+
+  // Four columns, so Add column is off: the phone's Options sheet still keeps Tab.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#cmpOptionsBtn').click();
+  await page.locator('#cmpOptions').waitFor();
+  assert.equal(await page.locator('#cmpOptions [data-action="cmp-add-menu"]').isDisabled(), true);
+  for (const key of ['Tab', 'Shift+Tab']) {
+    for (let i = 0; i < 10; i += 1) {
+      await page.keyboard.press(key);
+      const inside = await page.evaluate(() => {
+        const active = document.activeElement;
+        // The undo toast, while it shows, is part of the round.
+        return document.getElementById('cmpOptions').contains(active) || document.getElementById('cmpToast').contains(active);
+      });
+      assert.ok(inside, `${key} ${i + 1} left the Options sheet with four columns`);
+    }
+  }
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // ── A comparison bundle given to the Open dialog opens in Compare ──────────
+  await page.locator('#viewReports').click();
+  await page.waitForFunction(() => document.documentElement.dataset.dossierView === 'reports');
+  const bundle = {
+    dossierCompare: {
+      version: 1,
+      title: 'Bundled comparison',
+      columns: [
+        { id: 'k1', role: 'human', label: 'Draft', source: { kind: 'markdown', name: 'a.md', text: '# A\n\n## Summary\n\nOne.' } },
+        { id: 'k2', role: 'agent', label: 'Agent', source: { kind: 'text', name: 'b.txt', text: 'Two.' } },
+      ],
+    },
+  };
+  await page.locator('#openReport').click();
+  await page.locator('#importText').fill(JSON.stringify(bundle));
+  assert.match(await page.locator('#importDetected').innerText(), /comparison/i);
+  await page.locator('#importDialog [data-action="import-confirm"]').click();
+  await page.waitForFunction(() => document.documentElement.dataset.dossierView === 'compare');
+  await page.locator('.cmp-toolbar .set-title__text', { hasText: 'Bundled comparison' }).waitFor();
+  assert.equal(await page.locator('#compareView .col .reader').count(), 2);
+  await page.waitForFunction(() => /^#\/~compare\/c-/.test(location.hash));
+
+  // ── Dossier format without the page's CSS ──────────────────────────────────
+  // A stat tile's number and label stay two words; a word styled inside
+  // running text stays one. A drawing coloured by the page's classes is
+  // described (it would paint solid black), one with its own fills is drawn.
+  const normalized = await page.evaluate(async () => {
+    const { htmlToIr } = await import('/js/compare/normalize.js');
+    const { renderIr } = await import('/js/compare/ir-render.js');
+    const html = '<main><div class="stat"><span class="num">201</span><span class="lbl">tickets this year</span></div>'
+      + '<p>Up <span class="num">5</span><span class="unit">%</span> since May.</p>'
+      + '<svg viewBox="0 0 10 10" role="img"><title>A styled star</title><circle class="star" cx="5" cy="5" r="4"/></svg>'
+      + '<svg viewBox="0 0 10 10" aria-label="A drawn dot"><circle cx="5" cy="5" r="4" fill="#335"/></svg></main>';
+    const out = document.createElement('div');
+    out.innerHTML = renderIr(htmlToIr(html).blocks, { colId: 'zz' });
+    return { text: out.textContent.replace(/\s+/g, ' '), images: [...out.querySelectorAll('img')].map((img) => img.alt) };
+  });
+  assert.match(normalized.text, /201 tickets this year/, 'A stat tile ran its number into its label');
+  assert.match(normalized.text, /Up 5% since May/, 'A styled word in running text was split');
+  assert.match(normalized.text, /A styled star\. A drawing coloured by its page/, 'A class-styled drawing was not described');
+  assert.deepEqual(normalized.images, ['A drawn dot'], 'Only the drawing with its own fills is drawn');
+  await context.close();
+
+  // ── A hostile report, in every mode ────────────────────────────────────────
+  const hostile = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const hp = await hostile.newPage();
+  // The report's own scripts fail on purpose here (blocked loads, a sealed
+  // frame refused access to this page): those messages are the proof, not
+  // errors. Anything else this page raises still fails the run.
+  hp.on('pageerror', (error) => {
+    if (!/Blocked a frame with origin "null"|cross-origin frame/.test(error.message)) errors.push(`hostile: ${error.message}`);
+  });
+  // In Dossier format and Original nothing of the report is even attempted:
+  // the static copy leaves out its scripts, base, frames and outside loads,
+  // so the browser has nothing to refuse and logs nothing. Interactive runs
+  // the report's scripts, whose failures are the proof, so it is not counted.
+  const refusals = [];
+  let countRefusals = true;
+  hp.on('console', (msg) => { if (countRefusals && msg.type() === 'error') refusals.push(msg.text()); });
+  // A request the frame's policy refuses is reported by the browser, then
+  // fails with "csp" before anything is sent. Only the others left.
+  const outside = new Map();
+  let watching = false;
+  const isOutside = (raw) => {
+    const url = new URL(raw);
+    return !['127.0.0.1', 'localhost'].includes(url.hostname) && /^https?:$/.test(url.protocol);
+  };
+  hostile.on('request', (req) => { if (watching && isOutside(req.url())) outside.set(req, req.url()); });
+  hostile.on('requestfailed', (req) => { if (/csp/i.test(req.failure()?.errorText || '')) outside.delete(req); });
+  hostile.on('page', (popup) => outside.set(popup, `popup ${popup.url()}`));
+  await hp.goto(`${base}/?check=hostile#/~compare`, { waitUntil: 'networkidle' });
+  watching = true;
+  await hp.evaluate(() => {
+    window.__opened = [];
+    window.open = (url) => { window.__opened.push(String(url)); return null; };
+  });
+  await chooseFile(hp, 'k1', 'fixtures/compare/hostile.html');
+  await hp.waitForTimeout(400);
+  const reader = hp.locator('#cmp-col-k1 .reader');
+  assert.match(await reader.innerText(), /A reader should see these words/);
+  assert.equal(await reader.getByText('Hidden paragraph').count(), 0);
+  assert.equal(await reader.getByText('Invisible paragraph').count(), 0);
+  const formatMarkup = await reader.innerHTML();
+  // Words like "javascript:" may be shown as text; no tag may carry them.
+  const tags = formatMarkup.match(/<[^>]+>/g) || [];
+  const liveTags = tags.filter((tag) => /^<(script|iframe|form|input|button|object|embed|base|meta|link|style)\b|\son[a-z]+=|(href|src)="\s*(javascript|data:text|vbscript)/i.test(tag));
+  assert.deepEqual(liveTags, [], "Dossier format kept something live");
+  assert.ok(!/example\.invalid\/pixel/.test(formatMarkup), 'A remote image reached an img');
+  assert.match(formatMarkup, /Remote image from example\.invalid not loaded/);
+
+  async function hostileClean(label) {
+    const state = await hp.evaluate(() => ({
+      pwned: window.__dossierPwned || null,
+      stored: localStorage.getItem('dossier-pwned'),
+      bothTokens: [...document.querySelectorAll('iframe')].filter((f) => {
+        const tokens = (f.getAttribute('sandbox') || '').split(/\s+/);
+        return tokens.includes('allow-scripts') && tokens.includes('allow-same-origin');
+      }).length,
+      unsandboxed: [...document.querySelectorAll('#compareView iframe')].filter((f) => !f.hasAttribute('sandbox')).length,
+    }));
+    assert.equal(state.pwned, null, `${label}: a script in the report ran (${state.pwned})`);
+    assert.equal(state.stored, null, `${label}: the report wrote to this page's storage`);
+    assert.equal(state.bothTokens, 0, `${label}: a frame has allow-scripts and allow-same-origin`);
+    assert.equal(state.unsandboxed, 0, `${label}: a frame has no sandbox`);
+  }
+  await hostileClean('Dossier format');
+
+  // Original: static frame. Links are caught, nothing navigates.
+  await hp.locator('#cmp-col-k1 .col__menu').click();
+  await hp.locator('#cmpColumnMenu [data-value="original"]').click();
+  const frameEl = hp.locator('#cmp-col-k1 .col__frame');
+  await frameEl.waitFor();
+  await hp.waitForTimeout(500);
+  assert.equal(await frameEl.getAttribute('sandbox'), 'allow-same-origin');
+  assert.match(await hp.locator('#cmp-col-k1 .col__notes').innerText(), /not loaded/);
+  // The frame was handed a copy with no handler, refresh or script address
+  // left, even the ones that only show up when the copy is parsed again.
+  const copy = await frameEl.evaluate((f) => {
+    const doc = f.contentDocument;
+    return {
+      handlers: [...doc.querySelectorAll('*')].filter((el) => [...el.attributes].some((a) => /^on/i.test(a.name))).length,
+      refresh: [...doc.querySelectorAll('meta[http-equiv]')].filter((m) => /refresh/i.test(m.getAttribute('http-equiv'))).length,
+      scriptLinks: [...doc.querySelectorAll('[href]')].filter((el) => /^\s*javascript:/i.test(el.getAttribute('href'))).length,
+    };
+  });
+  assert.deepEqual(copy, { handlers: 0, refresh: 0, scriptLinks: 0 }, 'The static copy kept something live');
+  const frame = hp.frameLocator('#cmp-col-k1 .col__frame');
+  const pageUrl = hp.url();
+  const said = () => hp.locator('#app-toast').innerText();
+  for (const id of ['jsLink', 'dataLink', 'topLink', 'relLink', 'localLink']) {
+    await frame.locator(`#${id}`).click();
+    await hp.waitForTimeout(100);
+    // A refused scheme is not "a file beside the report", and is not repeated.
+    if (id === 'dataLink') assert.equal(await said(), 'That link was not opened: Dossier only opens web and mail links.');
+    if (id === 'relLink') assert.match(await said(), /^That link points at other-report\.html, a file beside the report/);
+  }
+  await frame.locator('#hostileSubmit').click();
+  await frame.locator('p', { hasText: 'Hover over this paragraph' }).hover();
+  await hp.waitForTimeout(300);
+  assert.equal(hp.url(), pageUrl, 'A link in the report navigated the page');
+  const frameUrl = await frameEl.evaluate((f) => f.contentWindow.location.href);
+  assert.equal(frameUrl, 'about:srcdoc', 'A link navigated the frame');
+  assert.deepEqual(await hp.evaluate(() => window.__opened), ['https://example.invalid/top'], 'Only the web link opens, in a new tab');
+  await hostileClean('Original');
+  assert.deepEqual(refusals, [], 'Dossier format or Original logged errors');
+  countRefusals = false;
+
+  // Interactive: the sealed host, scripts run with no way out.
+  await hp.locator('#cmp-col-k1 .col__menu').click();
+  await hp.locator('#cmpColumnMenu [data-value="interactive"]').click();
+  const live = hp.locator('#cmp-col-k1 .col__frame--interactive');
+  await live.waitFor();
+  await hp.waitForTimeout(800);
+  assert.equal(await live.getAttribute('sandbox'), 'allow-scripts');
+  assert.equal(await live.getAttribute('src'), 'embed.html');
+  await hostileClean('Interactive');
+  await hp.waitForTimeout(300);
+  assert.deepEqual([...outside.values()], [], 'Requests left localhost');
+  await hostile.close();
+
+  assert.deepEqual(errors, [], 'The page raised errors');
+  console.log('Passed: Compare entered from the welcome screen with focus on its own button, a comparison built from an HTML and a Markdown file in one typeface, a page that never scrolls at 1440 and 390 with the toolbar under the header, a skip link with no history entry, sections sync and sync off, ] steps headings and announces them, focus layout and back with focus kept and the columns named by their tabs, Original as a static frame that catches up with the column being read, saved and reopened at the same address, scroll kept across views, rename, delete with undo, remove a column with undo (focus back on what returned), the bundled example unsaved even after a tab tap, a pasted Dossier document with prefixed ids and nested heading levels, an Edit source that refuses a broken document, Move renaming the bodies, the phone Options sheet keeping Tab with four columns, Options at 1024 closing when Tab leaves it, a comparison bundle from the Open dialog, no sideways scroll at 1440, 1024, 768 and 390, / opens the switcher, one column at a time on a phone with the Options sheet under the bar, its title inside it, closed by Escape or the scrim, stat tiles and page-styled drawings in Dossier format, and a hostile report inert in Dossier format, Original (a static copy that stays clean when parsed again, and link refusals that say why) and Interactive with no request off localhost and no console error outside Interactive.');
+} finally {
+  await browser.close();
+}

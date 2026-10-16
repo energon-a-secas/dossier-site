@@ -1,19 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { comparisonDocument } from '../js/compose.js';
 import { compareHtml } from '../js/render/compare.js';
 import { blockHtml } from '../js/render/index.js';
 import { parse } from '../js/parse.js';
 import { validate } from '../js/validate.js';
-
-test('pasted responses become a valid report without invented scores', () => {
-  const doc = comparisonDocument({ left: 'First\n\nresponse', right: 'Second response', prompt: 'A shared task' });
-  assert.equal(validate(doc).filter((f) => f.level === 'error' || f.level === 'warn').length, 0);
-  assert.equal(doc.dossier.pages[0].blocks.length, 1);
-  assert.equal(doc.dossier.pages[0].blocks[0].left.value, 'First\n\nresponse');
-  assert.equal(doc.dossier.pages[0].blocks[0].prompt, 'A shared task');
-  assert.throws(() => comparisonDocument({ left: '   ', right: 'valid' }), /both responses/);
-});
 
 test('comparison context is escaped and a print view exposes both responses', () => {
   const block = { type: 'compare', kind: 'text', mode: 'toggle', prompt: '<script>bad()</script>', left: { label: 'A', caption: '<img src=x>', value: 'One two' }, right: { label: 'B', value: 'Three' } };

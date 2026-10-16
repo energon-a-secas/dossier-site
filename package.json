@@ -8,6 +8,6 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "validate": "node bin/validate.mjs",
-    "test:browser": "node scripts/check-workspace.mjs && node scripts/check-html-import.mjs"
+    "test:browser": "node scripts/check-workspace.mjs && node scripts/check-html-import.mjs && node scripts/check-compare.mjs && node scripts/check-compare-analysis.mjs"
   }
 }

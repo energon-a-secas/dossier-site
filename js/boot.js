@@ -35,15 +35,23 @@ import {
 } from './open.js';
 import { shareCurrent, showExportChoices } from './export-dialog.js';
 import { renderExamples } from './catalog.js';
-import { parseRoute, routeFor } from './router.js';
+import { parseRoute, routeFor, isAnchor } from './router.js';
+import {
+  initCompare, compareSettled, compareStep, focusCompareFilter,
+} from './compare/index.js';
+import { exampleCard } from './compare/example.js';
+import { copyComparisonLink } from './compare/export.js';
 import { init as initKeys } from './neokeys/index.js';
 import { initYaml } from './parse.js';
 
 /** Our own text surfaces, beyond the inputs and textareas NeoKeys already knows. */
 const TYPING_SURFACES = '.editor-textarea, [data-text-surface]';
 
-/** How many example cards the welcome screen shows; the Open dialog lists all. */
-const WELCOME_EXAMPLES = 4;
+/**
+ * How many report example cards the welcome screen shows, after the example
+ * comparison; the Open dialog lists all.
+ */
+const WELCOME_EXAMPLES = 3;
 
 export async function boot(state) {
   const root = document.documentElement;
@@ -80,13 +88,31 @@ async function start(state) {
   bindShortcuts(state, els);
   followRailWidth(() => state.preferences.railOpen);
   followFooterHeight();
-  setView(parseRoute().view || (parseRoute().key === 'dc' ? 'compare' : 'reports'));
+  // The Compare view listens for the view and route events, so it starts
+  // before the first of them.
+  initCompare();
+  const first = parseRoute();
+  setView(first.view || (first.key === 'dc' ? 'compare' : document.documentElement.dataset.dossierView));
   // Each change is read from its own event: two changes queued in one task
   // (a tab click, then the skip link) must not both read the last address.
   window.addEventListener('hashchange', (event) => {
     let hash = location.hash;
+    let previous = '';
     try { hash = new URL(event.newURL).hash; } catch { /* keep the live hash */ }
-    followRoute(state, els, hash);
+    try { previous = new URL(event.oldURL).hash; } catch { /* no previous address */ }
+    followRoute(state, els, hash, previous);
+  });
+  // The skip link moves focus to the content and leaves the address alone.
+  // Following its `#main` added a history entry that followRoute then turned
+  // back into the previous address, so the next Back press seemed to do
+  // nothing. A bare anchor reached any other way still goes to followRoute,
+  // which keeps the view.
+  document.querySelector('.skip-link')?.addEventListener('click', (event) => {
+    const href = event.currentTarget.getAttribute('href') || '';
+    const target = isAnchor(href) ? document.getElementById(parseRoute(href).anchor) : null;
+    if (!target) return;
+    event.preventDefault();
+    target.focus();
   });
   // Another tab wrote or deleted a report. Refresh the list rather than the
   // document: overwriting what this tab has open would be the bug we avoid.
@@ -99,10 +125,13 @@ async function start(state) {
   initYaml();
   // Both example lists, read once. The welcome screen waits for its list
   // before it is first shown, so its cards do not arrive after it.
+  // The example comparison leads both lists: it is what the tool is for.
   const examples = Promise.all([
     renderExamples(els.welcomeExamples, { limit: WELCOME_EXAMPLES }),
     renderExamples(els.openExamples),
-  ]);
+  ]).then(() => {
+    for (const list of [els.welcomeExamples, els.openExamples]) list?.prepend(exampleCard());
+  });
 
   const ticket = beginOpen();
   const { claimed, rewrite } = await loadInitialReport(state, ticket);
@@ -132,6 +161,8 @@ async function start(state) {
   }
 
   announceRoute(state, parseRoute());
+  // A comparison in the address is on screen before the page is shown.
+  await compareSettled();
 }
 
 /**
@@ -217,8 +248,22 @@ async function forgetDeleted(state, els, ids) {
  * React to a hash change: Back, Forward, a page tab, an outline link, or a
  * share link pasted into this tab.
  */
-function followRoute(state, els, hash = location.hash) {
+function followRoute(state, els, hash = location.hash, previous = '') {
   const route = parseRoute(hash);
+  if (route.anchor) {
+    // The skip link, or an in-page anchor: the browser has scrolled to it.
+    // It is not a route, so the view and page stay, and the address goes
+    // back to naming them, which keeps Reload and a copied link right.
+    // Accepted residual: the anchor's own history entry stays, now with the
+    // same address as the one before it, so the next Back seems to do
+    // nothing. `history.back()` here would undo the scroll the reader just
+    // asked for. The skip link, the common case, adds no entry at all (see
+    // its click handler in `boot`).
+    if (!parseRoute(previous).anchor) {
+      history.replaceState(history.state, '', previous || location.pathname + location.search);
+    }
+    return;
+  }
   if (route.payload) {
     // A report link pasted into an open tab used to do nothing. `#dc=` is a
     // comparison and belongs to the Compare view.
@@ -286,6 +331,7 @@ function bindShortcuts(state, els) {
   const reading = () => view() === 'reports' && Boolean(state.model || state.lastGood);
   const actions = {
     filter: () => {
+      if (view() === 'compare') return focusCompareFilter();
       if (!reading()) return false;
       if (!railOpen()) {
         setRail(true);
@@ -294,14 +340,15 @@ function bindShortcuts(state, els) {
       els.reportFilter?.focus();
       return true;
     },
-    share: () => (state.document ? shareCurrent(state) : false),
+    // In Compare, `s` and `e` act on the open comparison.
+    share: () => (view() === 'compare' ? (copyComparisonLink(), true) : state.document ? shareCurrent(state) : false),
     export: () => {
-      if (!state.document) return false;
+      if (view() !== 'compare' && !state.document) return false;
       showExportChoices(state, els, document.activeElement);
       return true;
     },
-    prev: () => stepPage(state, -1),
-    next: () => stepPage(state, 1),
+    prev: () => (view() === 'compare' ? compareStep(-1) : stepPage(state, -1)),
+    next: () => (view() === 'compare' ? compareStep(1) : stepPage(state, 1)),
     toggleMode: () => {
       if (!reading()) return false;
       toggleMode({ viaKey: true });

@@ -63,17 +63,21 @@ describe('adapters', () => {
       assert.strictEqual(htmlToDossier(' ').document, null);
     });
 
-    test('interactive embeds use the isolated host; offline exports include the document', () => {
+    test('scripted embeds are static until the reader runs them; an export never needs the hosted viewer', () => {
       const block = { type: 'embed', html: '<button onclick="this.textContent=2">1</button>', scripts: true };
-      const live = blockHtml(block);
+      const live = blockHtml(block, { interactive: true });
       const offline = blockHtml(block, { standalone: true });
-      assert.ok(live.includes('src="embed.html"'));
-      assert.ok(live.includes('sandbox="allow-scripts"'));
-      assert.ok(!live.includes('allow-same-origin'));
-      assert.ok(offline.includes('srcdoc='));
-      assert.ok(!offline.includes('src="embed.html"'));
-      assert.ok(offline.includes('Content-Security-Policy'));
-      assert.ok(offline.includes('connect-src &#39;none&#39;'));
+      const scripted = blockHtml(block, { standalone: true, embedView: () => 'interactive' });
+      assert.ok(live.includes('data-view="interactive"'), 'the live view does not offer to run the scripts');
+      assert.ok(!live.includes('allow-scripts'));
+      assert.ok(offline.includes('sandbox="allow-same-origin"'));
+      assert.ok(!offline.includes('allow-scripts'));
+      assert.ok(scripted.includes('srcdoc='));
+      assert.ok(scripted.includes('sandbox="allow-scripts"'));
+      assert.ok(!scripted.includes('allow-same-origin'));
+      assert.ok(!scripted.includes('src="embed.html"'));
+      assert.ok(scripted.includes('Content-Security-Policy'));
+      assert.ok(scripted.includes('connect-src &#39;none&#39;'));
     });
   });
 

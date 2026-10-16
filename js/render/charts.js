@@ -59,7 +59,10 @@ function categoriesOf(block, length) {
   return out;
 }
 
-export function renderChartBlock(block, ctx = {}) {
+export function renderChartBlock(input, ctx = {}) {
+  // Under an `idPrefix` (a Compare column) the chart's `<defs>` ids carry it
+  // too, through the uid the kit builds them from. Without one, untouched.
+  const block = ctx.idPrefix ? { ...input, id: `${ctx.idPrefix}-${input.id || 'chart'}` } : input;
   if (!block.form) {
     return emptyFrame('Chart: add "form", one of bar, stacked, line, area, donut, radar or heatmap.');
   }

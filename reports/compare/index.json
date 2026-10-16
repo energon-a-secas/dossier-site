@@ -1,0 +1,26 @@
+{
+  "title": "Illustrative example: checkout latency incident",
+  "summary": "One incident written three ways: a human draft, an agent's output, and the agent's report with a reviewer's fixes. Invented data.",
+  "prompt": "Write the incident report for the checkout latency incident on 8 October, from the metrics, the deploy log and the on-call notes.",
+  "columns": [
+    {
+      "role": "human",
+      "label": "Human draft",
+      "author": "D. Whitfield, on-call engineer",
+      "file": "human-draft.html"
+    },
+    {
+      "role": "agent",
+      "label": "Agent output",
+      "author": "incident report agent, run 7",
+      "file": "agent-output.md"
+    },
+    {
+      "role": "fix",
+      "label": "Fixes",
+      "author": "D. Whitfield",
+      "file": "fixes.html",
+      "fixes": 1
+    }
+  ]
+}

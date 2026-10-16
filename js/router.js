@@ -32,11 +32,14 @@ function decode(segment) {
  * Read a hash.
  *
  * @param {string} [hash] defaults to the current location
- * @returns {{view: 'reports', page?: string, anchor?: string}
+ * @returns {{view: 'reports', page?: string}
  *   | {view: 'compare', id?: string}
+ *   | {anchor: string}
  *   | {payload: true, key: 'dz'|'d1'|'dc'}}
  *   `page` absent means page one. `anchor` is a bare `#name`: a place on the
- *   current page that the browser scrolls to, so a page is not changed for it.
+ *   page already shown, which the browser scrolls to. It names no view and no
+ *   page, so following it changes neither: the skip link pressed in the
+ *   Compare view must not drop the reader back into Reports.
  */
 export function parseRoute(hash = (typeof location === 'undefined' ? '' : location.hash)) {
   const raw = String(hash || '').replace(/^#/, '');
@@ -46,10 +49,10 @@ export function parseRoute(hash = (typeof location === 'undefined' ? '' : locati
 
   if (!raw) return { view: 'reports' };
   // A bare `#<anchor>` (the skip link, an old outline heading link) is not a
-  // route: it names a place on the current page, so it carries no page.
+  // route: it names a place on the current page, so it carries no view.
   if (!raw.startsWith('/')) {
     const anchor = decode(raw);
-    return anchor ? { view: 'reports', anchor } : { view: 'reports' };
+    return anchor ? { anchor } : { view: 'reports' };
   }
 
   const rest = raw.slice(1);
@@ -83,4 +86,9 @@ export function routeFor(route = {}) {
 /** True when a hash carries a payload rather than naming a place. */
 export function isPayload(hash) {
   return Boolean(parseRoute(hash).payload);
+}
+
+/** True when a hash is a bare in-page anchor, which keeps the current view. */
+export function isAnchor(hash) {
+  return Boolean(parseRoute(hash).anchor);
 }

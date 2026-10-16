@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Incident report: checkout latency spike on 8 October (illustrative example)</title>
+<style>
+  body { max-width: 720px; margin: 0 auto; padding: 32px 24px 64px; color: #1d232b; font: 16px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  h1 { font-size: 28px; line-height: 1.25; }
+  h2 { margin-top: 28px; font-size: 20px; }
+  .note { color: #59616b; font-size: 14px; }
+  code { font-size: 14px; }
+</style>
+</head>
+<body>
+<article>
+  <h1>Incident report: checkout latency spike on 8 October</h1>
+  <p class="note">The agent's report, corrected by D. Whitfield against the metrics and the deploy log. Illustrative example, invented data.</p>
+
+  <h2>Summary</h2>
+  <p>On 8 October from 14:04 to 14:51 UTC, p95 checkout latency rose from 420 ms to 2.9 s and 6.2% of checkout attempts timed out. The trigger was a <code>cart-api</code> deploy that lowered the database connection pool from 50 to 12.</p>
+
+  <h2>Root cause</h2>
+  <p>The 4.18 release exhausted the primary database connection pool under peak load.</p>
+  <p>Checkout clients retry a timed-out call up to five times, which tripled the requests waiting for a connection.</p>
+
+  <h2>Impact</h2>
+  <ul>
+    <li>1,940 of 31,300 checkout attempts timed out (6.2%).</li>
+    <li>1,712 of those customers retried and finished their order.</li>
+    <li>No data was lost.</li>
+    <li>Support received 37 contacts about slow checkout.</li>
+  </ul>
+
+  <h2>Timeline</h2>
+  <ul>
+    <li>14:02: deployment of 4.18 begins.</li>
+    <li>14:04: p95 latency exceeds 800 ms.</li>
+    <li>14:13: latency alert pages on-call, nine minutes after the slowdown began.</li>
+    <li>14:44: rollback to 4.17 begins.</li>
+    <li>14:51: rollback complete, p95 back under 800 ms.</li>
+  </ul>
+
+  <h2>Remediation</h2>
+  <p>The deployment was rolled back to 4.17 and latency returned to normal.</p>
+
+  <h2>Action items</h2>
+  <ul>
+    <li>Add pool size to the deploy config review. Owner: checkout team, due 22 October.</li>
+    <li>Cap client retries at two, with backoff. Owner: web team, due 29 October.</li>
+    <li>Alert on pool saturation, not only on latency. Owner: SRE, due 29 October.</li>
+  </ul>
+</article>
+</body>
+</html>

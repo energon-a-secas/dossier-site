@@ -70,6 +70,7 @@
   <link rel="stylesheet" href="css/authoring.css">
   <link rel="stylesheet" href="css/comparison.css">
   <link rel="stylesheet" href="css/workspace.css">
+  <link rel="stylesheet" href="css/compare.css">
   <link rel="stylesheet" href="css/tokens.css">
   <!-- /template:styles -->
   <!-- Neorgon Header Kit (vendored; ?header=live swaps CSS to CDN). Keep after style.css, the kit owns the header. -->
@@ -119,10 +120,15 @@
        The page's only header. App mode: slim, hides on scroll down. The h1 is
        the kit's contract (its styles are keyed on .header-logo h1), so the
        report title on the page is an h2 (js/pipeline.js STAGE_TITLE_LEVEL).
-       Controls are classless buttons the kit styles. The view buttons stay out
-       of the kit's phone menu (below 480 px only the other view's button shows,
-       css/shell.css); Open, Share and Display move into that menu. -->
-  <header class="header-bar" data-header-mode="app" data-header-skin="ink">
+       Controls are classless buttons the kit styles, except the view switch:
+       a .header-btn-group of two .nav-link buttons, styled in css/style.css
+       with the kit's tokens, the current view marked by aria-current. The
+       group stays out of the kit's phone menu (data-keep-mobile on the group,
+       where the kit reads it; below 370 px only the other view's button shows,
+       css/shell.css); Open, Share and Display move into that menu. The skin
+       is "custom": its tokens are in css/style.css under the kit's contract
+       selector, and its middle stop is the theme-color above. -->
+  <header class="header-bar" data-header-mode="app" data-header-skin="custom">
     <div class="header-logo">
       <!-- PATTERN: one link: mark + name go to THIS site's home (root or #home)
            so clicking either resets the view. The hub icon in .header-right
@@ -139,11 +145,13 @@
     <!-- .header-right owns margin-left:auto; home icon is always last. -->
     <div class="header-right">
       <div class="header-actions">
-        <button type="button" id="viewReports" data-action="view" data-view="reports" aria-current="page" data-keep-mobile>Reports</button>
-        <button type="button" id="viewCompare" data-action="view" data-view="compare" data-keep-mobile>Compare</button>
+        <div class="header-btn-group" role="group" aria-label="View" data-keep-mobile>
+          <button type="button" class="nav-link" id="viewReports" data-action="view" data-view="reports" aria-current="page">Reports</button>
+          <button type="button" class="nav-link" id="viewCompare" data-action="view" data-view="compare">Compare</button>
+        </div>
         <button type="button" id="openReport" data-action="open">Open</button>
         <button type="button" id="shareReport" data-action="share" data-needs-report>Share</button>
-        <button type="button" id="displayOptions" data-action="display" aria-label="Display options" title="Display options"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><text x="12" y="17" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="15" font-weight="600" fill="currentColor">Aa</text></svg></button>
+        <button type="button" id="displayOptions" data-action="display" aria-label="Display options" title="Display options"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><text class="aa-glyph" x="12" y="17.5" text-anchor="middle" font-family="Georgia, serif" font-size="17" fill="currentColor">Aa</text></svg></button>
       </div>
 
       <a class="header-home" href="https://neorgon.com/" title="neorgon.com" aria-label="Neorgon home">
@@ -167,22 +175,11 @@
          writes it; no timer ever reveals the shell instead. -->
     <p class="ds-boot" id="bootStatus" role="status"></p>
 
-    <section class="ds-composer" id="comparisonComposer" aria-labelledby="composerHeading" hidden>
-      <form id="comparisonForm">
-        <div class="ds-composer__head">
-          <p class="ds-eyebrow">New comparison</p>
-          <h2 id="composerHeading">Give two responses a closer look.</h2>
-          <p>Paste outputs from different prompts, models or runs. Dossier puts them side by side and marks the differences.</p>
-        </div>
-        <label class="ds-field">Report title<input name="title" value="Response comparison" maxlength="120" required></label>
-        <label class="ds-field">Shared prompt <span class="ds-optional">optional</span><textarea name="prompt" rows="2" maxlength="4000" placeholder="What were both responses asked to do?"></textarea></label>
-        <div class="ds-composer__sides">
-          <fieldset><legend>Response A</legend><label class="ds-field">Label<input name="leftLabel" value="Response A" maxlength="40" required></label><label class="ds-field">Response text<textarea name="left" rows="12" maxlength="50000" placeholder="Paste the first response…" required></textarea></label></fieldset>
-          <fieldset><legend>Response B</legend><label class="ds-field">Label<input name="rightLabel" value="Response B" maxlength="40" required></label><label class="ds-field">Response text<textarea name="right" rows="12" maxlength="50000" placeholder="Paste the second response…" required></textarea></label></fieldset>
-        </div>
-        <div class="ds-composer__actions"><button class="btn btn--primary" type="submit">Create comparison</button><button class="btn btn--quiet" type="button" data-action="compose-cancel">Cancel</button><p>Your text stays in this browser.</p></div>
-      </form>
-    </section>
+    <!-- The Compare view: 2 to 4 reports side by side. A sibling of the
+         Reports shell, shown only while html[data-dossier-view="compare"].
+         js/compare/view.js builds its toolbar and columns into this region;
+         css/compare.css lays it out. -->
+    <section class="cmp" id="compareView" aria-labelledby="cmpHeading"></section>
 
     <!-- The Reports view. The rail (saved reports and this report's outline)
          can be shown in either mode; the side column holds Check report and,
@@ -320,8 +317,11 @@
       </form>
     </dialog>
 
-    <!-- Display options. One fieldset per option, each a radio group that
-         applies at once (js/display.js). -->
+    <!-- Display options: a popover under the Aa button (css/shell.css), a
+         sheet under the header on a phone. One fieldset per option, each a
+         radio group that applies at once and is remembered in this browser
+         (js/display.js). Theme changes the palette; the other four change
+         report text and the compare reader, never the controls. -->
     <dialog id="displayDialog" class="ds-dialog ds-dialog--display" aria-labelledby="displayHeading">
       <form method="dialog">
         <h2 id="displayHeading">Display</h2>
@@ -333,6 +333,38 @@
               <label><input type="radio" name="theme" value="light"> Light</label>
               <label><input type="radio" name="theme" value="dark"> Dark</label>
             </div>
+          </fieldset>
+          <fieldset class="ds-display__option">
+            <legend>Text size</legend>
+            <div class="ds-display__choices">
+              <label><input type="radio" name="readingSize" value="small"> Small</label>
+              <label><input type="radio" name="readingSize" value="medium"> Medium</label>
+              <label><input type="radio" name="readingSize" value="large"> Large</label>
+              <label><input type="radio" name="readingSize" value="xlarge"> Extra large</label>
+            </div>
+          </fieldset>
+          <fieldset class="ds-display__option">
+            <legend>Line width</legend>
+            <div class="ds-display__choices">
+              <label><input type="radio" name="measure" value="narrow"> Narrow</label>
+              <label><input type="radio" name="measure" value="normal"> Normal</label>
+              <label><input type="radio" name="measure" value="wide"> Wide</label>
+            </div>
+          </fieldset>
+          <fieldset class="ds-display__option">
+            <legend>Typeface</legend>
+            <div class="ds-display__choices">
+              <label><input type="radio" name="typeface" value="serif"> Serif</label>
+              <label><input type="radio" name="typeface" value="sans"> Sans</label>
+            </div>
+          </fieldset>
+          <fieldset class="ds-display__option" aria-describedby="displayCompareHint">
+            <legend>Compare columns</legend>
+            <div class="ds-display__choices">
+              <label><input type="radio" name="compareSize" value="reading"> Same as reading</label>
+              <label><input type="radio" name="compareSize" value="compact"> Compact</label>
+            </div>
+            <p class="ds-display__hint" id="displayCompareHint">Compact sets column text at 15 px, so three columns keep a readable line. Reports keep the text size above.</p>
           </fieldset>
         </div>
         <div class="ds-dialog__actions">
