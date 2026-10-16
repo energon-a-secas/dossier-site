@@ -60,6 +60,8 @@ export function safeImageSrc(value) {
   if (typeof value !== 'string') return null;
   const raw = value.replace(/[\t\n\r]/g, '').trim();
   if (!raw) return null;
-  if (/^data:image\/(png|jpe?g|gif|webp|avif|svg\+xml);/i.test(raw)) return raw;
+  // `;` for base64 or a charset, `,` for a bare percent-encoded SVG. An img
+  // never runs script inside an SVG, so both are safe as a source.
+  if (/^data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,]/i.test(raw)) return raw;
   return safeHref(raw);
 }

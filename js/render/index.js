@@ -12,6 +12,7 @@ import { renderBlock } from './dispatch.js';
 import { reportOf } from './model.js';
 import { inlineMarkdown as markdownToHtml, safeLink } from './markdown.js';
 import { safeHref } from './url.js';
+import { pick, TONES, WIDTHS, CHECKED_BY } from './enums.js';
 
 // One implementation of each thing. outline lives in outline.js and is
 // re-exported here so callers have one import site, not two answers.
@@ -21,7 +22,11 @@ export { reportOf } from './model.js';
 /**
  * @param {object} input the wrapped document, or the report inside it
  * @param {HTMLElement} container
- * @param {object} [opts] { page, print, interactive }
+ * @param {object} [opts] { page, print, interactive, titleLevel }
+ *   `titleLevel` is the report title's heading level, 1 by default. A page
+ *   that already has an h1 of its own (the app, whose Header Kit bar carries
+ *   the site name as its h1) passes 2, so the page keeps one h1. An exported
+ *   file has no other heading, so its title stays the h1.
  */
 export function renderReport(input, container, opts = {}) {
   const model = reportOf(input);
@@ -41,7 +46,7 @@ export function renderReport(input, container, opts = {}) {
   if (model.pages.length === 1 && model.pages[0].blocks?.length === 1
       && model.pages[0].blocks[0].type === 'embed') shell.classList.add('report-shell--artifact');
 
-  const header = renderHeader(model);
+  const header = renderHeader(model, opts.titleLevel);
   shell.appendChild(header);
 
   if (!allPages) {
@@ -68,7 +73,7 @@ export function renderReport(input, container, opts = {}) {
   container.appendChild(shell);
 }
 
-function renderHeader(model) {
+function renderHeader(model, titleLevel = 1) {
   const header = document.createElement('header');
   header.className = 'report-header';
 
@@ -76,7 +81,7 @@ function renderHeader(model) {
   titleRow.className = 'report-title-row';
 
   const titles = document.createElement('div');
-  const title = document.createElement('h1');
+  const title = document.createElement(titleLevel === 2 ? 'h2' : 'h1');
   title.className = 'report-title';
   title.textContent = model.title || 'Untitled Report';
   titles.appendChild(title);
@@ -216,7 +221,14 @@ export function blockHtml(block, ctx = {}) {
     return errorHtml(`Malformed: ${escHtml(block.__error)}`);
   }
 
-  let html = renderBlock(block, ctx);
+  let html;
+  try {
+    html = renderBlock(block, ctx);
+  } catch (err) {
+    // One block with a shape no renderer expected must not take the page with
+    // it. The reader gets a card naming the block, and the rest still renders.
+    return wrapBlock(errorHtml(`${def.name || 'Block'} could not be drawn: ${String(err?.message || err)}`), block, ctx);
+  }
   if (html === undefined || html === null || html === '') {
     html = renderEmpty(def);
   }
@@ -230,8 +242,11 @@ function renderEmpty(def) {
 
 function wrapBlock(html, block, ctx) {
   const id = block.id ? ` id="${escHtml(block.id)}"` : '';
-  const tone = block.tone ? ` block--${block.tone}` : '';
-  const width = block.width ? ` block--${block.width}` : '';
+  // Both come from the document and both used to reach the class raw.
+  const toneValue = pick(block.tone, TONES, '');
+  const widthValue = pick(block.width, WIDTHS, '');
+  const tone = toneValue ? ` block--${toneValue}` : '';
+  const width = widthValue ? ` block--${widthValue}` : '';
   const collapsed = block.collapsed ? ' block--collapsed' : '';
   const tag = block.collapsed ? 'details' : 'section';
   let wrapper = `<${tag} class="block${tone}${width}${collapsed}"${id} data-block-type="${escHtml(block.type)}">`;
@@ -272,16 +287,22 @@ function renderEvidenceMarker(evidence) {
   const items = Array.isArray(evidence) ? evidence.filter(Boolean) : [];
   if (!items.length) return '';
 
-  const weakest = items.some((e) => !e.checkedBy || e.checkedBy === 'llm' || e.checkedBy === 'none');
+  // The weak style, the summary and the rows all read the same whitelisted
+  // value, so an unknown checkedBy is treated as "nothing checked it" in every
+  // one of them instead of reading as unchecked and being styled as checked.
+  const weakest = items.some((e) => {
+    const who = pick(e.checkedBy, CHECKED_BY, 'none');
+    return who === 'llm' || who === 'none';
+  });
   const summary = items.length === 1
-    ? `1 source, ${checkedByLabel(items[0].checkedBy)}`
+    ? `1 source, ${checkedByLabel(pick(items[0].checkedBy, CHECKED_BY, 'none'))}`
     : `${items.length} sources`;
 
   const rows = items.map((e) => {
-    const who = e.checkedBy || 'none';
+    const who = pick(e.checkedBy, CHECKED_BY, 'none');
     const label = escHtml(e.label || 'Unnamed source');
     const name = e.href ? safeLink(e.href, e.label || 'Unnamed source') : label;
-    const bits = [`<span class="evidence-who evidence-who--${escHtml(who)}">${escHtml(checkedByLabel(who))}</span>`];
+    const bits = [`<span class="evidence-who evidence-who--${who}">${escHtml(checkedByLabel(who))}</span>`];
     if (e.kind) bits.push(`<span class="evidence-kind">${escHtml(e.kind)}</span>`);
     if (e.confidence) bits.push(`<span class="evidence-confidence">${escHtml(e.confidence)} confidence</span>`);
     if (e.hash) bits.push(`<code class="evidence-hash">${escHtml(String(e.hash).slice(0, 16))}</code>`);
@@ -329,7 +350,9 @@ function checkedByLabel(checkedBy) {
     llm: 'a model asserted it',
     none: 'nothing checked it',
   };
-  return labels[checkedBy] || 'unstated';
+  // Own keys only: `constructor` or `toString` would otherwise find a function
+  // on the prototype and print its source.
+  return Object.hasOwn(labels, checkedBy) ? labels[checkedBy] : 'unstated';
 }
 
 function levenshtein(a, b) {

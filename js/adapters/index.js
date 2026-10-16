@@ -9,7 +9,7 @@
 import { toDossier as numstatToDossier } from './numstat.js';
 import { toDossier as junitToDossier } from './junit.js';
 import { toDossier as sarifToDossier } from './sarif.js';
-import { toDossier as ctrfToDossier } from './ctrf.js';
+import { toDossier as ctrfToDossier, ctrfTests } from './ctrf.js';
 import { toDossier as commitsToDossier } from './commits.js';
 import { toDossier as markdownToDossier } from './markdown.js';
 import { toDossier as htmlToDossier } from './html.js';
@@ -104,17 +104,19 @@ function detectSarif(src) {
   }
 }
 
+// The adapter decides what a CTRF test list is, so detection and conversion
+// cannot disagree. Detection used to require `results.tool` while the adapter
+// read `results` as an array, so the bundled CTRF fixture matched neither.
 function detectCtrf(src) {
   try {
-    const obj = JSON.parse(src);
-    return obj && obj.results && obj.results.tool;
+    return Boolean(ctrfTests(JSON.parse(src)));
   } catch {
     return false;
   }
 }
 
 function detectCommits(src) {
-  return /^(feat|fix|docs|style|refactor|perf|test|chore)(\(.+?\))?:/m.test(src);
+  return /^(feat|fix|docs|style|refactor|perf|test|chore)(\(.+?\))?!?:/m.test(src);
 }
 
 function detectMarkdown(src) {

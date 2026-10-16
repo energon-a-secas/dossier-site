@@ -66,7 +66,7 @@
           },
           {
             "type": "code",
-            "lang": "javascript",
+            "language": "javascript",
             "source": "const result = await redis.incrby(`limit:${key}`, 1);\nif (result > maxPerSecond) {\n  await redis.decr(`limit:${key}`);\n  return 429;\n}"
           },
           {

@@ -7,6 +7,15 @@ import { inlineMarkdown as markdownToHtml, emptyFrame, safeLink } from './markdo
 import { safeImageSrc } from './url.js';
 import { compareHtml } from './compare.js';
 import { embedDocument } from '../embed-policy.js';
+import { pick, enumValues, CHECKED_BY } from './enums.js';
+
+// Every enum below reaches a class name or the page. Each one was interpolated
+// raw, which made `severity: 'high" onmouseover="..."'` a live attribute.
+const SEVERITY = enumValues('risks', 'items', 'severity');
+const LIKELIHOOD = enumValues('risks', 'items', 'likelihood');
+const ACTION_STATES = enumValues('actions', 'items', 'state');
+const INTENTS = enumValues('actions', 'items', 'intent');
+const DECISION_STATUS = enumValues('decision', 'status');
 
 /** The types this module renders. js/render/dispatch.js builds its
  *  table from these declarations, so a type cannot be routed to a module
@@ -40,13 +49,16 @@ function renderRisks(block) {
   if (items.length === 0) return '';
   let html = '<div class="block-risks">';
   for (const item of items) {
-    html += `<div class="risk-item risk-severity--${item.severity || 'medium'}">`;
-    html += `<h4>${escHtml(item.title || '')}</h4>`;
-    if (item.likelihood) {
-      html += `<p class="risk-likelihood">Likelihood: ${item.likelihood}</p>`;
+    if (!item || typeof item !== 'object') continue;
+    const severity = pick(item.severity, SEVERITY, 'medium');
+    const likelihood = pick(item.likelihood, LIKELIHOOD, '');
+    html += `<div class="risk-item risk-severity--${severity}">`;
+    html += `<h4>${escHtml(String(item.title || ''))}<span class="visually-hidden">, ${severity} severity</span></h4>`;
+    if (likelihood) {
+      html += `<p class="risk-likelihood">Likelihood: ${likelihood}</p>`;
     }
     if (item.mitigation) {
-      html += `<p class="risk-mitigation">${markdownToHtml(item.mitigation)}</p>`;
+      html += `<p class="risk-mitigation">${markdownToHtml(String(item.mitigation))}</p>`;
     }
     if (item.owner) {
       html += `<p class="risk-owner">Owner: ${escHtml(item.owner)}</p>`;
@@ -62,10 +74,13 @@ function renderActions(block) {
   if (items.length === 0) return '';
   let html = '<div class="block-actions">';
   for (const item of items) {
-    html += `<div class="action-item action-state--${item.state || 'todo'}">`;
-    html += `<h4>${escHtml(item.label || '')}</h4>`;
-    if (item.intent) {
-      html += `<p class="action-intent">Intent: ${item.intent}</p>`;
+    if (!item || typeof item !== 'object') continue;
+    const state = pick(item.state, ACTION_STATES, 'todo');
+    const intent = pick(item.intent, INTENTS, '');
+    html += `<div class="action-item action-state--${state}">`;
+    html += `<h4>${escHtml(String(item.label || ''))}<span class="visually-hidden">, ${state.replace('-', ' ')}</span></h4>`;
+    if (intent) {
+      html += `<p class="action-intent">Intent: ${intent}</p>`;
     }
     if (item.owner) {
       html += `<p class="action-owner">Owner: ${escHtml(item.owner)}</p>`;
@@ -87,6 +102,10 @@ function renderDecision(block) {
     return emptyFrame('Decision: add "context", "decision" and "consequences". The third is the one a later reader asks for.');
   }
   let html = '<div class="block-decision">';
+  const status = pick(block.status, DECISION_STATUS, 'accepted');
+  if (status !== 'accepted') {
+    html += `<p class="decision-status">Status: ${status}</p>`;
+  }
   if (block.context) {
     html += `<section class="decision-section"><h4>Context</h4><p>${markdownToHtml(block.context)}</p></section>`;
   }
@@ -99,9 +118,10 @@ function renderDecision(block) {
   if (Array.isArray(block.alternatives) && block.alternatives.length > 0) {
     html += '<section class="decision-section"><h4>Alternatives</h4><ul>';
     for (const alt of block.alternatives) {
-      html += `<li><strong>${escHtml(alt.label || '')}</strong>`;
+      if (!alt || typeof alt !== 'object') continue;
+      html += `<li><strong>${escHtml(String(alt.label || ''))}</strong>`;
       if (alt.why_not) {
-        html += ` - ${markdownToHtml(alt.why_not)}`;
+        html += `: ${markdownToHtml(String(alt.why_not))}`;
       }
       html += '</li>';
     }
@@ -182,14 +202,19 @@ function renderEvidence(block) {
   if (items.length === 0) return '';
   let html = '<ul class="block-evidence">';
   for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
     html += '<li class="evidence-item">';
     if (item.href) {
-      html += safeLink(item.href, item.label || 'Link');
+      html += safeLink(item.href, String(item.label || 'Link'));
     } else {
-      html += escHtml(item.label || '');
+      html += escHtml(String(item.label || ''));
     }
-    if (item.checkedBy && item.checkedBy !== 'none') {
-      html += ` <span class="evidence-checked-by">(${item.checkedBy})</span>`;
+    const checkedBy = pick(item.checkedBy, CHECKED_BY, 'none');
+    if (checkedBy !== 'none') {
+      html += ` <span class="evidence-checked-by">(${checkedBy})</span>`;
+    }
+    if (item.excerpt) {
+      html += `<blockquote class="evidence-excerpt">${escHtml(String(item.excerpt))}</blockquote>`;
     }
     html += '</li>';
   }

@@ -10,11 +10,25 @@
 </head>
 <body>
   <script>
+    // HTML_MAX_CHARS in js/embed-policy.js. This page cannot import it under its
+    // own policy, so tests/embed-cap.test.mjs keeps the two numbers equal. The
+    // 1024 is room for the policy head embedDocument() puts in front.
+    var MAX_CHARS = 2000000;
     if (window.parent !== window) {
       window.addEventListener('message', function receive(event) {
         if (event.source !== window.parent || event.data?.type !== 'dossier-embed-content'
-            || typeof event.data.html !== 'string' || event.data.html.length > 410000) return;
+            || typeof event.data.html !== 'string') return;
         window.removeEventListener('message', receive);
+        if (event.data.html.length > MAX_CHARS + 1024) {
+          // A sentence, not a blank frame: the frame is all the reader sees.
+          var note = document.createElement('p');
+          note.style.cssText = 'font: 16px/1.5 system-ui, sans-serif; margin: 24px; max-width: 60ch';
+          note.textContent = 'This HTML report is ' + event.data.html.length.toLocaleString('en-US')
+            + ' characters long, over the ' + MAX_CHARS.toLocaleString('en-US')
+            + ' character limit Dossier opens. Open the file in its own browser tab, or split it into smaller reports.';
+          document.body.appendChild(note);
+          return;
+        }
         document.open();
         document.write(event.data.html);
         document.close();

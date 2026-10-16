@@ -8,14 +8,30 @@
  * - Self-contained, no external $ref
  * - Under 60,000 bytes
  * - No derived fields in schema
+ *
+ * Three things the first version got wrong, all invisible to the hand-rolled
+ * test validator and all caught by a real one (ajv):
+ *
+ * - Each `Block_<type>` set `type: { const: <type> }` and then copied the
+ *   envelope over it, whose `type` is a plain string. Every block definition
+ *   matched every block, so `Block.oneOf` ("exactly one") rejected even the
+ *   one-prose document. The discriminator is now written last.
+ * - The envelope, evidence schema included, was pasted into all 27 block
+ *   definitions. It is now one `Envelope` definition each block references.
+ * - An `Evidence` definition was generated and never referenced. It is now
+ *   the one evidence schema, built from the registry like everything else.
+ *
+ * Required fields inside list items and objects are emitted too, matching
+ * what the validator now enforces.
  */
 
-import { BLOCKS, blockDef, derivedFields, requiredFields, ENVELOPE, META, PAGE } from '../js/registry/index.js';
+import { BLOCKS, derivedFields, requiredFields, ENVELOPE, META } from '../js/registry/index.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LIMIT = 60000;
 
 const schema = {
   $schema: 'http://json-schema.org/draft-07/schema#',
@@ -38,20 +54,19 @@ const schema = {
 const serialized = JSON.stringify(schema);
 const bytes = Buffer.byteLength(serialized, 'utf-8');
 
-if (bytes > 60000) {
-  console.error(`Schema too large: ${bytes} bytes (max 60,000). Dropping nested descriptions.`);
+if (bytes >= LIMIT) {
+  console.error(`Schema too large: ${bytes} bytes (must be under ${LIMIT}). Shorten registry notes or share more definitions.`);
   process.exit(2);
 }
 
-// Write schema.json
-const outputPath = path.join(__dirname, '../schema.json');
 // Written minified, on purpose. The size limit that matters belongs to the
 // agent vendors that accept a caller-supplied schema, and at least one caps it
 // at 64 KB. Pretty printing this doubled it to 111 KB, which measured clean
 // against the serialised form while shipping a file that would be refused.
 // The artifact itself is now the thing under the limit. Readability lives in
 // llms.txt and in js/registry, which are written for people.
-fs.writeFileSync(outputPath, JSON.stringify(schema) + '\n', 'utf-8');
+const outputPath = path.join(__dirname, '../schema.json');
+fs.writeFileSync(outputPath, `${serialized}\n`, 'utf-8');
 
 console.log(`Generated ${outputPath}: ${bytes} bytes`);
 process.exit(0);
@@ -63,7 +78,7 @@ function generateMetaProperties() {
 
   for (const [name, field] of Object.entries(META)) {
     if (!field) continue;
-    props[name] = fieldToSchema(field, name);
+    props[name] = fieldToSchema(field);
   }
 
   props.pages = {
@@ -79,7 +94,6 @@ function generateMetaProperties() {
 function generateDefinitions() {
   const defs = {};
 
-  // Page definition
   defs.Page = {
     type: 'object',
     additionalProperties: false,
@@ -96,158 +110,112 @@ function generateDefinitions() {
     },
   };
 
-  // Block definition with oneOf for each type
+  // The fields every block carries, once. `type` is left to each block, which
+  // pins it to a constant; the envelope only says what the shared fields are.
+  const envelope = {};
+  for (const [name, field] of Object.entries(ENVELOPE)) {
+    if (!field || name === 'type' || field.derived) continue;
+    envelope[name] = name === 'evidence'
+      ? withNote({ type: 'array', items: { $ref: '#/definitions/Evidence' } }, field)
+      : fieldToSchema(field);
+  }
+  defs.Envelope = { type: 'object', properties: envelope };
+
+  defs.Evidence = fieldToSchema(ENVELOPE.evidence.of);
+
   const blockOneOf = [];
   for (const block of BLOCKS) {
     const defName = `Block_${block.id}`;
     defs[defName] = generateBlockDefinition(block);
     blockOneOf.push({ $ref: `#/definitions/${defName}` });
   }
-
   defs.Block = { oneOf: blockOneOf };
-
-  // Evidence definition
-  defs.Evidence = {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      label: { type: 'string' },
-      href: { type: 'string' },
-      hash: { type: 'string' },
-      excerpt: { type: 'string' },
-      kind: { enum: ['commit', 'file', 'log', 'test', 'run', 'ticket', 'doc', 'metric', 'other'] },
-      checkedBy: { enum: ['code', 'human', 'llm', 'none'] },
-      confidence: { enum: ['high', 'medium', 'low'] },
-    },
-    required: ['label'],
-  };
 
   return defs;
 }
 
 function generateBlockDefinition(block) {
   const derived = new Set(derivedFields(block.id));
-  const required = requiredFields(block.id);
+  const props = {};
 
-  const props = {
-    type: { const: block.id },
-  };
-
-  // Add envelope fields except derived ones
-  for (const [name, field] of Object.entries(ENVELOPE)) {
-    if (derived.has(name)) continue;
-    if (!field) continue;
-    props[name] = fieldToSchema(field, name);
+  for (const [name, field] of Object.entries(block.fields || {})) {
+    if (!field || derived.has(name)) continue;
+    props[name] = fieldToSchema(field);
   }
 
-  // Add block-specific fields except derived ones
-  if (block.fields) {
-    for (const [name, field] of Object.entries(block.fields)) {
-      if (derived.has(name)) continue;
-      if (!field) continue;
-      props[name] = fieldToSchema(field, name);
-    }
-  }
+  // Written last, so nothing can overwrite the discriminator.
+  props.type = { const: block.id };
 
   return {
     type: 'object',
-    additionalProperties: true,
+    allOf: [{ $ref: '#/definitions/Envelope' }],
     properties: props,
-    required: required.filter(f => !derived.has(f)),
+    required: requiredFields(block.id).filter((f) => !derived.has(f)),
   };
 }
 
-function fieldToSchema(field, name) {
+function withNote(schema, field) {
+  if (field.note) schema.description = field.note;
+  return schema;
+}
+
+function fieldToSchema(field) {
   if (!field || !field.type) return {};
 
   const schema = {};
 
   switch (field.type) {
     case 'string':
-      schema.type = 'string';
-      if (field.maxLen) schema.maxLength = field.maxLen;
-      if (field.note) schema.description = field.note;
-      break;
-
     case 'text':
+    case 'url':
+    case 'date':
       schema.type = 'string';
       if (field.maxLen) schema.maxLength = field.maxLen;
-      if (field.note) schema.description = field.note;
       break;
 
     case 'number':
-      schema.type = 'number';
-      if (field.min !== undefined) schema.minimum = field.min;
-      if (field.max !== undefined) schema.maximum = field.max;
-      if (field.note) schema.description = field.note;
-      break;
-
     case 'integer':
-      schema.type = 'integer';
+      schema.type = field.type;
+      if (Array.isArray(field.values)) schema.enum = field.values;
       if (field.min !== undefined) schema.minimum = field.min;
       if (field.max !== undefined) schema.maximum = field.max;
-      if (field.note) schema.description = field.note;
       break;
 
     case 'boolean':
       schema.type = 'boolean';
-      if (field.note) schema.description = field.note;
       break;
 
     case 'enum':
       schema.enum = field.values || [];
-      if (field.note) schema.description = field.note;
-      break;
-
-    case 'url':
-      schema.type = 'string';
-      if (field.note) schema.description = field.note;
-      break;
-
-    case 'date':
-      schema.type = 'string';
-      if (field.note) schema.description = field.note;
       break;
 
     case 'array':
       schema.type = 'array';
       if (field.min !== undefined) schema.minItems = field.min;
       if (field.max !== undefined) schema.maxItems = field.max;
-
-      if (field.of) {
-        if (typeof field.of === 'string') {
-          if (field.of === 'block') {
-            schema.items = { $ref: '#/definitions/Block' };
-          } else if (field.of === 'page') {
-            schema.items = { $ref: '#/definitions/Page' };
-          }
-        } else if (typeof field.of === 'object' && field.of.type) {
-          schema.items = fieldToSchema(field.of, 'item');
-        }
-      }
-      if (field.note) schema.description = field.note;
+      if (field.of === 'block') schema.items = { $ref: '#/definitions/Block' };
+      else if (field.of === 'page') schema.items = { $ref: '#/definitions/Page' };
+      else if (field.of === 'evidence-item') schema.items = { $ref: '#/definitions/Evidence' };
+      else if (field.of && typeof field.of === 'object' && field.of.type) schema.items = fieldToSchema(field.of);
       break;
 
-    case 'object':
+    case 'object': {
       schema.type = 'object';
-      schema.additionalProperties = true;
-
-      if (field.fields) {
-        const props = {};
-        for (const [fname, ffield] of Object.entries(field.fields)) {
-          if (ffield) {
-            props[fname] = fieldToSchema(ffield, fname);
-          }
-        }
-        schema.properties = props;
+      const props = {};
+      const required = [];
+      for (const [name, sub] of Object.entries(field.fields || {})) {
+        if (!sub || sub.derived) continue;
+        props[name] = fieldToSchema(sub);
+        if (sub.required) required.push(name);
       }
-      if (field.note) schema.description = field.note;
+      if (Object.keys(props).length) schema.properties = props;
+      if (required.length) schema.required = required;
       break;
+    }
 
-    case 'any':
-      // No constraint
-      break;
+    default:
+      break; // 'any': no constraint
   }
 
-  return schema;
+  return withNote(schema, field);
 }

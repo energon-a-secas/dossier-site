@@ -1,12 +1,21 @@
 /**
  * Commits adapter: parse Conventional Commits 1.0.0 from git log output
  *
- * Groups by type into a timeline block plus a kv of counts.
+ * One table row per commit (type, scope, change, breaking) plus a facts block
+ * of counts per type. One regex for the commit format.
  *
- * One regex for the commit format.
+ * This used to emit a timeline whose items carried `title`, `note` and an
+ * undefined `date`, none of which a timeline item has, so every row rendered
+ * blank, and a facts block whose values were numbers where the format wants
+ * text. A one-line log has no times to put on a timeline, and a timeline needs
+ * at least two entries, so the commits are a table: it holds one row or two
+ * thousand and sorts by type.
  *
  * Pure, DOM-free.
  */
+
+const COMMIT = /^(feat|fix|docs|style|refactor|perf|test|chore)(\(.+?\))?(!)?:\s+(.+)$/;
+const MAX_ROWS = 2000;
 
 /**
  * @param {string} source
@@ -19,64 +28,60 @@ export function toDossier(source) {
     return { document: null, findings };
   }
 
-  const lines = source.trim().split('\n');
-  const commits = [];
+  const rows = [];
   const typeMap = {};
+  let total = 0;
 
-  const conventionalRegex = /^(feat|fix|docs|style|refactor|perf|test|chore)(\(.+?\))?(!)?:\s+(.+)$/;
-
-  for (const line of lines) {
-    if (!line.trim()) continue;
-
-    const match = line.match(conventionalRegex);
-    if (match) {
-      const [, type, scope, breaking, message] = match;
-      const fullMessage = `${type}${scope || ''}${breaking ? '!' : ''}: ${message}`;
-
-      commits.push({
-        type,
-        scope: scope ? scope.substring(1, scope.length - 1) : undefined,
-        breaking: !!breaking,
-        message,
-        fullMessage,
-      });
-
-      typeMap[type] = (typeMap[type] || 0) + 1;
+  for (const line of source.replace(/\r\n?/g, '\n').trim().split('\n')) {
+    const match = line.trim().match(COMMIT);
+    if (!match) continue;
+    const [, type, scope, breaking, message] = match;
+    if (rows.length < MAX_ROWS) {
+      rows.push([type, scope ? scope.slice(1, -1) : '', message, breaking ? 'yes' : '']);
     }
+    typeMap[type] = (typeMap[type] || 0) + 1;
+    total += 1;
   }
 
-  const timeline = commits.map((commit, i) => ({
-    date: undefined,
-    title: commit.message,
-    note: commit.scope ? `${commit.type}(${commit.scope})` : commit.type,
-  }));
+  if (total > rows.length) {
+    findings.push({
+      level: 'info',
+      message: `Only the first ${MAX_ROWS} of ${total} commits are shown.`,
+      path: '',
+      page: null,
+      rule: null,
+    });
+  }
 
-  const kvItems = Object.entries(typeMap).map(([type, count]) => ({
-    label: type,
-    value: count,
-  }));
+  const blocks = rows.length === 0
+    ? [{ type: 'prose', text: 'No Conventional Commits were found in this log.' }]
+    : [
+      {
+        type: 'table',
+        title: 'Commits',
+        columns: [
+          { label: 'Type' },
+          { label: 'Scope' },
+          { label: 'Change' },
+          { label: 'Breaking' },
+        ],
+        rows,
+      },
+      {
+        type: 'kv',
+        title: 'By type',
+        items: Object.entries(typeMap).map(([type, count]) => ({
+          label: type,
+          value: `${count} ${count === 1 ? 'commit' : 'commits'}`,
+        })),
+      },
+    ];
 
   const document = {
     dossier: {
       version: 1,
       title: 'Commits',
-      pages: [
-        {
-          title: 'Changes',
-          blocks: [
-            {
-              type: 'timeline',
-              title: 'Commits',
-              items: timeline,
-            },
-            {
-              type: 'kv',
-              title: 'By type',
-              items: kvItems,
-            },
-          ],
-        },
-      ],
+      pages: [{ title: 'Changes', blocks }],
     },
   };
 

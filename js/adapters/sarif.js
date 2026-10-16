@@ -4,10 +4,15 @@
  * Reads runs[].results[] for ruleId, level, message.text and the first
  * locations[].physicalLocation for path and region.startLine.
  *
- * Emits a findings block.
+ * Emits a findings block. SARIF's own levels are error, warning, note and
+ * none; the first three are the findings block's words too, and none (a
+ * result that is not a problem) becomes note. It used to become "info", which
+ * the format does not have.
  *
  * Pure, DOM-free.
  */
+
+const LEVELS = ['error', 'warning', 'note'];
 
 /**
  * @param {string} source
@@ -50,9 +55,9 @@ export function toDossier(source) {
     if (!run.results || !Array.isArray(run.results)) continue;
 
     for (const result of run.results) {
-      const ruleId = result.ruleId || 'rule';
-      const level = result.level || 'warning';
-      const message = result.message?.text || '(no message)';
+      const ruleId = String(result.ruleId || 'rule');
+      const level = LEVELS.includes(result.level) ? result.level : result.level === 'none' ? 'note' : 'warning';
+      const message = String(result.message?.text || result.message?.markdown || '(no message)');
 
       let path = '';
       let line = undefined;
@@ -67,13 +72,16 @@ export function toDossier(source) {
         }
       }
 
-      items.push({
-        rule: ruleId,
-        level: level === 'none' ? 'info' : level,
-        message,
-        path,
-        line,
-      });
+      const item = { rule: ruleId.substring(0, 80), level, message };
+      // A message past the field's limit keeps its first part as the message
+      // and the whole text as the detail, rather than failing validation.
+      if (message.length > 400) {
+        item.message = `${message.substring(0, 399)}\u2026`;
+        item.detail = message.substring(0, 1200);
+      }
+      if (path) item.path = String(path).substring(0, 240);
+      if (Number.isInteger(line)) item.line = line;
+      items.push(item);
     }
   }
 

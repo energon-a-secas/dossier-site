@@ -49,38 +49,38 @@
             "type": "checklist",
             "items": [
               {
-                "text": "Unit tests for search indexer (98% coverage)",
-                "done": true,
-                "checkedBy": "code"
+                "label": "Unit tests for search indexer (98% coverage)",
+                "state": "done",
+                "note": "Checked by an automated test or measurement."
               },
               {
-                "text": "Integration tests on mock data (500 documents)",
-                "done": true,
-                "checkedBy": "code"
+                "label": "Integration tests on mock data (500 documents)",
+                "state": "done",
+                "note": "Checked by an automated test or measurement."
               },
               {
-                "text": "Manual QA of search UX and filter UX",
-                "done": true,
-                "checkedBy": "human"
+                "label": "Manual QA of search UX and filter UX",
+                "state": "done",
+                "note": "Checked by a person."
               },
               {
-                "text": "Load test: 1000 concurrent searches",
-                "done": true,
-                "checkedBy": "code"
+                "label": "Load test: 1000 concurrent searches",
+                "state": "done",
+                "note": "Checked by an automated test or measurement."
               },
               {
-                "text": "A/B test in production (10% of users, 48 hours)",
-                "done": true,
-                "checkedBy": "code"
+                "label": "A/B test in production (10% of users, 48 hours)",
+                "state": "done",
+                "note": "Checked by an automated test or measurement."
               },
               {
-                "text": "Rollout to 100% (scheduled for 2026-10-15)",
-                "done": false
+                "label": "Rollout to 100% (scheduled for 2026-10-15)",
+                "state": "todo"
               },
               {
-                "text": "Rollback plan tested and ready",
-                "done": true,
-                "checkedBy": "human"
+                "label": "Rollback plan tested and ready",
+                "state": "done",
+                "note": "Checked by a person."
               }
             ]
           }

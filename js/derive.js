@@ -72,15 +72,34 @@ export function derive(model) {
   }
 }
 
+/**
+ * A page id is its route, `#/<id>`, so it has to be unique and routable.
+ *
+ * Two pages titled "Notes" both became `notes`, and the second one could never
+ * be opened. A title with no Latin letters or digits ("日本語", "???") slugged to
+ * an empty string, which is no route at all. Now a repeat gets a number
+ * (`notes`, `notes-2`), an empty slug becomes `page-<n>`, and nothing starts
+ * with `~`, which the router keeps for its own views (`#/~compare`). An id the
+ * author supplied is left alone, and a derived one never collides with it.
+ */
 function derivePageIds(dossier) {
   if (!dossier.pages || !Array.isArray(dossier.pages)) return;
 
+  const taken = new Set();
   for (const page of dossier.pages) {
-    if (!page.id) {
-      page.id = slugId(page.title);
-      markDerived(page, 'id');
-    }
+    if (page && page.id) taken.add(String(page.id));
   }
+
+  dossier.pages.forEach((page, index) => {
+    if (!page || typeof page !== 'object' || page.id) return;
+    // slugId keeps only [a-z0-9_-], so a derived id can never start with "~".
+    const base = slugId(page.title) || `page-${index + 1}`;
+    let id = base;
+    for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`;
+    taken.add(id);
+    page.id = id;
+    markDerived(page, 'id');
+  });
 }
 
 function deriveBlockIds(dossier) {
@@ -292,9 +311,11 @@ function slugId(title) {
   if (!title || typeof title !== 'string') return '';
 
   return title
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '') // "Résumé" keeps its letters as "resume"
     .trim()
     .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
+    .replace(/[^a-z0-9_\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');

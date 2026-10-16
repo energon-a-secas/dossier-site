@@ -72,10 +72,10 @@
             "type": "steps",
             "items": [
               {
-                "text": "Flip the environment variable AUTH_PROVIDER to 'okta' and deploy"
+                "title": "Flip the environment variable AUTH_PROVIDER to 'okta' and deploy"
               },
               {
-                "text": "Drain Clerk sessions (users will be asked to login again)"
+                "title": "Drain Clerk sessions (users will be asked to login again)"
               }
             ]
           },
@@ -98,24 +98,24 @@
             "type": "checklist",
             "items": [
               {
-                "text": "Stage environment passed auth flow tests",
-                "done": true,
-                "checkedBy": "code"
+                "label": "Stage environment passed auth flow tests",
+                "state": "done",
+                "note": "Checked by an automated test or measurement."
               },
               {
-                "text": "Staging SAML and OAuth both working in parallel",
-                "done": true,
-                "checkedBy": "human"
+                "label": "Staging SAML and OAuth both working in parallel",
+                "state": "done",
+                "note": "Checked by a person."
               },
               {
-                "text": "Canary (10%) running for 24 hours, no errors",
-                "done": true,
-                "checkedBy": "code"
+                "label": "Canary (10%) running for 24 hours, no errors",
+                "state": "done",
+                "note": "Checked by an automated test or measurement."
               },
               {
-                "text": "Feature flag kill switch tested in production",
-                "done": true,
-                "checkedBy": "human"
+                "label": "Feature flag kill switch tested in production",
+                "state": "done",
+                "note": "Checked by a person."
               }
             ]
           }

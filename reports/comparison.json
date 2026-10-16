@@ -30,7 +30,7 @@
           {
             "type": "compare",
             "title": "Monolith vs microservices",
-            "kind": "code",
+            "kind": "text",
             "left": {
               "label": "Monolith",
               "value": "Deploy: all or nothing\nDebug: one service\nScale: whole system"
@@ -50,13 +50,13 @@
             "type": "steps",
             "items": [
               {
-                "text": "Sustained traffic reaches 300 QPS (currently 100 QPS, growing 10% per quarter)"
+                "title": "Sustained traffic reaches 300 QPS (currently 100 QPS, growing 10% per quarter)"
               },
               {
-                "text": "OR compute capacity becomes the bottleneck in production"
+                "title": "OR compute capacity becomes the bottleneck in production"
               },
               {
-                "text": "OR auth or API becomes a performance hotspot that needs separate optimization"
+                "title": "OR auth or API becomes a performance hotspot that needs separate optimization"
               }
             ]
           },

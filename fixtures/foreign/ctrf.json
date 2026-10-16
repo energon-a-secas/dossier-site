@@ -4,31 +4,37 @@
       "name": "Jest"
     },
     "summary": {
-      "tests": 10,
-      "passed": 8,
+      "tests": 4,
+      "passed": 2,
       "failed": 1,
-      "skipped": 1
-    }
-  },
-  "results": [
-    {
-      "name": "should increment counter",
-      "status": "PASSED",
-      "duration": 123
+      "pending": 0,
+      "skipped": 1,
+      "other": 0,
+      "start": 1760097600000,
+      "stop": 1760097601234
     },
-    {
-      "name": "should handle concurrency",
-      "status": "PASSED",
-      "duration": 456
-    },
-    {
-      "name": "should reset on timeout",
-      "status": "FAILED",
-      "message": "Expected 0 to equal 1"
-    },
-    {
-      "name": "should skip old test",
-      "status": "SKIPPED"
-    }
-  ]
+    "tests": [
+      {
+        "name": "should increment counter",
+        "status": "passed",
+        "duration": 123
+      },
+      {
+        "name": "should handle concurrency",
+        "status": "passed",
+        "duration": 456
+      },
+      {
+        "name": "should reset on timeout",
+        "status": "failed",
+        "duration": 89,
+        "message": "Expected 0 to equal 1"
+      },
+      {
+        "name": "should skip old test",
+        "status": "skipped",
+        "duration": 0
+      }
+    ]
+  }
 }

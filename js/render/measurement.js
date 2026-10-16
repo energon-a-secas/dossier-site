@@ -5,11 +5,15 @@
 import { escHtml } from '../neorgon-dom.js';
 import { spark, gauge as vizGauge } from '../viz.js';
 import { renderChartBlock } from './charts.js';
-import { emptyFrame } from './markdown.js';
+import { emptyFrame, inlineMarkdown } from './markdown.js';
 // One formatter. This module carried its own copy of formatNumber, so fixing
 // the one in format.js changed nothing on screen: an error rate of 0.3 still
 // rendered as 0 and 1420000 requests still rendered as seven loose digits.
 import { formatNumber, formatCell } from './format.js';
+import { pick, enumValues } from './enums.js';
+import { safeDomId } from './ids.js';
+
+const VERDICTS = enumValues('scorecard', 'criteria', 'verdict');
 
 /** The types this module renders. js/render/dispatch.js builds its
  *  table from these declarations, so a type cannot be routed to a module
@@ -119,7 +123,7 @@ function renderGauge(block) {
   }
   const max = Number.isFinite(Number(block.max)) ? Number(block.max) : 100;
   const opts = {
-    uid: block.id ? `g-${block.id}` : 'g-gauge',
+    uid: block.id ? `g-${safeDomId(block.id)}` : 'g-gauge',
     max,
     title: block.title || '',
     scale: block.unit ? String(block.unit) : '',
@@ -152,30 +156,38 @@ function renderScorecard(block) {
   if (criteria.length === 0) return '';
   let html = '<table class="block-scorecard"><tbody>';
   for (const c of criteria) {
-    const verdictClass = `verdict--${c.verdict || 'unknown'}`;
-    html += `<tr><td class="scorecard-label">${escHtml(c.label || '')}</td>`;
-    html += `<td class="scorecard-verdict ${verdictClass}">${c.verdict || 'unknown'}</td></tr>`;
+    if (!c || typeof c !== 'object') continue;
+    // The verdict was written raw into a class and a cell. The detail is what
+    // the linter asks for on anything that did not pass, and it was not shown.
+    const verdict = pick(c.verdict, VERDICTS, 'unknown');
+    const detail = c.detail ? `<p class="scorecard-detail">${inlineMarkdown(String(c.detail))}</p>` : '';
+    html += `<tr><td class="scorecard-label">${escHtml(String(c.label || ''))}${detail}</td>`;
+    html += `<td class="scorecard-verdict verdict--${verdict}">${verdict}</td></tr>`;
   }
   html += '</tbody></table>';
   return html;
 }
 
+const ALIGNS = ['left', 'right', 'center'];
+
 function renderTable(block) {
-  const columns = Array.isArray(block.columns) ? block.columns : [];
+  // A column that is null or a bare string is drawn as a label, not read as
+  // an object: reading .align off null threw and the table became an error card.
+  const columns = (Array.isArray(block.columns) ? block.columns : [])
+    .map((c) => (c && typeof c === 'object' ? c : { label: String(c ?? '') }));
   const rows = Array.isArray(block.rows) ? block.rows : [];
   if (columns.length === 0 || rows.length === 0) return '';
+  const aligns = columns.map((c) => (ALIGNS.includes(c.align) ? c.align : 'left'));
   let html = `<div class="table-wrapper" tabindex="0" role="region" aria-label="${escHtml(block.title || 'Report table')}"><table class="block-table"><thead><tr>`;
-  for (const col of columns) {
-    const align = ['left', 'right', 'center'].includes(col.align) ? col.align : 'left';
-    html += `<th scope="col" align="${align}">${escHtml(col.label || '')}</th>`;
-  }
+  columns.forEach((col, i) => {
+    html += `<th scope="col" align="${aligns[i]}">${escHtml(String(col.label ?? ''))}</th>`;
+  });
   html += '</tr></thead><tbody>';
   for (const row of rows) {
     html += '<tr>';
     if (Array.isArray(row)) {
       for (let i = 0; i < columns.length; i++) {
-        const align = ['left', 'right', 'center'].includes(columns[i].align) ? columns[i].align : 'left';
-        html += `<td align="${align}">${escHtml(formatCell(row[i], columns[i].format))}</td>`;
+        html += `<td align="${aligns[i]}">${escHtml(formatCell(row[i], columns[i].format))}</td>`;
       }
     }
     html += '</tr>';

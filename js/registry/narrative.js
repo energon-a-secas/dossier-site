@@ -102,7 +102,12 @@ export const NARRATIVE = [
     fields: {
       items: arr(
         obj({
-          title: str({ required: true, maxLen: 120 }),
+          title: str({
+            required: true,
+            maxLen: 120,
+            accepts: ['label', 'text'],
+            note: 'What to do, in one line. "label" and "text" are accepted spellings.',
+          }),
           detail: text({ maxLen: 600 }),
         }),
         { required: true, min: 2, max: 20 },
@@ -134,9 +139,9 @@ export const NARRATIVE = [
     fields: {
       items: arr(
         obj({
-          label: str({ required: true, maxLen: 40 }),
+          label: str({ required: true, maxLen: 40, accepts: ['key'] }),
           value: str({ required: true, maxLen: 200 }),
-          href: url(),
+          href: url({ note: 'Makes the value a link.' }),
           tone: enom(TONES),
         }),
         { required: true, min: 1, max: 20 },

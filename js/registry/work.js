@@ -175,7 +175,7 @@ export const WORK = [
     fields: {
       items: arr(
         obj({
-          label: str({ required: true, maxLen: 160 }),
+          label: str({ required: true, maxLen: 160, accepts: ['text'] }),
           state: enom(CHECK_STATES, { required: true }),
           note: text({ maxLen: 400, note: 'Required by the linter for anything not done.' }),
         }),

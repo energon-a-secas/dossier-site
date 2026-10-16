@@ -58,34 +58,34 @@
             "type": "timeline",
             "items": [
               {
-                "time": "2026-10-08T14:32:00Z",
+                "at": "2026-10-08T14:32:00Z",
                 "label": "Primary becomes unresponsive",
-                "body": "Connection pool starts timing out on all queries."
+                "detail": "Connection pool starts timing out on all queries."
               },
               {
-                "time": "2026-10-08T14:35:00Z",
+                "at": "2026-10-08T14:35:00Z",
                 "label": "Alerting fires",
-                "body": "On-call team is paged. Application error rate reaches 95%."
+                "detail": "On-call team is paged. Application error rate reaches 95%."
               },
               {
-                "time": "2026-10-08T14:40:00Z",
+                "at": "2026-10-08T14:40:00Z",
                 "label": "Manual investigation begins",
-                "body": "Team connects to replica, checks replication lag. Shows 20ms lag, which is normal."
+                "detail": "Team connects to replica, checks replication lag. Shows 20ms lag, which is normal."
               },
               {
-                "time": "2026-10-08T14:42:00Z",
+                "at": "2026-10-08T14:42:00Z",
                 "label": "Failover automation triggers",
-                "body": "After 10 minutes of primary unavailability, the automatic failover script promotes the replica."
+                "detail": "After 10 minutes of primary unavailability, the automatic failover script promotes the replica."
               },
               {
-                "time": "2026-10-08T14:50:00Z",
+                "at": "2026-10-08T14:50:00Z",
                 "label": "Application reconnects",
-                "body": "Application detects replica is now primary and failover config propagates."
+                "detail": "Application detects replica is now primary and failover config propagates."
               },
               {
-                "time": "2026-10-08T15:17:00Z",
+                "at": "2026-10-08T15:17:00Z",
                 "label": "All traffic restored",
-                "body": "Last customer reconnects. Error rate returns to baseline."
+                "detail": "Last customer reconnects. Error rate returns to baseline."
               }
             ]
           }
@@ -114,20 +114,20 @@
             "type": "checklist",
             "items": [
               {
-                "text": "Add disk usage alert with 1-minute resolution and 80% threshold",
-                "done": false
+                "label": "Add disk usage alert with 1-minute resolution and 80% threshold",
+                "state": "todo"
               },
               {
-                "text": "Restore replication lag detection script and test in staging",
-                "done": false
+                "label": "Restore replication lag detection script and test in staging",
+                "state": "todo"
               },
               {
-                "text": "Reduce failover detection timeout from 10 to 5 minutes",
-                "done": false
+                "label": "Reduce failover detection timeout from 10 to 5 minutes",
+                "state": "todo"
               },
               {
-                "text": "Set up automatic disk cleanup for old log files",
-                "done": false
+                "label": "Set up automatic disk cleanup for old log files",
+                "state": "todo"
               }
             ]
           }

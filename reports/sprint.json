@@ -65,24 +65,24 @@
             "type": "checklist",
             "items": [
               {
-                "text": "Search performance exceeded targets (140ms instead of 250ms)",
-                "done": true,
-                "checkedBy": "code"
+                "label": "Search performance exceeded targets (140ms instead of 250ms)",
+                "state": "done",
+                "note": "Checked by an automated test or measurement."
               },
               {
-                "text": "A/B test showed 15% increase in feature usage after rollout",
-                "done": true,
-                "checkedBy": "human"
+                "label": "A/B test showed 15% increase in feature usage after rollout",
+                "state": "done",
+                "note": "Checked by a person."
               },
               {
-                "text": "Zero incidents during release. Rollback was not needed.",
-                "done": true,
-                "checkedBy": "code"
+                "label": "Zero incidents during release. Rollback was not needed.",
+                "state": "done",
+                "note": "Checked by an automated test or measurement."
               },
               {
-                "text": "Pair programming on indexer improved code quality",
-                "done": true,
-                "checkedBy": "human"
+                "label": "Pair programming on indexer improved code quality",
+                "state": "done",
+                "note": "Checked by a person."
               }
             ]
           }
@@ -100,10 +100,10 @@
             "type": "steps",
             "items": [
               {
-                "text": "For next sprint: schedule design reviews earlier and aim for one round of feedback"
+                "title": "For next sprint: schedule design reviews earlier and aim for one round of feedback"
               },
               {
-                "text": "For database work: reserve 25% buffer on estimates instead of 10%"
+                "title": "For database work: reserve 25% buffer on estimates instead of 10%"
               }
             ]
           }

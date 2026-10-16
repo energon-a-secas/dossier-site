@@ -6,7 +6,8 @@ import { escHtml } from '../neorgon-dom.js';
 // Imported for grid children. narrative.js and dispatch.js form a cycle, which
 // is safe here because the binding is read at call time, not at module init.
 import { renderBlock } from './dispatch.js';
-import { inlineMarkdown as markdownToHtml, emptyFrame } from './markdown.js';
+import { inlineMarkdown as markdownToHtml, emptyFrame, safeLink } from './markdown.js';
+import { pick, TONES, WIDTHS } from './enums.js';
 
 /** The types this module renders. js/render/dispatch.js builds its
  *  table from these declarations, so a type cannot be routed to a module
@@ -48,8 +49,8 @@ export function renderNarrativeBlock(block, ctx) {
 
 function renderHeading(block) {
   if (!block.text) return emptyFrame('Heading: add "text" to name this section.');
-  const level = block.level || 2;
-  const tag = `h${Math.max(2, Math.min(3, level))}`;
+  // Only 2 or 3. A string or a stray number used to reach the tag name.
+  const tag = Number(block.level) === 3 ? 'h3' : 'h2';
   return `<${tag} class="block-heading">${escHtml(block.text || '')}</${tag}>`;
 }
 
@@ -60,7 +61,7 @@ function renderProse(block) {
 }
 
 function renderCallout(block) {
-  const tone = block.tone || 'neutral';
+  const tone = pick(block.tone, TONES, 'neutral');
   const label = block.label || toneLabel(tone);
   const html = markdownToHtml(block.text || '');
   return `<aside class="block-callout block-callout--${tone}"><strong>${escHtml(label)}</strong> ${html}</aside>`;
@@ -80,25 +81,42 @@ function renderQuote(block) {
   return `<blockquote class="block-quote"><p>${text}</p>${attr}</blockquote>`;
 }
 
+/**
+ * The schema field is `title`. This read `item.label`, so every step rendered
+ * as a bare number with the title missing, including the catalog's own sample.
+ * `label` and `text` are accepted spellings (the parser renames them); they
+ * are read here too so a block rendered straight from a file still shows them.
+ */
 function renderSteps(block) {
-  const items = Array.isArray(block.items) ? block.items : [];
+  const items = Array.isArray(block.items) ? block.items.filter((i) => i && typeof i === 'object') : [];
   if (items.length === 0) return '';
   let html = '<ol class="block-steps">';
   for (const item of items) {
-    const text = markdownToHtml(item.label || '');
-    const detail = item.detail ? `<p>${markdownToHtml(item.detail)}</p>` : '';
+    const title = item.title ?? item.label ?? item.text;
+    const text = title ? `<span class="step-title">${markdownToHtml(String(title))}</span>` : '';
+    const detail = item.detail ? `<p>${markdownToHtml(String(item.detail))}</p>` : '';
     html += `<li class="step">${text}${detail}</li>`;
   }
   html += '</ol>';
   return html;
 }
 
+/**
+ * The schema field is `label`; this read `item.key`, so every fact rendered
+ * with no label, and `href` was ignored. `key` is an accepted spelling. A
+ * link comes from `href` through the one URL check.
+ */
 function renderKV(block) {
-  const items = Array.isArray(block.items) ? block.items : [];
+  const items = Array.isArray(block.items) ? block.items.filter((i) => i && typeof i === 'object') : [];
   if (items.length === 0) return '';
   let html = '<dl class="block-kv">';
   for (const item of items) {
-    html += `<dt>${escHtml(item.key || '')}</dt><dd>${markdownToHtml(item.value || '')}</dd>`;
+    const label = item.label ?? item.key ?? '';
+    const value = item.value === undefined || item.value === null ? '' : String(item.value);
+    const tone = pick(item.tone, TONES, '');
+    const toneClass = tone && tone !== 'neutral' ? ` class="kv-value kv-value--${tone}"` : '';
+    const shown = item.href ? safeLink(item.href, value || String(item.href)) : markdownToHtml(value);
+    html += `<dt>${escHtml(String(label))}</dt><dd${toneClass}>${shown}</dd>`;
   }
   html += '</dl>';
   return html;
@@ -128,13 +146,11 @@ function renderGrid(block, ctx = {}) {
     : Math.min(4, Math.max(2, children.length));
 
   const cells = children.map((child) => {
-    const width = ['full', 'half', 'third', 'two-thirds'].includes(child.width)
-      ? child.width
-      : 'full';
+    const width = pick(child.width, WIDTHS, 'full');
     const inner = child.type === 'grid'
       ? emptyFrame('A grid cannot hold a grid. One level of nesting is the whole layout model.')
-      : (renderBlock(child, { ...ctx, inGrid: true }) || emptyFrame(`No renderer for "${child.type}".`));
-    return `<div class="grid-item grid-item--${escHtml(width)}">${inner}</div>`;
+      : (renderBlock(child, { ...ctx, inGrid: true }) || emptyFrame(`No renderer for "${String(child.type)}".`));
+    return `<div class="grid-item grid-item--${width}">${inner}</div>`;
   }).join('');
 
   return `<div class="block-grid" style="--grid-columns: ${columns}">${cells}</div>`;

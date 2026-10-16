@@ -8,7 +8,7 @@
  * dynamic import that happens on first use.
  */
 
-import { aliases, derivedFields, blockDef } from './registry/index.js';
+import { derivedFields, blockDef } from './registry/index.js';
 import { derive } from './derive.js';
 
 let yamlLoaded = false;
@@ -172,39 +172,46 @@ function makeFatal(message, line, col, text) {
   };
 }
 
+/**
+ * Rename accepted spellings to the field that declares them, and only there.
+ *
+ * The first version renamed a key at any depth of the block using one flat
+ * map per block type. That was harmless while every alias was unique to its
+ * block, and wrong the moment one was not: `steps` accepts `label` for an
+ * item's `title`, and the evidence items every block carries have a `label`
+ * of their own, so a steps block's evidence would have lost its labels. The
+ * walk now follows the registry: a field's spellings apply inside the object
+ * that field belongs to, and nowhere else.
+ */
 function applyAliases(model, findings) {
-  const aliasMap = aliases();
+  function renameIn(value, fields, path) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !fields) return;
 
-  function walkValue(value, path, blockType) {
-    if (!value || typeof value !== 'object') return;
-
-    if (Array.isArray(value)) {
-      value.forEach((item, i) => {
-        walkValue(item, `${path}[${i}]`, blockType);
-      });
-    } else {
-      const keys = Object.keys(value);
-      const map = aliasMap[blockType] || {};
-
-      for (const key of keys) {
-        if (map[key] && map[key] !== key) {
-          const canonical = map[key];
-          if (value[canonical] === undefined) {
-            value[canonical] = value[key];
-            delete value[key];
-            findings.push({
-              level: 'info',
-              message: `Renamed "${key}" to "${canonical}"`,
-              path,
-              page: null,
-              rule: null,
-            });
-          }
-        }
+    for (const [name, def] of Object.entries(fields)) {
+      for (const alt of def?.accepts || []) {
+        if (alt === name || value[alt] === undefined || value[name] !== undefined) continue;
+        value[name] = value[alt];
+        delete value[alt];
+        findings.push({
+          level: 'info',
+          message: `Renamed "${alt}" to "${name}"`,
+          path,
+          page: null,
+          rule: null,
+        });
       }
+    }
 
-      for (const [k, v] of Object.entries(value)) {
-        walkValue(v, `${path}.${k}`, blockType);
+    for (const [name, def] of Object.entries(fields)) {
+      const child = value[name];
+      if (!def || child === undefined || child === null) continue;
+      if (def.type === 'object') renameIn(child, def.fields, `${path}.${name}`);
+      if (def.type !== 'array' || !Array.isArray(child)) continue;
+      if (def.of && typeof def.of === 'object' && def.of.type === 'object') {
+        child.forEach((item, i) => renameIn(item, def.of.fields, `${path}.${name}[${i}]`));
+      } else if (def.of === 'block') {
+        // A grid's children are blocks with their own spellings.
+        child.forEach((item, i) => renameIn(item, blockDef(item?.type)?.fields, `${path}.${name}[${i}]`));
       }
     }
   }
@@ -215,11 +222,8 @@ function applyAliases(model, findings) {
       if (page?.blocks && Array.isArray(page.blocks)) {
         for (let bi = 0; bi < page.blocks.length; bi++) {
           const block = page.blocks[bi];
-          const blockType = block?.type;
-          const blockPath = `dossier.pages[${pi}].blocks[${bi}]`;
-          if (blockType) {
-            walkValue(block, blockPath, blockType);
-          }
+          const def = blockDef(block?.type);
+          if (def) renameIn(block, def.fields, `dossier.pages[${pi}].blocks[${bi}]`);
         }
       }
     }

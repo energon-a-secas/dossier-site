@@ -3,13 +3,29 @@
  *
  * DOM-free. Node imports this. The validator, the CLI and tests all run the
  * same rules and cannot disagree about what a valid document is.
+ *
+ * Three blind spots this walk used to have, each of which let a shipped
+ * example render blank rows while "Check report" said it was fine:
+ *
+ * - A required field inside a list item or an object was never checked
+ *   (`if (value === undefined) continue`), so `steps` items with no `title`
+ *   and checklist items with no `label` or `state` passed.
+ * - A key the item does not have was never reported, so `text` where the
+ *   format says `label` was silent.
+ * - A grid's children were skipped ("for now"), so a grid holding an unknown
+ *   type validated with no finding at all.
  */
 
 import {
   BLOCKS, blockDef, isKnownType, derivedFields, requiredFields,
-  ENVELOPE, META, PAGE, CHECKED_BY
+  ENVELOPE, META, PAGE, CHECKED_BY,
 } from './registry/index.js';
 import { wasDerived } from './derive.js';
+
+const ENVELOPE_KEYS = new Set(Object.keys(ENVELOPE));
+// A page's blocks are walked by the page loop, with page context, so the
+// field walk leaves them out rather than validating every block twice.
+const PAGE_FIELDS = Object.fromEntries(Object.entries(PAGE).filter(([name]) => name !== 'blocks'));
 
 /**
  * @param {object} model
@@ -17,29 +33,9 @@ import { wasDerived } from './derive.js';
  */
 export function validate(model) {
   const findings = [];
-  const ctx = { model, countOfType, path: '' };
-
-  // Helper to add findings
-  function add(path, page, level, message, rule) {
+  const add = (path, page, level, message, rule) => {
     findings.push({ level, message, path, page: page || null, rule: rule || null });
-  }
-
-  // Track all block types for countOfType
-  const typeCounts = {};
-  if (model?.dossier?.pages && Array.isArray(model.dossier.pages)) {
-    for (const page of model.dossier.pages) {
-      if (page?.blocks && Array.isArray(page.blocks)) {
-        for (const block of page.blocks) {
-          const t = block?.type;
-          if (t) typeCounts[t] = (typeCounts[t] || 0) + 1;
-        }
-      }
-    }
-  }
-
-  function countOfType(type) {
-    return typeCounts[type] || 0;
-  }
+  };
 
   if (!model || typeof model !== 'object') {
     add('', null, 'error', 'Document is not an object');
@@ -52,24 +48,35 @@ export function validate(model) {
     return findings;
   }
 
-  // Validate meta fields
-  validateEnvelope(dossier, 'dossier', null, findings, add, META, 'meta');
+  // Block counts for the lint rules that judge a whole report, grid children
+  // included: a callout inside a grid is still a callout.
+  const typeCounts = {};
+  const count = (blocks) => {
+    for (const block of Array.isArray(blocks) ? blocks : []) {
+      const t = block?.type;
+      if (!t) continue;
+      typeCounts[t] = (typeCounts[t] || 0) + 1;
+      if (t === 'grid') count(block.blocks);
+    }
+  };
+  for (const page of Array.isArray(dossier.pages) ? dossier.pages : []) count(page?.blocks);
+  const countOfType = (type) => typeCounts[type] || 0;
 
-  // Validate pages
+  const walk = { add, countOfType };
+
+  // Unknown document and page keys are reported at info level. schema.json
+  // closes both objects (additionalProperties false), so a key the registry
+  // does not declare passed here and failed the published schema, with no
+  // word to the author about which one.
+  validateFields(dossier, META, 'dossier', null, walk, { rule: 'meta', checkUnknown: true });
+
   if (!Array.isArray(dossier.pages)) {
     add('dossier.pages', null, 'error', 'Pages must be an array');
     return findings;
   }
+  if (dossier.pages.length === 0) add('dossier.pages', null, 'error', 'Must have at least one page');
+  if (dossier.pages.length > 40) add('dossier.pages', null, 'error', 'Maximum 40 pages allowed');
 
-  if (dossier.pages.length === 0) {
-    add('dossier.pages', null, 'error', 'Must have at least one page');
-  }
-
-  if (dossier.pages.length > 40) {
-    add('dossier.pages', null, 'error', 'Maximum 40 pages allowed');
-  }
-
-  // Validate each page
   for (let pi = 0; pi < dossier.pages.length; pi++) {
     const page = dossier.pages[pi];
     const pagePath = `dossier.pages[${pi}]`;
@@ -80,62 +87,34 @@ export function validate(model) {
       continue;
     }
 
-    // Validate page envelope fields
-    validateEnvelope(page, pagePath, pageTitle, findings, add, PAGE, 'page');
+    validateFields(page, PAGE_FIELDS, pagePath, pageTitle, walk, { rule: 'page', checkUnknown: true, alsoKnown: ['blocks'] });
 
-    // Validate page blocks
     if (!Array.isArray(page.blocks)) {
       add(`${pagePath}.blocks`, pageTitle, 'error', 'Blocks must be an array');
       continue;
     }
-
     if (page.blocks.length === 0) {
       add(`${pagePath}.blocks`, pageTitle, 'error', 'Page must have at least one block');
     }
 
-    // Validate each block
-    for (let bi = 0; bi < page.blocks.length; bi++) {
-      const block = page.blocks[bi];
-      const blockPath = `${pagePath}.blocks[${bi}]`;
-
-      if (!block || typeof block !== 'object') {
-        add(blockPath, pageTitle, 'error', 'Block must be an object');
-        continue;
-      }
-
-      validateBlock(block, blockPath, pageTitle, findings, add, countOfType);
-    }
+    page.blocks.forEach((block, bi) => {
+      validateBlockAt(block, `${pagePath}.blocks[${bi}]`, pageTitle, walk, 0);
+    });
   }
 
   return findings;
 }
 
-function validateEnvelope(obj, path, page, findings, add, schema, category) {
-  if (!obj) return;
-
-  // Check required envelope fields
-  const reqFields = Object.entries(schema)
-    .filter(([, f]) => f?.required)
-    .map(([name]) => name);
-
-  for (const field of reqFields) {
-    if (obj[field] === undefined || obj[field] === null || obj[field] === '') {
-      const rule = category ? `${category}.${field}.required` : `${field}.required`;
-      add(`${path}.${field}`, page, 'error', `Missing required field: ${field}`, rule);
-    }
+function validateBlockAt(block, path, page, walk, depth) {
+  if (!block || typeof block !== 'object' || Array.isArray(block)) {
+    walk.add(path, page, 'error', 'Block must be an object');
+    return;
   }
-
-  // Type check all envelope fields
-  for (const [fieldName, fieldDef] of Object.entries(schema)) {
-    if (fieldDef === undefined) continue;
-    const fieldValue = obj[fieldName];
-    if (fieldValue === undefined || fieldValue === null) continue;
-
-    validateField(obj[fieldName], fieldDef, `${path}.${fieldName}`, page, findings, add, fieldName);
-  }
+  validateBlock(block, path, page, walk, depth);
 }
 
-function validateBlock(block, path, page, findings, add, countOfType) {
+function validateBlock(block, path, page, walk, depth) {
+  const { add } = walk;
   const blockType = block.type;
 
   if (!blockType) {
@@ -143,9 +122,8 @@ function validateBlock(block, path, page, findings, add, countOfType) {
     return;
   }
 
-  // Check if type is known
   if (!isKnownType(blockType)) {
-    const suggestion = findClosestType(blockType);
+    const suggestion = findClosestType(String(blockType));
     const message = suggestion
       ? `Unknown block type: ${blockType}. Did you mean: ${suggestion}?`
       : `Unknown block type: ${blockType}`;
@@ -156,15 +134,12 @@ function validateBlock(block, path, page, findings, add, countOfType) {
   const def = blockDef(blockType);
   if (!def) return;
 
-  // Validate envelope fields
-  validateEnvelope(block, path, page, findings, add, ENVELOPE, 'envelope');
+  validateFields(block, ENVELOPE, path, page, walk, { rule: 'envelope', checkUnknown: false });
 
-  // Check for derived fields supplied by author
-  const derived = derivedFields(blockType);
-  for (const field of derived) {
-    // A derived model carries these legitimately: derive() put them there and
-    // marked them. Only an author-supplied one is a finding, which is why the
-    // marker exists rather than this check being dropped.
+  // A derived model carries these legitimately: derive() put them there and
+  // marked them. Only an author-supplied one is a finding, which is why the
+  // marker exists rather than this check being dropped.
+  for (const field of derivedFields(blockType)) {
     if (block[field] !== undefined && !wasDerived(block, field)) {
       add(`${path}.${field}`, page, 'warn',
         `Field "${field}" is derived and should not be supplied. It will be ignored.`,
@@ -172,195 +147,219 @@ function validateBlock(block, path, page, findings, add, countOfType) {
     }
   }
 
-  // Validate required fields
-  const required = requiredFields(blockType);
-  for (const field of required) {
-    const val = block[field];
-    if (val === undefined || val === null || val === '') {
+  for (const field of requiredFields(blockType)) {
+    if (isMissing(block[field]) && !aliasPresent(block, def.fields?.[field])) {
       add(`${path}.${field}`, page, 'error',
         `Block "${blockType}" is missing required field: ${field}`,
         `block.${blockType}.${field}.required`);
     }
   }
 
-  // Validate block-specific fields
-  if (def.fields) {
-    for (const [fieldName, fieldDef] of Object.entries(def.fields)) {
-      if (fieldDef === undefined) continue;
-      const fieldValue = block[fieldName];
-      if (fieldValue === undefined || fieldValue === null) continue;
+  // Required top-level fields were reported just above, in the block's own
+  // words, so the walk below checks types, nested fields and unknown keys.
+  validateFields(block, def.fields || {}, path, page, walk, {
+    rule: `block.${blockType}`, blockType, depth, skipRequired: true, checkUnknown: false,
+  });
 
-      validateField(fieldValue, fieldDef, `${path}.${fieldName}`, page, findings, add, fieldName);
+  // Unknown top-level keys, at info: carried through, never rendered.
+  const known = new Set([...ENVELOPE_KEYS, ...Object.keys(def.fields || {})]);
+  for (const key of Object.keys(block)) {
+    if (known.has(key) || key === '__error' || wasDerived(block, key)) continue;
+    const alias = aliasTarget(def.fields, key);
+    if (alias && block[alias] === undefined) {
+      add(`${path}.${key}`, page, 'info', `Spelled "${key}", read as "${alias}".`, `block.${blockType}.${key}.alias`);
+    } else {
+      add(`${path}.${key}`, page, 'info', `Unknown field: ${key}`, `block.${blockType}.${key}.unknown`);
     }
   }
 
-  // Check for unknown fields (info level)
-  const knownFields = new Set(['type', 'id', 'title', 'note', 'width', 'tone', 'collapsed', 'extra', 'evidence']);
-  if (def.fields) {
-    for (const f of Object.keys(def.fields)) {
-      knownFields.add(f);
-    }
-  }
-
-  for (const [key] of Object.entries(block)) {
-    if (!knownFields.has(key) && key !== '__error') {
-      add(`${path}.${key}`, page, 'info',
-        `Unknown field: ${key}`,
-        `block.${blockType}.${key}.unknown`);
-    }
-  }
-
-  // Run lint rules
   if (Array.isArray(def.lint)) {
-    const lintCtx = {
-      model: findings.$model || null,
-      page,
-      countOfType,
-      path,
-    };
-
-    for (let i = 0; i < def.lint.length; i++) {
-      const rule = def.lint[i];
+    const lintCtx = { model: null, page, countOfType: walk.countOfType, path };
+    def.lint.forEach((rule, i) => {
       try {
-        const addFinding = (level, message) => {
-          add(path, page, level, message, `block.${blockType}.lint[${i}]`);
-        };
-        rule(block, addFinding, lintCtx);
+        rule(block, (level, message) => add(path, page, level, message, `block.${blockType}.lint[${i}]`), lintCtx);
       } catch (e) {
-        add(path, page, 'error',
-          `Lint rule ${i} threw: ${String(e?.message || e)}`,
-          `block.${blockType}.lint[${i}].error`);
+        add(path, page, 'error', `Lint rule ${i} threw: ${String(e?.message || e)}`, `block.${blockType}.lint[${i}].error`);
+      }
+    });
+  }
+}
+
+/**
+ * Check every declared field of `obj` against its descriptor.
+ *
+ * opts.rule          the rule id prefix, for example "block.steps.items"
+ * opts.skipRequired  the caller already reported missing required fields
+ * opts.checkUnknown  report keys the descriptor does not declare, at info
+ * opts.alsoKnown     declared keys the caller walks itself (a page's blocks)
+ */
+function validateFields(obj, fields, path, page, walk, opts = {}) {
+  const { add } = walk;
+
+  for (const [name, fieldDef] of Object.entries(fields)) {
+    if (!fieldDef) continue;
+    const value = obj[name];
+
+    if (isMissing(value)) {
+      if (fieldDef.required && !opts.skipRequired && !aliasPresent(obj, fieldDef)) {
+        add(`${path}.${name}`, page, 'error', `Missing required field: ${name}`, `${opts.rule}.${name}.required`);
+      }
+      if (value === undefined || value === null) continue;
+    }
+
+    validateField(value, fieldDef, `${path}.${name}`, page, walk, { ...opts, rule: `${opts.rule}.${name}` });
+  }
+
+  if (opts.checkUnknown && Object.keys(fields).length) {
+    for (const key of Object.keys(obj)) {
+      if (Object.prototype.hasOwnProperty.call(fields, key) || wasDerived(obj, key)) continue;
+      if (opts.alsoKnown && opts.alsoKnown.includes(key)) continue;
+      const alias = aliasTarget(fields, key);
+      if (alias && obj[alias] === undefined) {
+        add(`${path}.${key}`, page, 'info', `Spelled "${key}", read as "${alias}".`, `${opts.rule}.${key}.alias`);
+      } else {
+        add(`${path}.${key}`, page, 'info', `Unknown field: ${key}`, `${opts.rule}.${key}.unknown`);
       }
     }
   }
 }
 
-function validateField(value, fieldDef, path, page, findings, add, fieldName) {
+function validateField(value, fieldDef, path, page, walk, opts) {
+  const { add } = walk;
   if (!fieldDef || !fieldDef.type) return;
-
   const ft = fieldDef.type;
 
-  // Check for newlines in string fields
-  if (ft === 'string' && typeof value === 'string') {
-    if (value.includes('\n')) {
-      add(path, page, 'error', 'String field cannot contain newlines. Use a text field instead.');
+  if (ft === 'string' && typeof value === 'string' && value.includes('\n')) {
+    add(path, page, 'error', 'String field cannot contain newlines. Use a text field instead.');
+    return;
+  }
+
+  // One length check for every string-typed field. The text branch used to
+  // repeat it, so the findings panel listed one over-long field twice.
+  if (fieldDef.maxLen !== undefined && typeof value === 'string' && value.length > fieldDef.maxLen) {
+    add(path, page, 'error',
+      `Too long: ${value.length.toLocaleString('en-US')} characters, over the limit of ${fieldDef.maxLen.toLocaleString('en-US')}.`,
+      `${opts.rule}.maxLen`);
+  }
+
+  switch (ft) {
+    case 'string':
+    case 'text':
+      if (typeof value !== 'string') add(path, page, 'error', `Expected ${ft}, got ${typeName(value)}`);
+      break;
+    case 'integer':
+      if (!Number.isInteger(value)) add(path, page, 'error', `Expected integer, got ${typeName(value)}`);
+      else checkRange(value, fieldDef, path, page, add, 'Integer');
+      break;
+    case 'number':
+      if (typeof value !== 'number' || !Number.isFinite(value)) add(path, page, 'error', `Expected number, got ${typeName(value)}`);
+      else checkRange(value, fieldDef, path, page, add, 'Number');
+      break;
+    case 'boolean':
+      if (typeof value !== 'boolean') add(path, page, 'error', `Expected boolean, got ${typeName(value)}`);
+      break;
+    case 'enum':
+      if (!fieldDef.values || !fieldDef.values.includes(value)) {
+        add(path, page, 'error', `Invalid enum value: ${String(value)}. Allowed: ${fieldDef.values?.join(', ') || '?'}`);
+      }
+      break;
+    case 'url':
+      if (typeof value !== 'string') add(path, page, 'error', `Expected URL string, got ${typeName(value)}`);
+      else if (/^\s*javascript:/i.test(value)) add(path, page, 'error', 'JavaScript URLs are not allowed');
+      else if (!isValidUrl(value)) add(path, page, 'error', `Invalid URL: ${value}`);
+      break;
+    case 'date':
+      if (typeof value !== 'string') add(path, page, 'error', `Expected date string, got ${typeName(value)}`);
+      else if (!isValidDate(value)) add(path, page, 'error', `Invalid date format: ${value}. Use YYYY-MM-DD or ISO instant`);
+      break;
+    case 'array':
+      validateArray(value, fieldDef, path, page, walk, opts);
+      break;
+    case 'object':
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        add(path, page, 'error', `Expected object, got ${typeName(value)}`);
+      } else if (fieldDef.fields) {
+        validateFields(value, fieldDef.fields, path, page, walk, { ...opts, skipRequired: false, checkUnknown: true, alsoKnown: null });
+      }
+      break;
+    default:
+      break; // 'any': deliberately unconstrained
+  }
+}
+
+function validateArray(value, fieldDef, path, page, walk, opts) {
+  const { add } = walk;
+  if (!Array.isArray(value)) {
+    add(path, page, 'error', `Expected array, got ${typeName(value)}`);
+    return;
+  }
+  if (fieldDef.min !== undefined && value.length < fieldDef.min) {
+    add(path, page, 'error', `Array has fewer than ${fieldDef.min} items`);
+  }
+  if (fieldDef.max !== undefined && value.length > fieldDef.max) {
+    add(path, page, 'error', `Array has more than ${fieldDef.max} items`);
+  }
+
+  const of = fieldDef.of;
+  if (of === 'block') {
+    value.forEach((child, i) => {
+      const at = `${path}[${i}]`;
+      // One level of nesting is the layout model. The grid's own lint reports
+      // a grid inside a grid; its children are not walked a second level down.
+      if (opts.depth >= 1 || (child && child.type === 'grid' && opts.blockType === 'grid')) {
+        if (!child || typeof child !== 'object') walk.add(at, page, 'error', 'Block must be an object');
+        return;
+      }
+      validateBlockAt(child, at, page, walk, (opts.depth || 0) + 1);
+    });
+    return;
+  }
+
+  // 'page' items are walked by validate() itself; 'any' is unconstrained.
+  const itemDef = of === 'evidence-item' ? ENVELOPE.evidence.of
+    : (of && typeof of === 'object' && of.type ? of : null);
+  if (!itemDef) return;
+
+  value.forEach((item, i) => {
+    const at = `${path}[${i}]`;
+    if (itemDef.type === 'object' && (isMissing(item) || typeof item !== 'object')) {
+      add(at, page, 'error', `Expected object, got ${typeName(item)}`);
       return;
     }
+    validateField(item, itemDef, at, page, walk, opts);
+  });
+}
+
+function checkRange(value, fieldDef, path, page, add, what) {
+  if (fieldDef.min !== undefined && value < fieldDef.min) add(path, page, 'error', `${what} below minimum ${fieldDef.min}`);
+  if (fieldDef.max !== undefined && value > fieldDef.max) add(path, page, 'error', `${what} above maximum ${fieldDef.max}`);
+}
+
+function isMissing(value) {
+  return value === undefined || value === null || value === '';
+}
+
+/** The field an alternative spelling belongs to, or null. */
+function aliasTarget(fields, key) {
+  for (const [name, def] of Object.entries(fields || {})) {
+    if (def?.accepts?.includes(key)) return name;
   }
+  return null;
+}
 
-  // Check maxLen
-  if (fieldDef.maxLen !== undefined && typeof value === 'string') {
-    if (value.length > fieldDef.maxLen) {
-      add(path, page, 'error',
-        `String exceeds max length of ${fieldDef.maxLen} characters (${value.length} given)`);
-    }
-  }
+/** True when the object carries the field under one of its accepted spellings. */
+function aliasPresent(obj, fieldDef) {
+  return Boolean(obj && fieldDef?.accepts?.some((alt) => !isMissing(obj[alt])));
+}
 
-  // Type validation
-  if (ft === 'string') {
-    if (typeof value !== 'string') {
-      add(path, page, 'error', `Expected string, got ${typeof value}`);
-    }
-  } else if (ft === 'text') {
-    if (typeof value !== 'string') {
-      add(path, page, 'error', `Expected text, got ${typeof value}`);
-    } else if (fieldDef.maxLen && value.length > fieldDef.maxLen) {
-      add(path, page, 'error',
-        `Text exceeds max length of ${fieldDef.maxLen} characters`);
-    }
-  } else if (ft === 'integer') {
-    if (!Number.isInteger(value)) {
-      add(path, page, 'error', `Expected integer, got ${typeof value}`);
-    } else {
-      if (fieldDef.min !== undefined && value < fieldDef.min) {
-        add(path, page, 'error', `Integer below minimum ${fieldDef.min}`);
-      }
-      if (fieldDef.max !== undefined && value > fieldDef.max) {
-        add(path, page, 'error', `Integer above maximum ${fieldDef.max}`);
-      }
-    }
-  } else if (ft === 'number') {
-    if (typeof value !== 'number') {
-      add(path, page, 'error', `Expected number, got ${typeof value}`);
-    } else {
-      if (fieldDef.min !== undefined && value < fieldDef.min) {
-        add(path, page, 'error', `Number below minimum ${fieldDef.min}`);
-      }
-      if (fieldDef.max !== undefined && value > fieldDef.max) {
-        add(path, page, 'error', `Number above maximum ${fieldDef.max}`);
-      }
-    }
-  } else if (ft === 'boolean') {
-    if (typeof value !== 'boolean') {
-      add(path, page, 'error', `Expected boolean, got ${typeof value}`);
-    }
-  } else if (ft === 'enum') {
-    if (!fieldDef.values || !fieldDef.values.includes(value)) {
-      add(path, page, 'error',
-        `Invalid enum value: ${value}. Allowed: ${fieldDef.values?.join(', ') || '?'}`);
-    }
-  } else if (ft === 'url') {
-    if (typeof value !== 'string') {
-      add(path, page, 'error', `Expected URL string, got ${typeof value}`);
-    } else {
-      if (value.startsWith('javascript:')) {
-        add(path, page, 'error', `JavaScript URLs are not allowed`);
-      } else if (!isValidUrl(value)) {
-        add(path, page, 'error', `Invalid URL: ${value}`);
-      }
-    }
-  } else if (ft === 'date') {
-    if (typeof value !== 'string') {
-      add(path, page, 'error', `Expected date string, got ${typeof value}`);
-    } else if (!isValidDate(value)) {
-      add(path, page, 'error', `Invalid date format: ${value}. Use YYYY-MM-DD or ISO instant`);
-    }
-  } else if (ft === 'array') {
-    if (!Array.isArray(value)) {
-      add(path, page, 'error', `Expected array, got ${typeof value}`);
-    } else {
-      if (fieldDef.min !== undefined && value.length < fieldDef.min) {
-        add(path, page, 'error', `Array has fewer than ${fieldDef.min} items`);
-      }
-      if (fieldDef.max !== undefined && value.length > fieldDef.max) {
-        add(path, page, 'error', `Array has more than ${fieldDef.max} items`);
-      }
-
-      // Validate array items
-      if (fieldDef.of) {
-        for (let i = 0; i < value.length; i++) {
-          const item = value[i];
-          const itemPath = `${path}[${i}]`;
-
-          if (typeof fieldDef.of === 'string') {
-            // Block reference like 'block' or 'page'
-            // For now, skip deep validation of nested blocks
-          } else if (typeof fieldDef.of === 'object' && fieldDef.of.type) {
-            validateField(item, fieldDef.of, itemPath, page, findings, add, `item[${i}]`);
-          }
-        }
-      }
-    }
-  } else if (ft === 'object') {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      add(path, page, 'error', `Expected object, got ${typeof value}`);
-    } else if (fieldDef.fields) {
-      // Validate object fields
-      for (const [objFieldName, objFieldDef] of Object.entries(fieldDef.fields)) {
-        if (objFieldDef === undefined) continue;
-        const objValue = value[objFieldName];
-        if (objValue === undefined || objValue === null) continue;
-
-        validateField(objValue, objFieldDef, `${path}.${objFieldName}`, page, findings, add, objFieldName);
-      }
-    }
-  } else if (ft === 'any') {
-    // No constraint
-  }
+function typeName(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
 }
 
 function isValidUrl(str) {
-  if (str.startsWith('javascript:')) return false;
+  if (/^\s*javascript:/i.test(str)) return false;
   if (str.startsWith('data:')) return true;
   if (str.startsWith('http://') || str.startsWith('https://')) {
     try {
@@ -370,71 +369,41 @@ function isValidUrl(str) {
       return false;
     }
   }
+  if (str.startsWith('mailto:') || str.startsWith('#')) return true;
   // Relative paths are valid
-  if (str.startsWith('/') || str.startsWith('./') || /^[^/:?#]+\./.test(str)) {
-    return true;
-  }
-  return false;
+  return str.startsWith('/') || str.startsWith('./') || str.startsWith('../') || /^[^/:?#]+\./.test(str);
 }
 
 function isValidDate(str) {
-  // YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-    return true;
-  }
-  // ISO instant
-  if (/^\d{4}-\d{2}-\d{2}T/.test(str)) {
-    return true;
-  }
-  return false;
+  return /^\d{4}-\d{2}-\d{2}$/.test(str) || /^\d{4}-\d{2}-\d{2}T/.test(str);
 }
 
 function findClosestType(type) {
-  const known = [];
-  for (const b of BLOCKS) {
-    known.push(b.id);
-  }
-
   let closest = null;
   let minDist = Infinity;
-
-  for (const kt of known) {
-    const dist = levenshtein(type, kt);
+  for (const b of BLOCKS) {
+    const dist = levenshtein(type, b.id);
     if (dist < minDist && dist <= 3) {
       minDist = dist;
-      closest = kt;
+      closest = b.id;
     }
   }
-
   return closest;
 }
 
 function levenshtein(a, b) {
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
-
   const matrix = [];
-  for (let i = 0; i <= b.length; i++) {
-    matrix[i] = [i];
-  }
-  for (let j = 0; j <= a.length; j++) {
-    matrix[0][j] = j;
-  }
-
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
   for (let i = 1; i <= b.length; i++) {
     for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1,
-        );
-      }
+      matrix[i][j] = b.charAt(i - 1) === a.charAt(j - 1)
+        ? matrix[i - 1][j - 1]
+        : Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
     }
   }
-
   return matrix[b.length][a.length];
 }
 

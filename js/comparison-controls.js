@@ -33,7 +33,14 @@ export function bindComparisons(root) {
     const value = Math.max(0, Math.min(100, Number(control.value) || 0));
     const wipe = control.dataset.action === 'compare-wipe';
     comparison.style.setProperty(wipe ? '--wipe' : '--fade', wipe ? `${value}%` : String(value / 100));
-    control.setAttribute('aria-valuetext', `${value}%`);
+    // Say what the position means, not only the number. Replacing the initial
+    // "Before on the left, After on the right" with a bare "50%" lost the one
+    // thing a screen reader user needs to know about this control.
+    const left = control.dataset.left || 'Before';
+    const right = control.dataset.right || 'After';
+    control.setAttribute('aria-valuetext', wipe
+      ? `${value}% ${left} on the left, ${100 - value}% ${right} on the right`
+      : `${right} at ${value}% over ${left}`);
   });
 
   function showSide(comparison, side) {

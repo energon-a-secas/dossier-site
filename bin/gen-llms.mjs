@@ -71,12 +71,7 @@ function generateLlmsTxt() {
   lines.push('|------|---------|-----------------|');
 
   for (const block of BLOCKS) {
-    const reqFields = Object.entries(block.fields || {})
-      .filter(([, f]) => f?.required)
-      .map(([name]) => name)
-      .join(', ');
-
-    const row = `| \`${block.id}\` | ${block.summary} | ${reqFields || 'none'} |`;
+    const row = `| \`${block.id}\` | ${block.summary} | ${requiredText(block.fields) || 'none'} |`;
     lines.push(row);
   }
   lines.push('');
@@ -87,6 +82,7 @@ function generateLlmsTxt() {
   lines.push('- Narrative fields (`text`, `note`, `detail`, `excerpt`) are plain strings. Write them normally. Only inline markdown renders: bold, italic, code and links.');
   lines.push('- Set `unit` on every number and `better` on every metric that has a baseline. Without `better` the arrow assumes higher is good, which is wrong for latency and error rates.');
   lines.push('- Nothing is rejected. An unknown block type renders as an error card naming the type, a malformed block renders as an error card in its place, and the rest of the report still renders. Unknown fields are reported once and carried through; put your own fields in `extra` to keep them quiet.');
+  lines.push('- Required fields inside list items are checked like the block\'s own: a `steps` item needs a `title`, a `checklist` item needs a `label` and a `state`. The table above lists them as `items (each: ...)`.');
   lines.push('- Say what you did not do. A skipped or blocked `checklist` item without a `note`, a `fail` in a `scorecard` without a `detail`, and a high `risks` entry without a `mitigation` are all reported. An unexplained gap reads as an oversight rather than a decision.');
   lines.push('');
 
@@ -147,6 +143,21 @@ function generateLlmsTxt() {
   lines.push('');
 
   return lines.join('\n');
+}
+
+/**
+ * "items (each: label, state)" for a list whose items have required fields,
+ * so the table says what the validator checks rather than only the top level.
+ */
+function requiredText(fields) {
+  const parts = [];
+  for (const [name, f] of Object.entries(fields || {})) {
+    const inner = f?.type === 'array' && f.of && typeof f.of === 'object' && f.of.type === 'object'
+      ? Object.entries(f.of.fields || {}).filter(([, sub]) => sub?.required).map(([sub]) => sub)
+      : [];
+    if (f?.required) parts.push(inner.length ? `${name} (each: ${inner.join(', ')})` : name);
+  }
+  return parts.join(', ');
 }
 
 function generateSkillMd() {

@@ -1,8 +1,17 @@
 /** Bounded line comparison, shared by the report and response views. */
 
+/**
+ * Line endings are normalised first. A side pasted from Windows carries CRLF,
+ * and without this every one of its lines differed from the same text with LF
+ * endings, so the comparison marked the whole response as changed.
+ */
+export function splitLines(text) {
+  return String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
+}
+
 export function lineDiff(before, after) {
-  const a = before.split('\n');
-  const b = after.split('\n');
+  const a = splitLines(before);
+  const b = splitLines(after);
   const LIMIT = 400;
   if (a.length > LIMIT || b.length > LIMIT) {
     return { left: null, right: null, added: 0, removed: 0, gaveUp: true };

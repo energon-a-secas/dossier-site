@@ -11,6 +11,7 @@
  */
 
 import { str, text, num, int, bool, url, date, enom, arr, obj, TONES } from './types.js';
+import { HTML_MAX_CHARS } from '../embed-policy.js';
 
 export const COMPARE_MODES = Object.freeze([
   'side',    // two panels, read together
@@ -226,7 +227,7 @@ export const JUDGMENT = [
     },
     sample: {
       type: 'image',
-      src: 'https://example.invalid/429-storm.png',
+      src: "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 80'%3E%3Crect width='240' height='80' fill='%23f4f5f7'/%3E%3Cpath d='M8 72h224' stroke='%23999'/%3E%3Cg fill='%23c2410c'%3E%3Crect x='20' y='66' width='16' height='6'/%3E%3Crect x='48' y='60' width='16' height='12'/%3E%3Crect x='76' y='22' width='16' height='50'/%3E%3Crect x='104' y='12' width='16' height='60'/%3E%3Crect x='132' y='18' width='16' height='54'/%3E%3Crect x='160' y='58' width='16' height='14'/%3E%3Crect x='188' y='64' width='16' height='8'/%3E%3C/g%3E%3C/svg%3E",
       alt: 'A spike of 429 responses between 09:00 and 11:00',
       caption: 'The storm that started the investigation',
     },
@@ -249,7 +250,7 @@ export const JUDGMENT = [
     summary: 'Foreign HTML, rendered sandboxed in its own frame.',
     when: 'You already have an HTML artefact and will not rewrite it as blocks.',
     fields: {
-      html: text({ maxLen: 400000, note: 'Complete HTML, including styles and inline assets. Rendered in an isolated frame; external resources are blocked.' }),
+      html: text({ maxLen: HTML_MAX_CHARS, note: 'Complete HTML, including styles and inline assets, up to 2,000,000 characters. Rendered in an isolated frame; external resources are blocked.' }),
       src: url({
         note: 'A remote URL is not framed: this page\'s policy refuses third-party frames, so the block renders a link and says why. Use "html" for content you want shown inline.',
       }),

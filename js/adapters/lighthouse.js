@@ -4,6 +4,13 @@
  * Reads categories into a metrics block with each score as a percentage,
  * and failed audits into findings.
  *
+ * Levels are the findings block's own words (error, warning, note). This used
+ * to write "warn", which the format does not have, so every opportunity was a
+ * validation error and rendered at the fallback level. The 90 every score is
+ * held against is Lighthouse's "good" threshold, so it is the metric's target,
+ * not a baseline: a baseline is what the number was before, and calling 90
+ * that made the page report a change nobody measured.
+ *
  * Pure, DOM-free.
  */
 
@@ -45,13 +52,13 @@ export function toDossier(source) {
 
   const metrics = [];
   for (const [key, cat] of Object.entries(obj.categories || {})) {
-    if (cat.score !== undefined) {
+    if (typeof cat?.score === 'number' && Number.isFinite(cat.score)) {
       const pct = Math.round(cat.score * 100);
       metrics.push({
-        label: cat.title || key,
+        label: String(cat.title || key).substring(0, 40),
         value: pct,
         unit: '%',
-        baseline: 90,
+        target: 90,
         better: 'higher',
       });
     }
@@ -60,13 +67,15 @@ export function toDossier(source) {
   const failedFindings = [];
   if (obj.audits) {
     for (const [key, audit] of Object.entries(obj.audits)) {
-      if (audit.score !== undefined && audit.score < 1 && audit.details?.type === 'opportunity') {
-        failedFindings.push({
-          rule: key,
-          level: 'warn',
-          message: audit.title || key,
-          path: '',
-        });
+      // A null score is an informative or manual audit, not a failed one.
+      if (typeof audit?.score === 'number' && audit.score < 1 && audit.details?.type === 'opportunity') {
+        const finding = {
+          rule: String(key).substring(0, 80),
+          level: 'warning',
+          message: String(audit.title || key).substring(0, 400),
+        };
+        if (typeof audit.displayValue === 'string' && audit.displayValue) finding.detail = audit.displayValue.substring(0, 1200);
+        failedFindings.push(finding);
       }
     }
   }

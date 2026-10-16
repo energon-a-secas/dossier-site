@@ -15,6 +15,7 @@ import { escHtml } from '../neorgon-dom.js';
 import { bars, line, donut, radar, heatmap, empty } from '../viz.js';
 import { emptyFrame } from './markdown.js';
 import { chartColor, chartLegend, chartValues, groupedBars } from './chart-data.js';
+import { safeDomId } from './ids.js';
 
 /** The kit's right-aligned readout is where a unit belongs. */
 function scaleText(block) {
@@ -31,10 +32,12 @@ function baseOpts(block, extra = {}) {
   return {
     // A stable uid keeps the <defs> ids deterministic, which the tests rely on
     // and which stops two charts on one page sharing a gradient.
-    uid: block.id ? `c-${block.id}` : 'c-chart',
+    // The kit writes the uid into SVG ids raw, so it is reduced to id-safe
+    // characters here rather than trusted.
+    uid: block.id ? `c-${safeDomId(block.id)}` : 'c-chart',
     title: block.title || '',
     scale: scaleText(block),
-    ariaLabel: block.title || `${block.form} chart`,
+    ariaLabel: block.title || `${String(block.form)} chart`,
     width: 640,
     height: 280,
     animate: false,
@@ -157,12 +160,17 @@ function radarChart(block) {
   const series = seriesOf(block);
   if (!axes.length) return emptyFrame('Chart: a radar needs "axes" to name its spokes.');
   if (!series.length) return emptyFrame('Chart: a radar needs at least one series.');
+  // The kit does arithmetic on these and draws the result, so anything that
+  // is not a number becomes 0 here rather than NaN in a points attribute.
   const mapped = series.map((s) => ({
     name: s.label || '',
     color: chartColor(s, series.indexOf(s)),
-    values: s.values,
+    values: Array.isArray(s.values) ? s.values.map((v) => Number(v) || 0) : [],
   }));
-  return radar(axes, mapped, baseOpts(block, { max: block.max }));
+  const named = axes.map((a, i) => (typeof a === 'string'
+    ? { key: a, label: a }
+    : { key: String(a?.key ?? i), label: String(a?.label ?? a?.key ?? `Axis ${i + 1}`) }));
+  return radar(named, mapped, baseOpts(block, { max: block.max }));
 }
 
 /**
@@ -170,7 +178,9 @@ function radarChart(block) {
  * counts made it reserve the gutter and then print nothing in it.
  */
 function heatmapChart(block) {
-  const grid = Array.isArray(block.grid) ? block.grid.filter(Array.isArray) : [];
+  const grid = Array.isArray(block.grid)
+    ? block.grid.filter(Array.isArray).map((row) => row.map((v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v))))
+    : [];
   if (!grid.length) return emptyFrame('Chart: a heatmap reads "grid", a list of rows of numbers.');
   const width = Math.max(...grid.map((r) => r.length));
   const opts = baseOpts(block, { max: block.max });

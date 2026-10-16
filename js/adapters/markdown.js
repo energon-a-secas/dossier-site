@@ -1,12 +1,31 @@
 /**
  * Markdown adapter: convert Markdown to Dossier blocks
  *
- * Headings become pages and heading blocks, paragraphs become prose,
- * fenced code becomes code, tables become table, blockquotes become callout.
- * Front matter fills the meta.
+ * A level 1 heading starts a page, deeper headings become heading blocks
+ * (level 2, or 3 for anything deeper, since the format has no h4), paragraphs
+ * become prose, fenced code becomes code, tables become table, blockquotes
+ * become callout. Front matter fills the meta.
+ *
+ * Every block is written in the registry's own field names. This adapter used
+ * to write `title` on a heading and `note` on a callout, which the renderers
+ * never read, so every imported heading and blockquote lost its words and the
+ * validator reported four errors on a plain Markdown file.
+ *
+ * Front matter is read through the registry's META, not copied whole. Keys
+ * such as `author` and `date` used to land on the document, where the
+ * validator said nothing and the published schema (additionalProperties
+ * false) refused the file. Now a declared key is copied when its value fits
+ * the field, `author` fills `owner`, and everything else is named in one info
+ * finding so the reader knows what was left out.
  *
  * Pure, DOM-free.
  */
+
+import { META, KINDS, STATUSES } from '../registry/types.js';
+
+/** Front-matter keys copied as one-line strings, with the field's own limit. */
+const STRING_KEYS = ['title', 'subtitle', 'owner'];
+const ENUM_KEYS = { kind: KINDS, status: STATUSES, chrome: META.chrome.values || [] };
 
 /**
  * @param {string} source
@@ -20,23 +39,25 @@ export function toDossier(source) {
   }
 
   let frontMatter = '';
-  let body = source;
+  // Windows line endings would leave a carriage return on every fenced code
+  // line and stop the front matter from matching.
+  const text = source.replace(/\r\n?/g, '\n');
+  let body = text;
 
-  const fmMatch = source.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const fmMatch = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (fmMatch) {
     frontMatter = fmMatch[1];
     body = fmMatch[2];
   }
 
-  let meta = {};
-  if (frontMatter) {
-    meta = parseYamlFront(frontMatter);
-  }
+  const meta = frontMatter ? metaFromFrontMatter(parseYamlFront(frontMatter), findings) : {};
 
+  // `version` is the format's version, always 1. A front-matter version is
+  // the document's own revision and is not copied over it.
   const doc = {
-    version: meta.version || 1,
-    title: meta.title || 'Document',
+    version: 1,
     ...meta,
+    title: meta.title || 'Document',
     pages: [],
   };
 
@@ -53,10 +74,11 @@ export function toDossier(source) {
         currentBlocks = [];
       }
       currentPage = { title: block.text, blocks: [] };
-    } else if (block.type === 'heading' && block.level === 2) {
+    } else if (block.type === 'heading') {
       currentBlocks.push({
         type: 'heading',
-        title: block.text,
+        level: block.level === 2 ? 2 : 3,
+        text: block.text,
       });
     } else {
       currentBlocks.push(block);
@@ -81,6 +103,60 @@ export function toDossier(source) {
   return { document, findings };
 }
 
+/**
+ * The META fields front matter can fill, each only when its value fits.
+ * Anything else is reported once, by name, at info level.
+ */
+function metaFromFrontMatter(front, findings) {
+  const meta = {};
+  const used = new Set();
+  const line = (value) => (typeof value === 'string' || typeof value === 'number')
+    ? String(value).replace(/\s+/g, ' ').trim() : '';
+
+  for (const key of STRING_KEYS) {
+    const value = line(front[key]);
+    if (!value) continue;
+    meta[key] = value.slice(0, META[key].maxLen || value.length);
+    used.add(key);
+  }
+  if (!meta.owner && line(front.author)) {
+    meta.owner = line(front.author).slice(0, META.owner.maxLen || 80);
+    used.add('author');
+  }
+  for (const [key, values] of Object.entries(ENUM_KEYS)) {
+    if (values.includes(front[key])) {
+      meta[key] = front[key];
+      used.add(key);
+    }
+  }
+  if (typeof front.tags === 'string' && front.tags.trim()) {
+    const tags = front.tags.replace(/^\[|\]$/g, '').split(',')
+      .map((t) => unquote(t.trim())).filter(Boolean)
+      .slice(0, META.tags.max || 12);
+    if (tags.length) {
+      meta.tags = tags;
+      used.add('tags');
+    }
+  }
+
+  const left = Object.keys(front).filter((key) => !used.has(key) && key !== 'version');
+  if (left.length) {
+    findings.push({
+      level: 'info',
+      message: `Front matter left out, because Dossier has no such field or the value does not fit it: ${left.join(', ')}.`,
+      path: 'dossier',
+      page: null,
+      rule: 'import.markdown.frontmatter',
+    });
+  }
+  return meta;
+}
+
+function unquote(value) {
+  const m = /^(["'])([\s\S]*)\1$/.exec(value);
+  return m ? m[2] : value;
+}
+
 function parseYamlFront(front) {
   const obj = {};
   const lines = front.split('\n');
@@ -89,11 +165,15 @@ function parseYamlFront(front) {
     const match = line.match(/^([^:]+):\s*(.*)$/);
     if (match) {
       const key = match[1].trim();
-      let value = match[2].trim();
+      const raw = match[2].trim();
+      let value = unquote(raw);
 
-      if (value === 'true') value = true;
-      if (value === 'false') value = false;
-      if (/^\d+$/.test(value)) value = parseInt(value, 10);
+      // A quoted value stays a string, as it does in YAML.
+      if (value === raw) {
+        if (value === 'true') value = true;
+        else if (value === 'false') value = false;
+        else if (/^\d+$/.test(value)) value = parseInt(value, 10);
+      }
 
       obj[key] = value;
     }
@@ -129,11 +209,9 @@ function parseMarkdown(text) {
         i++;
       }
       i++;
-      blocks.push({
-        type: 'code',
-        source: code.join('\n'),
-        language: lang || undefined,
-      });
+      const block = { type: 'code', source: code.join('\n') };
+      if (lang) block.language = lang;
+      blocks.push(block);
     } else if (line.startsWith('|')) {
       const tableLines = [];
       while (i < lines.length && lines[i].startsWith('|')) {
@@ -150,7 +228,7 @@ function parseMarkdown(text) {
       }
       blocks.push({
         type: 'callout',
-        note: quoteLines.join('\n'),
+        text: quoteLines.join('\n'),
       });
     } else {
       const para = [];

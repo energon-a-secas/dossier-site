@@ -344,3 +344,49 @@ describe('derive', () => {
     assert.strictEqual(item.deltaPct, undefined);
   });
 });
+
+// ── Page ids are routes ──────────────────────────────────────────────────────
+// `#/<page id>` opens a page, so two pages with one id made the second
+// unreachable, and a title with no Latin letters produced no route at all.
+
+describe('derived page ids', () => {
+  const pagesOf = (...titles) => ({
+    dossier: { version: 1, title: 'T', pages: titles.map((title) => ({ title, blocks: [{ type: 'prose', text: 'x' }] })) },
+  });
+
+  test('a repeated title gets a numbered id', () => {
+    const model = pagesOf('Notes', 'Notes', 'Notes');
+    derive(model);
+    assert.deepStrictEqual(model.dossier.pages.map((p) => p.id), ['notes', 'notes-2', 'notes-3']);
+  });
+
+  test('a title with no Latin letters or digits gets page-<n>', () => {
+    const model = pagesOf('Overview', '日本語', '!!!');
+    derive(model);
+    assert.deepStrictEqual(model.dossier.pages.map((p) => p.id), ['overview', 'page-2', 'page-3']);
+  });
+
+  test('accents fold to their letters rather than vanishing', () => {
+    const model = pagesOf('Résumé des tâches');
+    derive(model);
+    assert.strictEqual(model.dossier.pages[0].id, 'resume-des-taches');
+  });
+
+  test('ids stay route-safe and never start with ~, which the router keeps', () => {
+    const model = pagesOf('~compare', '#/~compare', 'A <b>bold</b> "title"', '  ');
+    derive(model);
+    for (const { id } of model.dossier.pages) {
+      assert.match(id, /^[a-z0-9_-]+$/, `"${id}" is not route-safe`);
+      assert.ok(!id.startsWith('~'));
+    }
+    assert.strictEqual(new Set(model.dossier.pages.map((p) => p.id)).size, 4, 'two pages share an id');
+  });
+
+  test('a derived id never collides with one the author supplied', () => {
+    const model = pagesOf('Notes', 'Other');
+    model.dossier.pages[1].id = 'notes';
+    derive(model);
+    assert.strictEqual(model.dossier.pages[1].id, 'notes');
+    assert.strictEqual(model.dossier.pages[0].id, 'notes-2');
+  });
+});

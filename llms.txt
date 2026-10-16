@@ -45,25 +45,25 @@
 | `prose` | A paragraph or two. Inline markdown only, never a block element. | text |
 | `callout` | One boxed sentence the reader must not scroll past. | text |
 | `quote` | Someone else's words, attributed. | text |
-| `steps` | A numbered procedure, in order. | items |
-| `kv` | A label and value list. The facts panel. | items |
+| `steps` | A numbered procedure, in order. | items (each: title) |
+| `kv` | A label and value list. The facts panel. | items (each: label, value) |
 | `grid` | Lays its child blocks side by side. The only container. | blocks |
-| `metrics` | A row of headline numbers, each with its baseline and a derived delta. | items |
-| `chart` | Bars, lines, areas, a donut, a radar or a heatmap over stated series. | form, series |
+| `metrics` | A row of headline numbers, each with its baseline and a derived delta. | items (each: label, value) |
+| `chart` | Bars, lines, areas, a donut, a radar or a heatmap over stated series. | form, series (each: values) |
 | `gauge` | One value against a range, as a ring or a banded meter. | value |
-| `scorecard` | Criteria with a verdict each. Pass, fail, partial. | criteria |
-| `table` | Rows and columns, sortable, with derived totals. | columns, rows |
-| `files` | The paths that changed, with churn per path and a derived total. | items |
+| `scorecard` | Criteria with a verdict each. Pass, fail, partial. | criteria (each: label, verdict) |
+| `table` | Rows and columns, sortable, with derived totals. | columns (each: label), rows |
+| `files` | The paths that changed, with churn per path and a derived total. | items (each: path) |
 | `diff` | A unified patch, or a before and after of one file. | none |
 | `code` | A snippet, highlighted, with optional emphasised lines. | source |
 | `log` | Captured output, folded by default, with ANSI colour preserved. | source |
-| `checklist` | What was done, what was not, and why not. | items |
-| `timeline` | What happened when, in order, with a tone per entry. | items |
-| `findings` | Issues anchored to a file and a line, grouped by level. | items |
+| `checklist` | What was done, what was not, and why not. | items (each: label, state) |
+| `timeline` | What happened when, in order, with a tone per entry. | items (each: at, label) |
+| `findings` | Issues anchored to a file and a line, grouped by level. | items (each: message, level) |
 | `tests` | A test run: counts, duration and the failures in full. | none |
 | `compare` | Responses, execution results or a before-and-after change, read together. | kind, left, right |
-| `risks` | What could still go wrong, how bad, and what is in place. | items |
-| `actions` | What happens next, who owns it, and whether it is done. | items |
+| `risks` | What could still go wrong, how bad, and what is in place. | items (each: title, severity) |
+| `actions` | What happens next, who owns it, and whether it is done. | items (each: label, state) |
 | `decision` | The context, the choice, and what it costs. An ADR in one block. | context, decision, consequences |
 | `image` | A screenshot or a diagram, with a caption. | src, alt |
 | `embed` | Foreign HTML, rendered sandboxed in its own frame. | none |
@@ -75,6 +75,7 @@
 - Narrative fields (`text`, `note`, `detail`, `excerpt`) are plain strings. Write them normally. Only inline markdown renders: bold, italic, code and links.
 - Set `unit` on every number and `better` on every metric that has a baseline. Without `better` the arrow assumes higher is good, which is wrong for latency and error rates.
 - Nothing is rejected. An unknown block type renders as an error card naming the type, a malformed block renders as an error card in its place, and the rest of the report still renders. Unknown fields are reported once and carried through; put your own fields in `extra` to keep them quiet.
+- Required fields inside list items are checked like the block's own: a `steps` item needs a `title`, a `checklist` item needs a `label` and a `state`. The table above lists them as `items (each: ...)`.
 - Say what you did not do. A skipped or blocked `checklist` item without a `note`, a `fail` in a `scorecard` without a `detail`, and a high `risks` entry without a `mitigation` are all reported. An unexplained gap reads as an oversight rather than a decision.
 
 ## Evidence, which is the point
