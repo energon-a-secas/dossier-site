@@ -1,4 +1,4 @@
-/** Appearance and complete HTML artifacts, including isolation and offline use. */
+/** Display options, the header mark, and complete HTML artifacts, including isolation and offline use. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
@@ -24,6 +24,18 @@ async function exportHtml(target) {
   });
 }
 
+/** Choose a theme in the Display dialog, the way a reader does. */
+async function chooseTheme(target, label) {
+  const dialog = target.locator('#displayDialog');
+  const menu = target.locator('.header-overflow-toggle');
+  if (await menu.isVisible()) await menu.click();
+  await target.locator('#displayOptions').click();
+  await dialog.waitFor({ state: 'visible' });
+  await dialog.getByRole('radio', { name: label, exact: true }).check();
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+}
+
 async function checkContrast(target) {
   const ratio = await target.evaluate(() => {
     const canvas = document.createElement('canvas');
@@ -46,24 +58,48 @@ async function checkContrast(target) {
 
 try {
   await page.goto(`${base}/?check=appearance`, { waitUntil: 'networkidle' });
+  // The page's one mark is the Header Kit's, painted from this site's logo.svg.
+  assert.equal(await page.locator('.header-bar .header-logo-mark').isVisible(), true);
+  assert.match(await page.locator('.header-bar .header-logo-mark').evaluate((el) => getComputedStyle(el).maskImage), /logo\.svg/);
+  assert.equal(await page.locator('.ds-logo, #toggleAppearance').count(), 0, 'The old toolbar logo or Dark mode button is back');
+  await page.locator('#welcomeExamples [data-file="responses.json"]').click();
   await page.locator('.report-title').waitFor();
+  // System is the default, and follows the operating system.
   assert.equal(await page.locator('html').getAttribute('data-appearance'), 'dark');
-  assert.equal(await page.getByRole('button', { name: 'Dark mode', exact: true }).getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.locator('.ds-logo').isVisible(), true);
-  assert.match(await page.locator('.ds-logo').evaluate((el) => getComputedStyle(el).maskImage), /logo\.svg/);
+  await page.locator('#displayOptions').click();
+  assert.equal(await page.locator('#displayDialog').getByRole('radio', { name: 'System', exact: true }).isChecked(), true);
+  await page.locator('#displayDialog').getByRole('button', { name: 'Close', exact: true }).click();
   await checkContrast(page);
   await page.screenshot({ path: '.verify/appearance-dark.png', fullPage: true });
-  await page.getByRole('button', { name: 'Dark mode', exact: true }).click();
+  await chooseTheme(page, 'Light');
+  assert.equal(await page.locator('html').getAttribute('data-appearance'), 'light');
   await checkContrast(page);
+  // Reopened, the dialog starts on the choice in effect, so Space cannot
+  // quietly switch a reader back to System; Close returns focus to Aa.
+  await page.locator('#displayOptions').click();
+  assert.equal(await page.locator('#displayDialog').getByRole('radio', { name: 'Light', exact: true }).evaluate((el) => el === document.activeElement), true, 'Display options did not start on the checked theme');
+  await page.locator('#displayDialog').getByRole('button', { name: 'Close', exact: true }).click();
+  assert.equal(await page.locator('#displayOptions').evaluate((el) => el === document.activeElement), true, 'Focus did not return to Display options');
   await page.reload({ waitUntil: 'networkidle' });
   assert.equal(await page.locator('html').getAttribute('data-appearance'), 'light', 'Explicit light choice was lost');
+  await page.locator('#welcomeExamples [data-file="responses.json"]').click();
+  await page.locator('.report-title').waitFor();
   await page.screenshot({ path: '.verify/appearance-light.png', fullPage: true });
-  await page.getByRole('button', { name: 'Dark mode', exact: true }).click();
+  await chooseTheme(page, 'Dark');
   await page.emulateMedia({ colorScheme: 'light' });
   assert.equal(await page.locator('html').getAttribute('data-appearance'), 'dark', 'OS preference overrode the saved choice');
+  await chooseTheme(page, 'System');
+  assert.equal(await page.locator('html').getAttribute('data-appearance'), 'light', 'System did not follow the operating system');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  // The media query's change event arrives on a later task than emulateMedia.
+  await page.waitForFunction(() => document.documentElement.dataset.appearance === 'dark', null, { timeout: 3000 })
+    .catch(() => assert.fail('System did not follow a change of the operating system'));
+  await page.emulateMedia({ colorScheme: 'light' });
+  await chooseTheme(page, 'Dark');
+  assert.equal(await page.locator('html').getAttribute('data-appearance'), 'dark');
   await fs.writeFile('.verify/dark-report.html', await exportHtml(page));
 
-  await page.getByRole('button', { name: 'Open report', exact: true }).click();
+  await page.locator('#openReport').click();
   await page.locator('#importFile').setInputFiles('fixtures/foreign/presentation.html');
   await page.waitForFunction(() => document.getElementById('importDetected').textContent.startsWith('HTML report.'));
   await page.getByRole('button', { name: 'Open it', exact: true }).click();
@@ -127,16 +163,32 @@ try {
   }, source);
   await page.waitForFunction(async () => (await (await import('/js/store.js')).listReports()).length === 2);
   await page.frameLocator('#stage iframe').locator('body[data-ready="true"]').waitFor();
-  await page.getByRole('button', { name: 'Open report', exact: true }).click();
+  await page.locator('#openReport').click();
   await page.locator('#importText').fill('# A Markdown report\n\nA preserved paragraph.');
   await page.getByRole('button', { name: 'Open it', exact: true }).click();
   await page.locator('.block-prose').filter({ hasText: 'A preserved paragraph.' }).waitFor();
 
   for (const width of [390, 768, 1024]) {
     await page.setViewportSize({ width, height: 844 });
+    // The kit moves controls into its menu from a media query change event,
+    // which lands on a later task than the resize. Read nothing until the
+    // menu matches the width: hidden above 700 px, shown at or below it.
+    await page.waitForFunction((w) => {
+      const overflow = document.querySelector('.header-overflow');
+      return !overflow || overflow.hidden === (w > 700);
+    }, width, { timeout: 3000 }).catch(() => assert.fail(`${width}px: the header menu never settled`));
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `${width}px viewport overflows`);
-    assert.equal(await page.locator('.ds-logo').isVisible(), true);
-    assert.equal(await page.getByRole('button', { name: 'Dark mode', exact: true }).isVisible(), true);
+    assert.equal(await page.locator('.header-bar .header-logo-mark').isVisible(), true);
+    const bars = await page.evaluate(() => [...document.querySelectorAll('.header-bar')].filter((el) => el.getClientRects().length).length);
+    assert.equal(bars, 1, `${width}px shows ${bars} header bars`);
+    // Display options stay reachable: in the bar, or in the kit's menu on a phone.
+    const phone = width <= 700;
+    if (phone) await page.locator('.header-overflow-toggle').click();
+    assert.equal(await page.locator('#displayOptions').isVisible(), true, `${width}px hides Display options`);
+    if (phone) {
+      await page.keyboard.press('Escape');
+      await page.locator('#displayOptions').waitFor({ state: 'hidden' });
+    }
   }
   await page.screenshot({ path: '.verify/appearance-tablet.png', fullPage: true });
   assert.deepEqual(errors, [], 'Page raised JavaScript errors');

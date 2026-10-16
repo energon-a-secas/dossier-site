@@ -3,19 +3,103 @@
  *
  * Every entry point goes through here: the editor on a keystroke, a dropped
  * file, a template, a share link, an adapter. One path means the findings
- * panel, the outline and the claim count cannot be computed from a different
- * document than the one on screen.
+ * panel and the outline cannot be computed from a different document than the
+ * one on screen.
  *
  * The rule that shapes this file: a parse failure is never destructive. The
  * last model that parsed stays on screen, dimmed, with the error beside it.
  * In a live editing tool that is the most travelled error path there is, and
  * replacing the reader's report with a red message on every mistyped bracket
  * is the behaviour this avoids.
+ *
+ * Two shapes leave this module. `state.model` is the derived model the
+ * renderer reads: page ids, block ids, deltas, totals. `state.document` is the
+ * authored document, which is what gets saved, shared, exported and shown in
+ * the editor. Saving the derived model made every reopen strip the derived
+ * fields again, with one warning each.
  */
 
 import { parse } from './parse.js';
-import { validate, claimAudit } from './validate.js';
+import { validate } from './validate.js';
+import { wasDerived, markDerived } from './derive.js';
 import { renderReport, outline, reportOf } from './render/index.js';
+import { routeFor } from './router.js';
+
+// ── Authored versus derived ──────────────────────────────────────────────────
+
+/**
+ * The document as an author wrote it: a plain deep copy with every field that
+ * js/derive.js computed left out. Accepts a derived model or a plain document;
+ * a plain document comes back as an equal copy.
+ *
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+export function authored(value) {
+  if (Array.isArray(value)) return value.map(authored);
+  if (value === null || typeof value !== 'object') return value;
+  const out = {};
+  for (const key of Object.keys(value)) {
+    if (wasDerived(value, key)) continue;
+    const child = value[key];
+    // JSON drops undefined anyway. Dropping it here keeps a cleared form
+    // field from surviving as a key in IndexedDB.
+    if (child === undefined) continue;
+    out[key] = authored(child);
+  }
+  return out;
+}
+
+/**
+ * Copy the derived markers from the model onto an edited copy of it.
+ *
+ * The form editors build the next document with object spreads, and a spread
+ * copies enumerable fields only. The derived page id survives the copy and
+ * its marker does not, so `authored()` would keep the id and the next parse
+ * would warn that the author supplied it. This walks both trees in step and
+ * marks a field derived when the reference marked it and the value is
+ * unchanged. A value the author edited stays authored.
+ *
+ * @param {object} next the edited document
+ * @param {object} reference the model it was edited from
+ * @returns {object} next, marked in place
+ */
+export function carryDerivedMarks(next, reference) {
+  if (!next || !reference || typeof next !== 'object' || typeof reference !== 'object') return next;
+  if (next === reference) return next;
+  if (Array.isArray(next)) {
+    if (Array.isArray(reference)) next.forEach((item, i) => carryDerivedMarks(item, reference[i]));
+    return next;
+  }
+  for (const field of Array.isArray(reference.__derived) ? reference.__derived : []) {
+    if (!(field in next) || wasDerived(next, field)) continue;
+    if (JSON.stringify(next[field]) === JSON.stringify(reference[field])) markDerived(next, field);
+  }
+  for (const key of Object.keys(next)) carryDerivedMarks(next[key], reference[key]);
+  return next;
+}
+
+// ── Into the state ───────────────────────────────────────────────────────────
+
+/**
+ * Put a model that parsed into the state. Every successful path ends here.
+ *
+ * @param {object} state
+ * @param {{model: object, findings: Array, text?: string, document?: object}} parsed
+ */
+export function commitModel(state, { model, findings, text, document }) {
+  if (typeof text === 'string') state.sourceText = text;
+  state.fatal = null;
+  state.model = model;
+  state.lastGood = model;
+  state.document = document || authored(model);
+  state.findings = findings || [];
+
+  const pages = reportOf(model)?.pages || [];
+  if (!state.page || !pages.some((p) => p.id === state.page)) {
+    state.page = pages[0]?.id || null;
+  }
+}
 
 /**
  * Parse text into the state, without rendering.
@@ -37,16 +121,10 @@ export function applyText(state, text) {
     return { ok: false, fatal: state.fatal };
   }
 
-  state.fatal = null;
-  state.model = result.model;
-  state.lastGood = result.model;
-  state.document = result.model;
-  state.findings = [...(result.findings || []), ...validate(result.model)];
-
-  const pages = reportOf(result.model)?.pages || [];
-  if (!state.page || !pages.some((p) => p.id === state.page)) {
-    state.page = pages[0]?.id || null;
-  }
+  commitModel(state, {
+    model: result.model,
+    findings: [...(result.findings || []), ...validate(result.model)],
+  });
   return { ok: true, fatal: null };
 }
 
@@ -67,25 +145,38 @@ export function applyParsed(state, result, text) {
     return { ok: false, fatal: state.fatal };
   }
 
-  state.fatal = result.fatal || null;
+  // With a fatal error the editor hands over its last good model, which stays
+  // on screen dimmed while the error is shown.
   if (result.model) {
-    state.model = result.model;
-    state.lastGood = result.model;
-    state.document = result.model;
+    commitModel(state, {
+      model: result.model,
+      findings: [...(result.findings || []), ...validate(result.model)],
+    });
+  } else if (state.model) {
+    state.findings = [...(result.findings || []), ...validate(state.model)];
   }
-  state.findings = [...(result.findings || []), ...validate(state.model)];
-
-  const pages = reportOf(state.model)?.pages || [];
-  if (!state.page || !pages.some((p) => p.id === state.page)) {
-    state.page = pages[0]?.id || null;
-  }
+  state.fatal = result.fatal || null;
   return { ok: !state.fatal, fatal: state.fatal };
 }
 
-/** The same, for a document that is already an object. */
+/**
+ * The same, for a document that is already an object. The object may be a
+ * derived model (a form edit, an inserted block): only its authored fields go
+ * into the source text, so the editor never shows a derived id.
+ */
 export function applyDocument(state, document) {
-  return applyText(state, JSON.stringify(document, null, 2));
+  return applyText(state, JSON.stringify(authored(document), null, 2));
 }
+
+// ── Drawing ──────────────────────────────────────────────────────────────────
+
+/**
+ * The report title's heading level on the page. The Header Kit bar carries
+ * the site name as the page's h1 (its markup contract and its styles are keyed
+ * on that h1), so the report title on screen is an h2. Exported files keep the
+ * title as their h1.
+ */
+export const STAGE_TITLE_LEVEL = 2;
 
 /**
  * Draw the current state. Separate from parsing so the two can be debounced
@@ -98,18 +189,19 @@ export function rerender(state, els) {
 
   stage.setAttribute('aria-busy', 'true');
   for (const control of document.querySelectorAll('[data-needs-report]')) control.disabled = !model;
-  const origin = document.getElementById('reportOrigin');
-  if (origin) origin.textContent = state.isExample ? 'Example report · illustrative data' : state.reportId ? 'Saved in this browser' : state.fromUrl ? 'Shared report' : 'Your report';
+  updateReportBar(state, model);
 
   if (!model) {
     stage.replaceChildren();
     document.body.classList.add('is-empty');
     stage.setAttribute('aria-busy', 'false');
+    if (els.outline) els.outline.replaceChildren();
+    if (els.findingsCount) updateFindingCount(state, els.findingsCount);
     return;
   }
 
   document.body.classList.remove('is-empty');
-  renderReport(model, stage, { page: state.page, interactive: true });
+  renderReport(model, stage, { page: state.page, interactive: true, titleLevel: STAGE_TITLE_LEVEL });
 
   // Dimmed while the source does not parse, so it is obvious that what is on
   // screen is the last good version rather than the current text.
@@ -120,6 +212,12 @@ export function rerender(state, els) {
   if (els.findingsCount) updateFindingCount(state, els.findingsCount);
 }
 
+/**
+ * Pages link to their route. Headings scroll within the page through the
+ * `outline-heading` action: a bare `#<block id>` href replaced the page route,
+ * so a reload after clicking a heading reopened page one. The href still names
+ * the page, so copying the link or opening it in a new tab lands somewhere real.
+ */
 function renderOutline(state, host) {
   const model = state.model || state.lastGood;
   host.replaceChildren();
@@ -131,7 +229,7 @@ function renderOutline(state, host) {
   for (const page of pages) {
     const li = document.createElement('li');
     const link = document.createElement('a');
-    link.href = `#/${encodeURIComponent(page.id)}`;
+    link.href = routeFor({ page: page.id });
     link.textContent = page.title || 'Untitled page';
     link.className = 'ds-outline__page';
     if (page.id === state.page) link.setAttribute('aria-current', 'page');
@@ -140,9 +238,12 @@ function renderOutline(state, host) {
     if (page.id === state.page && page.headings && page.headings.length) {
       const sub = document.createElement('ul');
       for (const heading of page.headings) {
+        if (!heading.id) continue;
         const subLi = document.createElement('li');
         const subLink = document.createElement('a');
-        subLink.href = `#${heading.id || ''}`;
+        subLink.href = routeFor({ page: page.id });
+        subLink.dataset.action = 'outline-heading';
+        subLink.dataset.blockId = heading.id;
         subLink.textContent = heading.text || '';
         subLink.className = 'ds-outline__heading';
         subLi.appendChild(subLink);
@@ -156,23 +257,39 @@ function renderOutline(state, host) {
 }
 
 /**
- * The count a reader actually needs: how many findings, and how many claims
- * have nothing behind them. The second number is the product's spine.
+ * Where the open report came from, and how many pages it has. The report bar
+ * replaced the old context bar above the report.
  */
-function updateFindingCount(state, el) {
-  const serious = state.findings.filter((f) => f.level === 'error' || f.level === 'warn');
-  el.textContent = String(serious.length);
-  el.hidden = serious.length === 0;
-  el.classList.toggle('is-error', state.findings.some((f) => f.level === 'error'));
+export function updateReportBar(state, model = state.model || state.lastGood) {
+  const origin = document.getElementById('reportOrigin');
+  if (origin) origin.textContent = originText(state, model);
+  const pages = document.getElementById('reportPages');
+  if (pages) {
+    const count = (reportOf(model)?.pages || []).length;
+    pages.textContent = count ? `${count} page${count === 1 ? '' : 's'}` : '';
+  }
 }
 
-/** The claim summary, for the header and for anything else that asks. */
-export function claims(state) {
-  const model = state.model || state.lastGood;
-  if (!model) return null;
-  try {
-    return claimAudit(model);
-  } catch {
-    return null;
-  }
+export function originText(state, model = state.model || state.lastGood) {
+  if (!model) return 'Nothing open';
+  if (state.isExample) return 'Example report · illustrative data';
+  if (state.reportId) return 'Saved in this browser';
+  if (state.fromUrl) return 'Opened from a link';
+  return 'Not saved yet';
+}
+
+/**
+ * How many findings need a look: errors and warnings, not notes. Said in
+ * words ("1 error, 2 warnings"), so the badge does not depend on its colour.
+ */
+function updateFindingCount(state, el) {
+  const errors = state.findings.filter((f) => f.level === 'error').length;
+  const warnings = state.findings.filter((f) => f.level === 'warn').length;
+  const words = [
+    errors ? `${errors} error${errors === 1 ? '' : 's'}` : null,
+    warnings ? `${warnings} warning${warnings === 1 ? '' : 's'}` : null,
+  ].filter(Boolean);
+  el.textContent = words.join(', ');
+  el.hidden = words.length === 0;
+  el.classList.toggle('is-error', errors > 0);
 }

@@ -2,11 +2,29 @@
  * Findings panel: render validation and parse findings.
  *
  * Grouped by page, then by level (errors first). The count goes in the header
- * so a clipped list still says how much it clipped. Each finding links to its
- * block by path, scrolling it into view and marking it.
+ * so a clipped list still says how much it clipped. A finding whose path
+ * names a place in the report (`findingPlace`) is a button that takes the
+ * reader there (js/source-pane.js gotoFinding); any other finding is text.
  */
 
-import { escHtml } from './neorgon-dom.js';
+/**
+ * Where a finding's path points in the rendered report.
+ *
+ * `dossier.pages[2].blocks[4].field` is a block, `dossier.pages[2]` a page, and
+ * a document field such as `dossier.subtitle` is the report header. A path
+ * with no place (none, the bare document, a parse position) gives null, and
+ * such a finding is not a button: it used to be one that did nothing.
+ *
+ * @param {string|null|undefined} path
+ * @returns {{page: number, block: number|null}|{header: true}|null}
+ */
+export function findingPlace(path) {
+  const text = String(path || '');
+  const m = /pages\[(\d+)\](?:\.blocks\[(\d+)\])?/.exec(text);
+  if (m) return { page: Number(m[1]), block: m[2] === undefined ? null : Number(m[2]) };
+  if (/^dossier\.[A-Za-z]/.test(text)) return { header: true };
+  return null;
+}
 
 /**
  * Create a findings panel.
@@ -96,12 +114,24 @@ export function createFindingsPanel(opts = {}) {
       pageSection.appendChild(levelGroup);
 
       for (const finding of levelFindings) {
-        const findingEl = document.createElement('div');
+        // A finding that names a place goes there, so it is a real button:
+        // it was a clickable div, which a keyboard could not reach.
+        const goes = Boolean(findingPlace(finding.path));
+        const findingEl = document.createElement(goes ? 'button' : 'div');
         findingEl.className = `finding finding-${finding.level}`;
-        if (finding.path) findingEl.style.cursor = 'pointer';
+        if (goes) {
+          findingEl.type = 'button';
+          findingEl.title = 'Show this in the report';
+          // Button defaults that the row style does not reset yet.
+          Object.assign(findingEl.style, {
+            display: 'block', width: '100%', textAlign: 'start', fontFamily: 'inherit', cursor: 'pointer',
+          });
+          findingEl.addEventListener('click', () => onFindingClick(finding));
+        }
 
-        const messageEl = document.createElement('div');
+        const messageEl = document.createElement(goes ? 'span' : 'div');
         messageEl.className = 'finding-message';
+        if (goes) messageEl.style.display = 'block';
         messageEl.textContent = finding.message;
         findingEl.appendChild(messageEl);
 
@@ -110,12 +140,6 @@ export function createFindingsPanel(opts = {}) {
           ruleEl.className = 'finding-rule';
           ruleEl.textContent = finding.rule;
           findingEl.appendChild(ruleEl);
-        }
-
-        if (finding.path) {
-          findingEl.addEventListener('click', () => {
-            onFindingClick(finding);
-          });
         }
 
         levelGroup.appendChild(findingEl);
@@ -127,14 +151,18 @@ export function createFindingsPanel(opts = {}) {
 }
 
 /**
- * Update findings in an existing panel.
+ * Redraw the panel with new findings.
  *
- * @param {HTMLElement} panel the panel element
+ * Returns the new panel, which replaces the old one in the page. Keep the
+ * returned node: the old one is detached, and replacing it again does nothing.
+ *
+ * @param {HTMLElement|null} panel the current panel, or null for none
  * @param {array} findings array of Finding objects
- * @param {function} onFindingClick called when a finding is clicked
+ * @param {function} onFindingClick called when a finding is chosen
+ * @returns {HTMLElement} the new panel
  */
 export function updateFindingsPanel(panel, findings = [], onFindingClick = () => {}) {
   const newPanel = createFindingsPanel({ findings, onFindingClick });
-  panel.replaceWith(newPanel);
+  if (panel && panel.isConnected) panel.replaceWith(newPanel);
   return newPanel;
 }

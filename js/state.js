@@ -21,8 +21,15 @@ export const state = {
   model: null,
   /** The last model that parsed cleanly, kept so an error is never destructive. */
   lastGood: null,
-  /** The document as authored, which is what gets saved and shared. */
+  /**
+   * The document as authored: `authored(model)` from js/pipeline.js, with
+   * every derived field left out. This is what gets saved, shared and exported.
+   */
   document: null,
+  /** The text the editor shows, JSON or YAML. */
+  sourceText: '',
+  /** Which view the route names: 'reports' or 'compare' (js/router.js). */
+  view: 'reports',
   /** The id of the record in js/store.js, or null for an unsaved report. */
   reportId: null,
   /** Which page of the report is on screen. */
@@ -48,8 +55,10 @@ export function loadSaved(s) {
     sourceTab: SOURCE_TABS.includes(src.sourceTab) ? src.sourceTab : 'form',
     showFindings: src.showFindings === true,
     lastReportId: typeof src.lastReportId === 'string' ? src.lastReportId : null,
-    seenWelcome: src.seenWelcome === true,
     readMode: src.readMode !== false,
+    // The side rail (saved reports and the outline) when the window is wide
+    // enough to dock it. null means the visitor never chose: open by default.
+    railOpen: typeof src.railOpen === 'boolean' ? src.railOpen : null,
   };
   return s.preferences;
 }

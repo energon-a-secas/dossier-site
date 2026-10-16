@@ -1,10 +1,14 @@
 /**
- * Block catalog: browse, preview, and insert blocks.
+ * Block catalog and examples.
  *
- * One modal dialog listing every block type by group. Each card shows the
- * block's sample rendered by the real renderer, so the preview never drifts
- * from what the reader will see. Clicking a card inserts that block's sample
- * into the current page.
+ * One modal dialog with two tabs. Blocks lists every block type by group,
+ * each card showing the block's sample rendered by the real renderer, so the
+ * preview never drifts from what the reader will see; clicking a card inserts
+ * that sample into the current page. Examples lists the bundled reports.
+ *
+ * The examples list (reports/index.json) is also read by the welcome screen
+ * and the Open dialog, through `loadExamples` and `renderExamples`, so the
+ * three places cannot disagree about what ships.
  */
 
 import { uid, debounce } from './neorgon-dom.js';
@@ -36,7 +40,7 @@ export function createCatalogDialog(onInsert = () => {}) {
 
   const title = document.createElement('h2');
   title.id = 'catalogHeading';
-  title.textContent = 'Insert block';
+  title.textContent = TITLES.blocks;
   dialog.setAttribute('aria-labelledby', title.id);
   header.appendChild(title);
 
@@ -49,20 +53,13 @@ export function createCatalogDialog(onInsert = () => {}) {
 
   const tabs = document.createElement('div');
   tabs.className = 'catalog-tabs';
+  tabs.setAttribute('role', 'tablist');
+  tabs.setAttribute('aria-label', 'Catalog');
   inner.appendChild(tabs);
 
-  const blockTabBtn = document.createElement('button');
-  blockTabBtn.type = 'button';
-  blockTabBtn.className = 'catalog-tab-btn active';
-  blockTabBtn.textContent = 'Blocks';
-  blockTabBtn.dataset.tab = 'blocks';
+  const blockTabBtn = tabButton('blocks', 'Blocks', true);
   tabs.appendChild(blockTabBtn);
-
-  const templatesTabBtn = document.createElement('button');
-  templatesTabBtn.type = 'button';
-  templatesTabBtn.className = 'catalog-tab-btn';
-  templatesTabBtn.textContent = 'Templates';
-  templatesTabBtn.dataset.tab = 'templates';
+  const templatesTabBtn = tabButton('templates', 'Examples', false);
   tabs.appendChild(templatesTabBtn);
 
   const searchContainer = document.createElement('div');
@@ -80,14 +77,9 @@ export function createCatalogDialog(onInsert = () => {}) {
   content.className = 'catalog-content';
   inner.appendChild(content);
 
-  const blockContent = document.createElement('div');
-  blockContent.className = 'catalog-tab active';
-  blockContent.dataset.tab = 'blocks';
+  const blockContent = tabPanel('blocks', true);
   content.appendChild(blockContent);
-
-  const templatesContent = document.createElement('div');
-  templatesContent.className = 'catalog-tab';
-  templatesContent.dataset.tab = 'templates';
+  const templatesContent = tabPanel('templates', false);
   content.appendChild(templatesContent);
 
   const blocksGrid = document.createElement('div');
@@ -150,13 +142,7 @@ export function createCatalogDialog(onInsert = () => {}) {
           preview.className = 'catalog-card-preview';
           preview.inert = true;
           preview.setAttribute('aria-hidden', 'true');
-          const ctx = { interactive: false };
-          preview.innerHTML = blockHtml(blockDef.sample, ctx);
-          for (const img of preview.querySelectorAll('img')) {
-            const caption = document.createElement('span');
-            caption.textContent = img.alt || 'Image preview';
-            img.replaceWith(caption);
-          }
+          preview.append(inertPreview(blockHtml(blockDef.sample, { interactive: false })));
           card.appendChild(preview);
         }
 
@@ -183,51 +169,44 @@ export function createCatalogDialog(onInsert = () => {}) {
 
   function renderTemplates() {
     templatesGrid.replaceChildren();
+    loadExamples().then((index) => {
+      templatesGrid.replaceChildren();
+      if (!index) {
+        templatesGrid.textContent = 'The examples could not be loaded.';
+        return;
+      }
+      for (const tpl of index) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'catalog-card template-card';
+        card.setAttribute('data-template', tpl.file);
 
-    fetch('reports/index.json')
-      .then((r) => r.json())
-      .then((index) => {
-        if (!Array.isArray(index)) {
-          templatesGrid.textContent = 'Could not load templates';
-          return;
-        }
+        const tplTitle = document.createElement('div');
+        tplTitle.className = 'catalog-card-title';
+        tplTitle.textContent = tpl.title;
+        card.appendChild(tplTitle);
 
-        for (const tpl of index) {
-          const card = document.createElement('button');
-          card.type = 'button';
-          card.className = 'catalog-card template-card';
-          card.setAttribute('data-template', tpl.file);
+        const tplSummary = document.createElement('div');
+        tplSummary.className = 'catalog-card-summary';
+        tplSummary.textContent = tpl.summary;
+        card.appendChild(tplSummary);
 
-          const tplTitle = document.createElement('div');
-          tplTitle.className = 'catalog-card-title';
-          tplTitle.textContent = tpl.title;
-          card.appendChild(tplTitle);
+        const tplKind = document.createElement('div');
+        tplKind.className = 'catalog-template-kind';
+        tplKind.textContent = exampleMeta(tpl);
+        card.appendChild(tplKind);
 
-          const tplSummary = document.createElement('div');
-          tplSummary.className = 'catalog-card-summary';
-          tplSummary.textContent = tpl.summary;
-          card.appendChild(tplSummary);
+        card.addEventListener('click', () => {
+          onInsert(null, null, tpl.file);
+          dialog.close();
+        });
 
-          const tplKind = document.createElement('div');
-          tplKind.className = 'catalog-template-kind';
-          tplKind.textContent = `${tpl.kind || 'report'} (${tpl.pages || 1} page${(tpl.pages || 1) !== 1 ? 's' : ''})`;
-          card.appendChild(tplKind);
-
-          card.addEventListener('click', () => {
-            onInsert(null, null, tpl.file);
-            dialog.close();
-          });
-
-          templatesGrid.appendChild(card);
-        }
-
-        if (templatesGrid.children.length === 0) {
-          templatesGrid.textContent = 'No templates available';
-        }
-      })
-      .catch(() => {
-        templatesGrid.textContent = 'Could not load templates';
-      });
+        templatesGrid.appendChild(card);
+      }
+      if (templatesGrid.children.length === 0) {
+        templatesGrid.textContent = 'No examples are bundled with this copy.';
+      }
+    });
   }
 
   searchInput.addEventListener(
@@ -237,24 +216,40 @@ export function createCatalogDialog(onInsert = () => {}) {
     }, 150)
   );
 
+  function selectTab(which) {
+    const blocks = which !== 'templates';
+    for (const [btn, panel, on] of [[blockTabBtn, blockContent, blocks], [templatesTabBtn, templatesContent, !blocks]]) {
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', String(on));
+      btn.tabIndex = on ? 0 : -1;
+      panel.classList.toggle('active', on);
+      panel.hidden = !on;
+    }
+    // The search filters blocks only. Hiding its container, not just the
+    // input, leaves no empty band above the examples.
+    searchContainer.hidden = !blocks;
+    title.textContent = blocks ? TITLES.blocks : TITLES.templates;
+    if (blocks) {
+      renderBlocks(searchInput.value);
+    } else {
+      renderTemplates();
+    }
+  }
+
   blockTabBtn.addEventListener('click', () => {
-    renderBlocks(searchInput.value);
-    blockTabBtn.classList.add('active');
-    templatesTabBtn.classList.remove('active');
-    blockContent.classList.add('active');
-    templatesContent.classList.remove('active');
-    searchInput.style.display = 'block';
+    selectTab('blocks');
     searchInput.focus();
   });
-
-  templatesTabBtn.addEventListener('click', () => {
-    templatesTabBtn.classList.add('active');
-    blockTabBtn.classList.remove('active');
-    templatesContent.classList.add('active');
-    blockContent.classList.remove('active');
-    searchInput.style.display = 'none';
-    renderTemplates();
+  templatesTabBtn.addEventListener('click', () => selectTab('templates'));
+  // Arrow keys move between the two tabs, as a tablist does.
+  tabs.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const next = blockTabBtn.getAttribute('aria-selected') === 'true' ? templatesTabBtn : blockTabBtn;
+    next.click();
+    next.focus();
   });
+  dialog.selectTab = selectTab;
 
   // Previews are built when requested, keeping the report's first load small.
 
@@ -269,11 +264,146 @@ export function createCatalogDialog(onInsert = () => {}) {
  * Open the catalog dialog.
  *
  * @param {HTMLElement} [opener] the element that opened the dialog
+ * @param {'blocks'|'templates'} [tab]
  */
 export function openCatalog(opener, tab = 'blocks') {
   if (!catalogDialog) {
     throw new Error('Catalog not initialized');
   }
   openDialog(catalogDialog, opener);
-  catalogDialog.querySelector(`.catalog-tab-btn[data-tab="${tab === 'templates' ? 'templates' : 'blocks'}"]`)?.click();
+  catalogDialog.selectTab(tab === 'templates' ? 'templates' : 'blocks');
+}
+
+const TITLES = Object.freeze({ blocks: 'Insert block', templates: 'Examples' });
+
+function tabButton(name, label, selected) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `catalog-tab-btn${selected ? ' active' : ''}`;
+  btn.textContent = label;
+  btn.dataset.tab = name;
+  btn.id = `catalog-tab-${name}`;
+  btn.setAttribute('role', 'tab');
+  btn.setAttribute('aria-selected', String(selected));
+  btn.setAttribute('aria-controls', `catalog-panel-${name}`);
+  btn.tabIndex = selected ? 0 : -1;
+  return btn;
+}
+
+function tabPanel(name, selected) {
+  const panel = document.createElement('div');
+  panel.className = `catalog-tab${selected ? ' active' : ''}`;
+  panel.dataset.tab = name;
+  panel.id = `catalog-panel-${name}`;
+  panel.setAttribute('role', 'tabpanel');
+  panel.setAttribute('aria-labelledby', `catalog-tab-${name}`);
+  panel.hidden = !selected;
+  return panel;
+}
+
+/**
+ * Parse a preview inside a <template>, whose content is inert: an image in it
+ * is never fetched, so a sample that names a remote image cannot make the
+ * catalog send a request just by opening. Images become their alt text.
+ *
+ * @param {string} html markup from our own renderer
+ * @returns {DocumentFragment}
+ */
+function inertPreview(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  for (const img of tpl.content.querySelectorAll('img')) {
+    const caption = document.createElement('span');
+    caption.textContent = img.alt || 'Image preview';
+    img.replaceWith(caption);
+  }
+  return document.importNode(tpl.content, true);
+}
+
+// ── Examples ─────────────────────────────────────────────────────────────────
+
+/** A bundled example's file name: one plain segment, so nothing walks out of reports/. */
+const EXAMPLE_FILE = /^[a-z0-9][a-z0-9-]*\.json$/;
+
+let examples = null;
+
+/**
+ * The bundled examples, read once. Resolves to null when the list could not
+ * be loaded, so a caller can say so instead of showing an empty list.
+ *
+ * @returns {Promise<Array<{file: string, title: string, summary?: string, kind?: string, pages?: number}>|null>}
+ */
+export function loadExamples() {
+  if (!examples) {
+    examples = fetch('reports/index.json')
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json();
+      })
+      .then((index) => (Array.isArray(index)
+        ? index.filter((item) => item && EXAMPLE_FILE.test(String(item.file || '')) && item.title)
+        : null))
+      .catch(() => {
+        examples = null;
+        return null;
+      });
+  }
+  return examples;
+}
+
+/** "Comparison, 3 pages" */
+export function exampleMeta(item) {
+  const pages = Number(item.pages) || 1;
+  const kind = String(item.kind || 'report');
+  return `${kind.charAt(0).toUpperCase()}${kind.slice(1)}, ${pages} page${pages === 1 ? '' : 's'}`;
+}
+
+/**
+ * Fill a list with example buttons (`data-action="example"`).
+ *
+ * @param {HTMLElement} host a <ul> or <ol>
+ * @param {{limit?: number}} [opts]
+ * @returns {Promise<boolean>} false when the list could not be loaded
+ */
+export async function renderExamples(host, { limit = Infinity } = {}) {
+  if (!host) return false;
+  const index = await loadExamples();
+  host.replaceChildren();
+  if (!index) {
+    const li = document.createElement('li');
+    li.className = 'ds-examples__empty';
+    li.textContent = 'The examples could not be loaded.';
+    host.appendChild(li);
+    return false;
+  }
+  for (const item of index.slice(0, limit)) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ds-example';
+    btn.dataset.action = 'example';
+    btn.dataset.file = item.file;
+    const name = document.createElement('span');
+    name.className = 'ds-example__title';
+    name.textContent = item.title;
+    const meta = document.createElement('span');
+    meta.className = 'ds-example__meta';
+    meta.textContent = exampleMeta(item);
+    btn.append(name);
+    if (item.summary) {
+      const summary = document.createElement('span');
+      summary.className = 'ds-example__summary';
+      summary.textContent = item.summary;
+      btn.append(summary);
+    }
+    btn.append(meta);
+    li.appendChild(btn);
+    host.appendChild(li);
+  }
+  return true;
+}
+
+/** True for a file name `renderExamples` would have emitted. */
+export function isExampleFile(file) {
+  return EXAMPLE_FILE.test(String(file || ''));
 }

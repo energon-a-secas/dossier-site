@@ -43,7 +43,9 @@
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://dossier.neorgon.com/">
   <meta property="og:locale" content="en_US">
-  <meta name="theme-color" content="#f3f4f7">
+  <!-- The colour of the header bar, which is the same in light and dark. It
+       must equal theme_color in site.webmanifest (smoke check 24). -->
+  <meta name="theme-color" content="#171e2a">
   <meta property="og:image" content="https://dossier.neorgon.com/og-preview.jpg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -56,8 +58,9 @@
        packages/neorgon-ui/{css/viz.css,js/viz.js}, refreshed by sync-viz.sh.
        Do not edit these copies. -->
   <link rel="stylesheet" href="css/viz.css">
-  <!-- NeoKeys: owns H, the ? sheet and the WCAG 2.1.4 remap panel. The render
-       mode is a separate site-owned attribute, see js/chrome.js for why. -->
+  <!-- NeoKeys: owns H (hide and show the header bar), the ? sheet and the WCAG
+       2.1.4 remap panel. Read and edit mode is a separate site attribute,
+       html[data-dossier-mode], see js/chrome.js. -->
   <meta name="neo-chrome-toggle" content="on">
   <link rel="stylesheet" href="css/neorgon-keys.css">
   <!-- The report document and its blocks. -->
@@ -113,8 +116,12 @@
   <a class="skip-link" href="#main">Skip to content</a>
 
   <!-- Neorgon Header Kit contract (packages/neorgon-ui/header/README.md).
-       data-header-mode: hub (glass) | content (sticky gradient) | app (slim, auto-hides on scroll).
-       Pick content for learning/content sites, app for tool-dense sites. -->
+       The page's only header. App mode: slim, hides on scroll down. The h1 is
+       the kit's contract (its styles are keyed on .header-logo h1), so the
+       report title on the page is an h2 (js/pipeline.js STAGE_TITLE_LEVEL).
+       Controls are classless buttons the kit styles. The view buttons stay out
+       of the kit's phone menu (below 480 px only the other view's button shows,
+       css/shell.css); Open, Share and Display move into that menu. -->
   <header class="header-bar" data-header-mode="app" data-header-skin="ink">
     <div class="header-logo">
       <!-- PATTERN: one link: mark + name go to THIS site's home (root or #home)
@@ -124,14 +131,20 @@
         <img src="energon-classic-logo.png" class="header-logo-img" alt="">
         <div class="header-title-wrap">
           <h1>Dossier</h1>
-          <div class="header-subtitle">Work reports, rendered from one file</div>
+          <div class="header-subtitle">Read and compare reports</div>
         </div>
       </a>
     </div>
 
     <!-- .header-right owns margin-left:auto; home icon is always last. -->
     <div class="header-right">
-
+      <div class="header-actions">
+        <button type="button" id="viewReports" data-action="view" data-view="reports" aria-current="page" data-keep-mobile>Reports</button>
+        <button type="button" id="viewCompare" data-action="view" data-view="compare" data-keep-mobile>Compare</button>
+        <button type="button" id="openReport" data-action="open">Open</button>
+        <button type="button" id="shareReport" data-action="share" data-needs-report>Share</button>
+        <button type="button" id="displayOptions" data-action="display" aria-label="Display options" title="Display options"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><text x="12" y="17" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="15" font-weight="600" fill="currentColor">Aa</text></svg></button>
+      </div>
 
       <a class="header-home" href="https://neorgon.com/" title="neorgon.com" aria-label="Neorgon home">
         <svg class="nh-hub-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -149,22 +162,11 @@
 
   <!-- template:main -->
   <main id="main" tabindex="-1">
-    <div class="ds-workbar" aria-label="Report tools">
-      <a class="ds-wordmark" href="./" aria-label="Dossier home"><span class="ds-logo" aria-hidden="true"></span>Dossier<span class="ds-tagline">Compare. Understand. Decide.</span></a>
-      <div class="ds-workbar__actions">
-        <button class="btn btn--quiet" type="button" id="toggleAppearance" aria-pressed="false">Dark mode</button>
-        <button class="btn btn--quiet" type="button" data-action="templates">Examples</button>
-        <button class="btn btn--quiet" type="button" id="openReport" data-action="open">Open report</button>
-        <button class="btn btn--quiet" type="button" id="shareReport" data-action="share" data-needs-report>Share</button>
-        <button class="btn btn--quiet" type="button" id="exportReport" data-action="export" data-needs-report>Export</button>
-        <button class="btn" type="button" id="toggleMode" data-action="toggle-mode" aria-pressed="false" data-needs-report><span>Edit report</span></button>
-        <button class="btn btn--primary" type="button" data-action="compose">Compare responses</button>
-      </div>
-    </div>
-    <div class="ds-contextbar" id="reportContext">
-      <span id="reportOrigin">Your workspace</span>
-      <span>Private to your browser. Share only when you choose.</span>
-    </div>
+    <!-- Shown only while js/boot.js has not finished: "Loading" when it takes
+         a while, a reason when the app's code could not load. js/appearance.js
+         writes it; no timer ever reveals the shell instead. -->
+    <p class="ds-boot" id="bootStatus" role="status"></p>
+
     <section class="ds-composer" id="comparisonComposer" aria-labelledby="composerHeading" hidden>
       <form id="comparisonForm">
         <div class="ds-composer__head">
@@ -182,17 +184,17 @@
       </form>
     </section>
 
-
-    <!-- Three regions. Read mode hides the rail and the source pane and gives
-         the whole window to the report, which is what a link recipient wants.
-         Build mode shows all three. css/report.css owns the switch. -->
+    <!-- The Reports view. The rail (saved reports and this report's outline)
+         can be shown in either mode; the side column holds Check report and,
+         in edit mode, the editor. css/shell.css owns the layout. -->
     <div class="ds-shell" id="shell">
 
-      <aside class="ds-rail" id="rail" aria-label="Reports and pages">
+      <aside class="ds-rail" id="rail" aria-label="Saved reports and pages">
         <section class="ds-rail__group" aria-labelledby="libraryHeading">
           <div class="ds-rail__head">
-            <h2 id="libraryHeading">Reports</h2>
-            <button type="button" class="btn btn--quiet btn--sm" data-action="new-report">New report</button>
+            <h2 id="libraryHeading">Saved reports</h2>
+            <button type="button" class="btn btn--quiet btn--sm" data-action="new-report" aria-label="New report">New</button>
+            <button type="button" class="btn btn--quiet btn--sm ds-rail__hide" data-action="toggle-rail" aria-controls="rail" aria-expanded="true" aria-label="Hide saved reports">Hide</button>
           </div>
           <label class="visually-hidden" for="reportFilter">Filter saved reports</label>
           <input type="search" id="reportFilter" placeholder="Find a saved report" autocomplete="off"
@@ -206,57 +208,66 @@
         </section>
       </aside>
 
-      <div class="ds-stage" id="stageWrap">
-        <nav class="ds-tabs" id="pageTabs" aria-label="Report pages" hidden></nav>
-        <div class="ds-report" id="stage" aria-live="polite" aria-busy="false"></div>
+      <div class="ds-reportbar" id="reportBar">
+        <button type="button" class="btn btn--quiet btn--sm ds-reportbar__rail" id="toggleRail" data-action="toggle-rail" aria-controls="rail" aria-expanded="false" title="Saved reports"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><path d="M6 2.5v11" stroke="currentColor"/></svg><span>Saved reports</span></button>
+        <span class="ds-reportbar__origin" id="reportOrigin">Nothing open</span>
+        <span class="ds-reportbar__pages" id="reportPages"></span>
+        <button type="button" class="btn btn--quiet btn--sm ds-reportbar__check" id="toggleFindings" data-action="findings" aria-expanded="false" aria-controls="findingsPanel" data-needs-report><span>Check report</span> <span class="ds-count" id="findingsCount" hidden></span></button>
+        <button type="button" class="btn btn--primary btn--sm" id="toggleMode" data-action="toggle-mode" aria-pressed="false" data-needs-report><span>Edit</span></button>
       </div>
 
-      <section class="ds-source" id="sourcePane" aria-labelledby="sourceHeading">
-        <div class="ds-source__head">
-          <h2 id="sourceHeading">Edit report</h2>
-          <div class="ds-source__tabs" role="tablist" aria-label="How to edit">
-            <button type="button" role="tab" id="tabForm" aria-selected="true"
-                    aria-controls="formPane" data-action="source-tab" data-pane="form">Form</button>
-            <button type="button" role="tab" id="tabJson" aria-selected="false"
-                    aria-controls="jsonPane" data-action="source-tab" data-pane="json">JSON</button>
+      <div class="ds-stage" id="stageWrap">
+        <div class="ds-report" id="stage" aria-busy="false"></div>
+      </div>
+
+      <div class="ds-side" id="sidePane">
+        <section class="ds-findings" id="findingsPanel" aria-labelledby="findingsHeading" hidden>
+          <div class="ds-findings__head">
+            <h2 id="findingsHeading">Check report</h2>
+            <button type="button" class="btn btn--quiet btn--sm" data-action="findings">Close</button>
           </div>
-          <button type="button" class="btn btn--quiet btn--sm" data-action="format-json" title="Tidy the document">Format</button>
-        </div>
+          <div id="findingsBody"></div>
+        </section>
 
-        <div class="ds-source__tools"><button type="button" class="btn btn--sm" id="openCatalog" data-action="catalog">Add block</button><button type="button" class="btn btn--quiet btn--sm" id="toggleFindings" data-action="findings" aria-expanded="false" aria-controls="findingsPanel">Check report <span class="ds-count" id="findingsCount" hidden>0</span></button></div>
-        <div id="formPane" role="tabpanel" aria-labelledby="tabForm"></div>
+        <section class="ds-source" id="sourcePane" aria-labelledby="sourceHeading">
+          <div class="ds-source__head">
+            <h2 id="sourceHeading">Edit report</h2>
+            <div class="ds-source__tabs" role="tablist" aria-label="How to edit">
+              <button type="button" role="tab" id="tabForm" aria-selected="true"
+                      aria-controls="formPane" data-action="source-tab" data-pane="form">Form</button>
+              <button type="button" role="tab" id="tabJson" aria-selected="false"
+                      aria-controls="jsonPane" data-action="source-tab" data-pane="json">JSON</button>
+            </div>
+          </div>
 
-        <!-- js/editor.js builds the textarea, its toolbar and the error banner,
-             so this is a mount point rather than a second copy of them. -->
-        <div id="jsonPane" role="tabpanel" aria-labelledby="tabJson" hidden></div>
-      </section>
+          <div class="ds-source__tools"><button type="button" class="btn btn--sm" id="openCatalog" data-action="catalog">Add block</button></div>
+          <div id="formPane" role="tabpanel" aria-labelledby="tabForm"></div>
 
-      <section class="ds-findings" id="findingsPanel" aria-labelledby="findingsHeading" hidden>
-        <div class="ds-findings__head">
-          <h2 id="findingsHeading">Findings</h2>
-          <button type="button" class="btn btn--quiet btn--sm" data-action="findings">Close</button>
-        </div>
-        <div id="findingsBody"></div>
-      </section>
+          <!-- js/editor.js builds the textarea, its toolbar (with Format) and
+               the error banner, so this is a mount point rather than a copy. -->
+          <div id="jsonPane" role="tabpanel" aria-labelledby="tabJson" hidden></div>
+        </section>
+      </div>
     </div>
 
-    <!-- The front door for someone with nothing open yet. Replaced by the
-         report as soon as there is one, and brought back when the last one is
-         closed. "Nothing open" and "that file would not load" are different
-         states and never share a message. -->
+    <!-- The front door: what a first visit sees, and what is left when the
+         last saved report is deleted. A stored report or a shared link opens
+         directly instead. "Nothing open" and "that file would not load" are
+         different states and never share a message. -->
     <div class="ds-welcome" id="welcome">
       <div class="ds-welcome__inner">
-        <p class="ds-eyebrow">A clearer view of your work</p>
-        <h2>See what changed.<br>Decide what matters.</h2>
-        <p>
-          Compare responses, inspect execution results, and turn the evidence into a report worth sharing. Everything stays in your browser.
+        <h2 id="welcomeHeading">Read reports, and compare them side by side.</h2>
+        <p class="ds-welcome__lead">
+          Open a report to read it in one clean format, or put a human draft, an agent's output and the fixes next to each other and see what changed. Everything stays in your browser.
         </p>
         <div class="ds-welcome__actions">
-          <button type="button" class="btn btn--primary" data-action="compose">Compare responses</button>
+          <button type="button" class="btn btn--primary" data-action="view" data-view="compare">Compare reports</button>
           <button type="button" class="btn" data-action="open">Open a report</button>
-
-          <button type="button" class="btn" data-action="demo">Explore an example</button>
         </div>
+        <section class="ds-welcome__examples" aria-labelledby="welcomeExamplesHeading">
+          <h3 id="welcomeExamplesHeading">Or start from an example</h3>
+          <ul class="ds-examples" id="welcomeExamples"></ul>
+        </section>
         <p class="ds-welcome__note">
           Writing one with an agent? Point it at
           <a href="llms.txt">llms.txt</a> and
@@ -265,27 +276,31 @@
       </div>
     </div>
 
-    <!-- Paste and import. A native dialog: the platform owns Escape and the
-         focus trap, and js/dialogs.js owns launch and return focus. -->
+    <!-- Open. A native dialog: the platform owns Escape and the focus trap,
+         and js/dialogs.js owns launch and return focus. -->
     <dialog id="importDialog" class="ds-dialog" aria-labelledby="importHeading">
       <form method="dialog">
         <h2 id="importHeading">Open a report</h2>
         <p class="ds-dialog__lead">
-          Choose a file or paste its contents. HTML reports keep their original
-          layout and interactive controls. You can also open JSON, YAML,
-          Markdown, test results and logs.
+          Choose a file or paste its contents: a Dossier document in JSON or
+          YAML, an HTML or Markdown report, test results or a log.
         </p>
         <label for="importFile">Choose a file</label>
         <input type="file" id="importFile"
                accept=".json,.yaml,.yml,.md,.html,.htm,.xml,.sarif,.txt">
         <label for="importText">Or paste it here</label>
-        <textarea id="importText" rows="10" aria-describedby="importDetected" spellcheck="false" data-text-surface
+        <textarea id="importText" rows="8" aria-describedby="importDetected" spellcheck="false" data-text-surface
                   placeholder='{"dossier": {"version": 1, "title": "...", "pages": []}}'></textarea>
         <p class="ds-dialog__detected" id="importDetected" role="status"></p>
         <div class="ds-dialog__actions">
           <button type="button" class="btn btn--primary" data-action="import-confirm">Open it</button>
           <button type="submit" class="btn" value="cancel">Cancel</button>
         </div>
+        <section class="ds-dialog__examples" aria-labelledby="openExamplesHeading">
+          <h3 id="openExamplesHeading">Examples</h3>
+          <p class="ds-dialog__lead">Bundled reports with illustrative data. An example is not saved until you edit it.</p>
+          <ul class="ds-examples ds-examples--list" id="openExamples"></ul>
+        </section>
       </form>
     </dialog>
 
@@ -293,12 +308,35 @@
          boot, because its cards are previewed with the real renderer and the
          markup has to come from the module that knows the registry. -->
 
+    <!-- Share and export: js/export-dialog.js fills the choices, with the
+         share link's measured size, each time it opens. -->
     <dialog id="exportDialog" class="ds-dialog" aria-labelledby="exportHeading">
       <form method="dialog">
-        <h2 id="exportHeading">Export</h2>
+        <h2 id="exportHeading">Share and export</h2>
         <div id="exportBody"></div>
         <div class="ds-dialog__actions">
           <button type="submit" class="btn" value="cancel">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Display options. One fieldset per option, each a radio group that
+         applies at once (js/display.js). -->
+    <dialog id="displayDialog" class="ds-dialog ds-dialog--display" aria-labelledby="displayHeading">
+      <form method="dialog">
+        <h2 id="displayHeading">Display</h2>
+        <div class="ds-display" id="displayBody">
+          <fieldset class="ds-display__option">
+            <legend>Theme</legend>
+            <div class="ds-display__choices">
+              <label><input type="radio" name="theme" value="system"> System</label>
+              <label><input type="radio" name="theme" value="light"> Light</label>
+              <label><input type="radio" name="theme" value="dark"> Dark</label>
+            </div>
+          </fieldset>
+        </div>
+        <div class="ds-dialog__actions">
+          <button type="submit" class="btn" value="close">Close</button>
         </div>
       </form>
     </dialog>

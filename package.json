@@ -6,7 +6,7 @@
   "description": "Render AI-written work reports from one JSON file",
   "license": "MIT",
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.mjs",
     "validate": "node bin/validate.mjs",
     "test:browser": "node scripts/check-workspace.mjs && node scripts/check-html-import.mjs"
   }

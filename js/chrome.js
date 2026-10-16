@@ -1,117 +1,175 @@
 /**
- * Workspace mode and keyboard shortcuts. NeoKeys owns the optional global header.
+ * The workspace's own state on <html>: mode, view and rail, plus the keyboard
+ * shortcuts.
+ *
+ * The page has one header, the fleet Header Kit bar, and `H` belongs to
+ * NeoKeys alone: it hides and shows that bar, and nothing here reacts to it.
+ * An earlier build hid the kit bar behind a second, site-made toolbar and
+ * handed it back on the first H press, which showed two bars on load and a
+ * "Chrome hidden" toast at the moment the bar appeared.
+ *
+ *   html[data-dossier-mode]   read | build   the editor pane is shown in build
+ *   html[data-dossier-view]   reports | compare
+ *   html[data-dossier-rail]   open | closed  saved reports and the outline
+ *
+ * js/appearance.js writes the first two before the first paint, from the
+ * address and the stored preference, so the first frame has the right shape.
  *
  * NeoKeys owns `H`, the `?` sheet, the `G` switcher and the WCAG 2.1.4 remap
  * panel. We register through it and never write `if (e.key === 'h')`: a bare
  * letter binding with no way to turn it off or move it is an accessibility
  * failure, and the kit's disable switch and rebind panel are the whole reason
  * the fleet is allowed single-key shortcuts at all.
- *
- * The workspace has its own toolbar in both modes. Keep the global header
- * hidden by default with a local attribute, without writing the fleet-wide
- * cookie. H reveals it and hands visibility back to the visitor.
  */
 
 import { showToast } from './neorgon-dom.js';
 
-const MODE_ATTR = 'dossierMode';
-const CHROME_ATTR = 'dossierChrome';
+const root = () => document.documentElement;
 
-/**
- * True while the workspace is hiding the header. Once the visitor presses H
- * we stop deciding for them.
- */
-let weHidTheHeader = false;
+// ── Mode ─────────────────────────────────────────────────────────────────────
 
-/** Read mode: the report fills the window and the page furniture steps back. */
+/** Read mode: the report has the window. Build mode adds the editor pane. */
 export function setMode(mode) {
-  const root = document.documentElement;
   const next = mode === 'read' ? 'read' : 'build';
-  root.dataset[MODE_ATTR] = next;
-
-  // Hide the header only while the visitor has not taken that decision over.
-  if (!hasVisitorOpinion() && root.dataset[CHROME_ATTR] !== 'shown') {
-    root.dataset[CHROME_ATTR] = 'hidden';
-    weHidTheHeader = true;
-  }
-
+  root().dataset.dossierMode = next;
   document.dispatchEvent(new CustomEvent('dossier-mode', { detail: { mode: next } }));
   return next;
 }
 
-/** The visitor has pressed H at some point, so the header is theirs now. */
-function hasVisitorOpinion() {
-  return document.documentElement.dataset[CHROME_ATTR] === 'visitor';
+export function mode() {
+  return root().dataset.dossierMode === 'read' ? 'read' : 'build';
 }
 
 /**
- * Hand the header back the moment the visitor asks for it.
- *
- * The awkward case this solves: the workspace has hidden the header with our own
- * attribute while the kit still believes chrome is on. A press of H would
- * move the kit from on to off and fire `hidden: true`, so the header would
- * stay exactly as invisible as before and the key would feel broken. Two
- * presses would fix it, which is not an answer.
- *
- * So when that first press arrives, we drop our hide and ask the kit to show.
- * `chrome.show()` writes the fleet cookie, which is the one side effect we
- * were avoiding, but it only ever writes the value that reveals chrome and
- * never the value that hides it. Revealing furniture on another tab is a
- * harmless direction to be wrong in; hiding it is not.
+ * Switch between reading and editing. Only a key press gets a toast: a click
+ * already changed the button the reader is looking at, and a toast that names
+ * a key means nothing on a touch screen.
  */
-export function followVisitorChromeChoice() {
-  document.addEventListener('neo-chrome', (e) => {
-    const root = document.documentElement;
-    const hidden = Boolean(e.detail && e.detail.hidden);
-
-    // Deferred out of the event dispatch on purpose. The kit's `hide()` paints
-    // first, which is what fires this event, and writes its cookie afterwards.
-    // Calling `show()` from inside the handler therefore ran before that write
-    // and was immediately overwritten: the header was visible and the stored
-    // preference said hidden, so the next visit opened with the bar gone and a
-    // toast explaining a choice the visitor never made. A microtask lets the
-    // kit finish its own work before we react to it.
-    queueMicrotask(() => {
-      if (weHidTheHeader) {
-        delete root.dataset[CHROME_ATTR];
-        weHidTheHeader = false;
-        if (hidden) {
-          const chrome = window.NeoKeys && window.NeoKeys.chrome;
-          if (chrome && typeof chrome.show === 'function') chrome.show();
-        }
-      }
-      root.dataset[CHROME_ATTR] = 'visitor';
-    });
-  });
-}
-
-export function mode() {
-  return document.documentElement.dataset[MODE_ATTR] === 'read' ? 'read' : 'build';
-}
-
-export function toggleMode() {
+export function toggleMode({ viaKey = false } = {}) {
   const next = setMode(mode() === 'read' ? 'build' : 'read');
-  showToast(next === 'read'
-    ? 'Reading. R brings the editor back, H the header.'
-    : 'Editing. R puts the editor away.');
+  if (viaKey) showToast(next === 'read' ? 'Reading. R opens the editor again.' : 'Editing. R puts the editor away.');
   return next;
 }
 
 /**
- * A report that arrived in the URL is something to read, not something to
- * edit, so the page opens out of the way of it. An author who then wants the
- * editor presses one key, and the document itself can insist either way with
- * its own `chrome` field.
+ * The mode a newly opened report starts in. The document's own `chrome` field
+ * can insist: `hidden` opens it for reading, `shown` opens it in the editor,
+ * and `auto` (or no field) leaves it to the reader's last choice. A report
+ * that arrived in a link opens for reading unless the document says otherwise.
  */
-export function initialMode({ fromUrl = false, documentChrome = 'auto' } = {}) {
-  if (!hasVisitorOpinion() && documentChrome === 'shown') {
-    document.documentElement.dataset[CHROME_ATTR] = 'shown';
-    weHidTheHeader = false;
-  }
+export function initialMode({ preferRead = true, documentChrome = 'auto' } = {}) {
   if (documentChrome === 'hidden') return setMode('read');
   if (documentChrome === 'shown') return setMode('build');
-  return setMode(fromUrl ? 'read' : 'build');
+  return setMode(preferRead ? 'read' : 'build');
 }
+
+// ── View ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Reports or Compare. Marks the matching header button as the current page
+ * and tells the views (`dossier-view`), which show and hide themselves.
+ */
+export function setView(view) {
+  const next = view === 'compare' ? 'compare' : 'reports';
+  const previous = root().dataset.dossierView;
+  root().dataset.dossierView = next;
+  for (const button of document.querySelectorAll('.header-actions [data-action="view"]')) {
+    if (button.dataset.view === next) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+  document.dispatchEvent(new CustomEvent('dossier-view', { detail: { view: next, previous } }));
+  return next;
+}
+
+export function view() {
+  return root().dataset.dossierView === 'compare' ? 'compare' : 'reports';
+}
+
+// ── Rail ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Wide enough to dock the rail beside the report (and the editor). Narrower,
+ * the rail opens as a drawer over the report and always starts closed, so a
+ * stored "open" never covers the report on a laptop or a phone.
+ */
+const DOCKED = '(min-width: 1280px)';
+
+export function railDocked() {
+  return window.matchMedia(DOCKED).matches;
+}
+
+export function railOpen() {
+  return root().dataset.dossierRail === 'open';
+}
+
+/**
+ * @param {boolean} open
+ * @param {{focus?: boolean}} [opts] focus moves into a drawer that opens and
+ *   back to the toggle when it closes; a docked rail leaves focus alone
+ */
+export function setRail(open, { focus = false } = {}) {
+  root().dataset.dossierRail = open ? 'open' : 'closed';
+  for (const toggle of document.querySelectorAll('[data-action="toggle-rail"][aria-controls="rail"]')) {
+    toggle.setAttribute('aria-expanded', String(Boolean(open)));
+  }
+  if (!focus) return;
+  if (open) {
+    document.getElementById('reportFilter')?.focus();
+  } else {
+    document.getElementById('toggleRail')?.focus({ preventScroll: true });
+  }
+}
+
+/**
+ * Where the rail starts. A shared link opens closed: its reader came for
+ * that one report. Otherwise a docked rail follows the stored choice and is
+ * open when there is none.
+ */
+export function initialRail({ fromLink = false, preference = null } = {}) {
+  setRail(!fromLink && railDocked() && preference !== false);
+}
+
+/**
+ * Keep the rail sensible across a resize: leaving the docked width closes the
+ * drawer it would become, and reaching it restores the stored choice.
+ *
+ * @param {() => boolean|null} preference the stored `railOpen`
+ */
+export function followRailWidth(preference) {
+  const mq = window.matchMedia(DOCKED);
+  mq.addEventListener('change', () => {
+    if (mq.matches) setRail(preference() !== false);
+    else setRail(false);
+  });
+  // Escape closes the drawer, never a docked rail, which is page layout.
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || railDocked() || !railOpen() || event.defaultPrevented) return;
+    if (document.querySelector('dialog[open]')) return;
+    setRail(false, { focus: true });
+  });
+}
+
+// ── Footer ───────────────────────────────────────────────────────────────────
+
+/**
+ * Publish the footer's height as `--ds-footer-h` on <html>. The sticky rail
+ * and side column subtract it (css/shell.css --pane-max) so that at the end
+ * of the page they still fit above the footer and keep their headings in the
+ * window. The footer belongs to the kit and its height is the kit's (and the
+ * site may tune its padding), so it is measured rather than assumed.
+ */
+export function followFooterHeight() {
+  const footer = document.querySelector('.neo-footer');
+  if (!footer) return;
+  const write = () => {
+    const height = Math.ceil(footer.getBoundingClientRect().height);
+    if (height > 0) root().style.setProperty('--ds-footer-h', `${height}px`);
+  };
+  write();
+  if (typeof ResizeObserver === 'function') new ResizeObserver(write).observe(footer);
+}
+
+// ── Shortcuts ────────────────────────────────────────────────────────────────
 
 /**
  * Register this page's shortcuts with the kit.
@@ -136,26 +194,13 @@ export function registerShortcuts(actions) {
   }
 
   const defs = [
-    { key: '/', label: 'Filter this report', hint: 'Find a page, a block or a finding', run: actions.filter },
+    { key: '/', label: 'Find a saved report', hint: 'Opens the side panel first if it is closed', run: actions.filter },
     { key: 's', label: 'Copy a share link', hint: 'The report travels inside the link', run: actions.share },
-    { key: 'e', label: 'Export', hint: 'A file that opens with no account and no network', run: actions.export },
+    { key: 'e', label: 'Share and export', hint: 'A link, one HTML file, JSON, YAML, print or a deck', run: actions.export },
     { key: '[', label: 'Previous page', run: actions.prev },
     { key: ']', label: 'Next page', run: actions.next },
-    { key: 'r', label: 'Read or edit', hint: 'Put the editor away, or bring it back', run: actions.toggleMode },
+    { key: 'r', label: 'Edit or done', hint: 'Open the editor, or put it away', run: actions.toggleMode },
   ].filter((d) => typeof d.run === 'function');
 
   return keys.register(defs);
-}
-
-/**
- * Keep NeoKeys honest about our text surfaces. The kit already treats inputs,
- * textareas, selects and contenteditable as typing targets, so a bare letter
- * never fires mid-word. This adds anything of ours that is a text surface
- * without being one of those elements.
- */
-export function guardTypingSurfaces() {
-  const keys = window.NeoKeys;
-  if (keys && typeof keys.setTypingSelector === 'function') {
-    keys.setTypingSelector('.ds-editor, [data-text-surface]');
-  }
 }

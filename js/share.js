@@ -4,13 +4,19 @@
  * Inbound:
  *   #d1=<base64url(json)>              uncompressed, forward compatible
  *   #dz=<base64url(deflate-raw(json))> the one we emit
- *   ?src=<https url>                   fetch a hosted document
+ *   ?src=<https url>                   fetch a hosted document, any format the
+ *                                      Open dialog reads (js/open.js readText)
+ *
+ * Outbound links carry the authored document (`state.document`), never the
+ * derived model, so the recipient's parse raises no derived-field warnings.
+ * js/router.js owns telling a payload from a page route.
  *
  * CompressionStream is native, no dependency. Falls back to uncompressed
  * #d1= if deflate is not available.
  */
 
 import { showToast, copyText } from './neorgon-dom.js';
+import { parseRoute } from './router.js';
 
 
 function toBase64url(bytes) {
@@ -41,8 +47,8 @@ async function compressDeflateRaw(text) {
     const data = encoder.encode(text);
     const stream = new CompressionStream('deflate-raw');
     const writer = stream.writable.getWriter();
-    writer.write(data);
-    writer.close();
+    writer.write(data).catch(() => {});
+    writer.close().catch(() => {});
     const reader = stream.readable.getReader();
     const chunks = [];
     let result;
@@ -72,8 +78,12 @@ async function decompressDeflateRaw(bytes) {
     }
     const stream = new DecompressionStream('deflate-raw');
     const writer = stream.writable.getWriter();
-    writer.write(bytes);
-    writer.close();
+    // A damaged link errors the stream, which rejects these two promises as
+    // well as the read below. Only the read is awaited (and caught), so the
+    // writer's rejections are handled here, or a broken link raised an
+    // unhandled "Compressed input was truncated." on top of its own message.
+    writer.write(bytes).catch(() => {});
+    writer.close().catch(() => {});
     const reader = stream.readable.getReader();
     const chunks = [];
     let result;
@@ -195,16 +205,16 @@ export async function decodeFragment(hash) {
  * a message saying the link carried no readable report.
  */
 export function fragmentCarriesReport(hash = window.location.hash) {
-  const raw = String(hash || '').replace(/^#/, '');
-  return /^(dz|d1)=/.test(raw) || /^v1:(dz|d1):/.test(raw);
+  const route = parseRoute(hash);
+  // `#dc=` is a payload too, but it carries a comparison, not a report.
+  return Boolean(route.payload) && route.key !== 'dc';
 }
 
 /**
- * Load from URL if present.
+ * Does the URL carry a report? `?src=` or a report payload in the hash.
  *
- * Handles #dz= and #d1= fragments, and ?src= query parameters.
- * Returns true if a URL source claimed the load. Does not block on network;
- * call loadFromUrlAsync for the full async loading with callbacks.
+ * Synchronous, so boot can decide before any network or decoding work.
+ * Call readUrlPayload for the content.
  *
  * @returns {boolean}
  */
@@ -216,61 +226,88 @@ export function loadFromUrl() {
 }
 
 /**
- * Async loading from URL source. Called after loadFromUrl returns true.
- * @param {function} onDocument - callback with {document, findings}
- * @returns {Promise<boolean>} true if successful
+ * Read what the URL carries, without touching the page state.
+ *
+ * Every failure comes back with its own reason, for the caller to show once.
+ * The earlier version toasted inside the fetch and then the caller toasted a
+ * generic message on top, so the specific reason was never readable.
+ *
+ * @returns {Promise<{found: false}
+ *   | {found: true, ok: true, text: string, findings: Array, source: 'link'|'src', host?: string}
+ *   | {found: true, ok: false, reason: string}>}
  */
-export async function loadFromUrlAsync(onDocument) {
+export async function readUrlPayload() {
   const url = new URL(window.location.href);
   const src = url.searchParams.get('src');
-  if (src) {
-    return loadFromSrc(src, onDocument);
-  }
+  if (src) return readSrc(src);
   // A page route is not a payload. Decoding `#/results` and failing made a
   // page link report that the link carried no readable report.
-  if (fragmentCarriesReport(window.location.hash)) {
-    const result = await decodeFragment(window.location.hash);
-    if (result) {
-      onDocument(result);
-      history.replaceState(null, '', window.location.pathname + window.location.search);
-      return true;
-    }
+  if (!fragmentCarriesReport(url.hash)) return { found: false };
+  const result = await decodeFragment(url.hash);
+  if (!result) {
+    return {
+      found: true,
+      ok: false,
+      reason: 'That link is incomplete or damaged, so the report inside it could not be decoded. Ask for the link again, or for the HTML file.',
+    };
   }
-  return false;
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+  return { found: true, ok: true, text: JSON.stringify(result.document, null, 2), findings: result.findings || [], source: 'link' };
 }
 
-async function loadFromSrc(src, onDocument) {
-  const timeout = new Promise((resolve) => {
-    setTimeout(() => resolve(null), 10000);
-  });
+const SRC_TIMEOUT_MS = 10000;
+
+async function readSrc(src) {
+  const fail = (reason) => ({ found: true, ok: false, reason });
+  let url;
   try {
-    const url = new URL(src);
-    if (!url.protocol.startsWith('http')) return false;
-    if (url.hostname !== 'localhost' && url.protocol !== 'https:') return false;
+    url = new URL(src);
   } catch {
-    return false;
+    return fail('The src address in this link is not a valid URL. Nothing was loaded.');
   }
+  const local = url.protocol === 'http:' && url.hostname === 'localhost';
+  if (url.protocol !== 'https:' && !local) {
+    return fail(`The src address has to start with https://, and this one uses ${url.protocol}. Nothing was loaded.`);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SRC_TIMEOUT_MS);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    const res = await Promise.race([
-      fetch(src, { signal: controller.signal }),
-      timeout,
-    ]);
-    clearTimeout(timer);
-    if (!res || !res.ok) {
-      showToast('Could not fetch document from URL');
-      return true;
+    const res = await fetch(url.href, { signal: controller.signal });
+    if (!res.ok) {
+      return fail(`${url.host} answered ${res.status}${res.statusText ? ` ${res.statusText}` : ''} for that document. Nothing was loaded.`);
     }
     const text = await res.text();
-    const document = JSON.parse(text);
-    onDocument({ document, findings: [] });
     history.replaceState(null, '', window.location.pathname + window.location.search);
-    return true;
-  } catch {
-    showToast('Could not fetch or parse document from URL');
-    return true;
+    return { found: true, ok: true, text, findings: [], source: 'src', host: url.host };
+  } catch (err) {
+    return fail(err && err.name === 'AbortError'
+      ? `${url.host} took more than ${SRC_TIMEOUT_MS / 1000} seconds to answer. Nothing was loaded.`
+      : `Could not fetch the document from ${url.host}. The server may be down, or it does not let other sites read the file.`);
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+/**
+ * A toast that stays up long enough to read a long message. The one copy:
+ * js/open.js and js/boot.js import it from here, since this module imports
+ * neither of them.
+ */
+export function say(message) {
+  showToast(message, { duration: Math.min(9000, 2000 + message.length * 40) });
+}
+
+/**
+ * End a sentence with a full stop, unless it already ends one. Toasts end on
+ * a quoted title (`Opened "X".`), and a title that ends in its own full stop
+ * printed `Opened "Two responses. A clearer decision.".` Here the title's own
+ * stop, inside the closing quote, ends the sentence.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function sentence(text) {
+  return /[.!?…]["'”’)]?$/.test(text) ? text : `${text}.`;
 }
 
 let lastPayload = null;
@@ -289,7 +326,7 @@ export async function copyShareLink(document) {
   }
   const { payload, fragment, tier } = encoded;
   if (tier === 'refused') {
-    showToast(`Too long for a link at ${payload.length.toLocaleString()} characters. Export the one HTML file instead: it needs no account and no network.`);
+    say(`Too long for a link at ${payload.length.toLocaleString()} characters. Export the one HTML file instead: it needs no account and no network.`);
     return false;
   }
   lastPayload = payload;
@@ -307,7 +344,7 @@ export async function copyShareLink(document) {
       : tier === 'fine'
         ? 'fine for a message or a ticket'
         : `${payload.length.toLocaleString()} characters, which some chat clients will cut`;
-    showToast(`Link copied, ${tierMsg}. Anyone with the link has the report: there is no sign-in on it.`);
+    say(`Link copied, ${tierMsg}. Anyone with the link has the report: there is no sign-in on it.`);
   } else {
     showToast('Could not copy to clipboard');
   }

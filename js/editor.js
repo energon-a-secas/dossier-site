@@ -15,7 +15,9 @@ import { parse } from './parse.js';
  * @param {string} sourceText initial JSON/YAML source
  * @param {object} opts configuration
  *   - onChange(result) called when parsing completes, with { model, fatal, findings }
- *   - onFormat() called when user wants to format (caller updates source)
+ *   - onFormat() called by the toolbar's Format button. The caller formats
+ *     the authored document through js/source-pane.js formatCurrent, the
+ *     one Format in the app.
  *   - autoSave(text) called after a valid edit is parsed
  * @returns {HTMLElement} the editor container
  */
@@ -49,7 +51,11 @@ export function createEditor(sourceText = '', opts = {}) {
   const textarea = document.createElement('textarea');
   textarea.className = 'editor-textarea';
   textarea.setAttribute('aria-label', 'Report source, JSON or YAML');
-  textarea.spellcheck = 'false';
+  // The attribute, not the property: `spellcheck = 'false'` assigns a
+  // non-empty string to a boolean property, which turns spellcheck on.
+  textarea.setAttribute('spellcheck', 'false');
+  textarea.setAttribute('autocapitalize', 'off');
+  textarea.setAttribute('autocomplete', 'off');
   textarea.value = sourceText;
   container.appendChild(textarea);
 
