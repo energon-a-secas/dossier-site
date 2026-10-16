@@ -8,12 +8,22 @@
  * click on the toolbar never reloads a report or loses a scroll position.
  *
  * Layout state lives on `#compareView` as classes (`is-focus-layout`,
- * `has-<feature>`) and on each column (`is-focus`, `col--empty`); the CSS in
- * css/compare.css does the rest, including the phone layout, where one
- * column shows at a time whatever the layout says.
+ * `has-<feature>`, `can-add-col` while the set has room for a column) and
+ * on each column (`is-focus`, `col--empty`); the CSS in css/compare.css does
+ * the rest, including the phone layout, where one column shows at a time
+ * whatever the layout says.
+ *
+ * The columns' grid ends with the Add column tile (`.cmp-addcol`), which
+ * css/compare.css shows only where the toolbar has folded Add column into
+ * Options. It is made once, after the columns, and never moves: new columns
+ * go in before it, so a tile with focus keeps it.
  */
 
-import { toolbarHtml, optionsHtml, addMenuHtml, bindGroupKeys } from './toolbar.js';
+import { bindGroupKeys } from '../seg.js';
+import {
+  toolbarHtml, optionsHtml, addMenuHtml, addSlotHtml, watchToolbar,
+} from './toolbar.js';
+import { MAX_COLUMNS } from './model.js';
 import { headHtml, renderBody, bodyKey, labelBody } from './column.js';
 import {
   slotHtml, textFormHtml, textFormLabel, fillTextForm, detailsFormHtml,
@@ -29,6 +39,7 @@ export function mountView(root) {
   root.innerHTML = `
     <h2 class="visually-hidden" id="cmpHeading">Compare reports</h2>
     <div class="cmp-toolbar" id="cmpToolbar" role="group" aria-label="Comparison controls">${toolbarHtml()}</div>
+    <section class="cmp-brief" id="cmpBrief" aria-labelledby="cmpBriefLbl" hidden></section>
     <div class="cmp-body" id="cmpBody">
       <div class="cmp-columns" id="cmpColumns"></div>
       <aside class="cmp-panel" id="cmpPanel" aria-label="Side panel" hidden></aside>
@@ -43,10 +54,12 @@ export function mountView(root) {
     <input type="file" id="cmpFile" hidden tabindex="-1" aria-hidden="true"
       accept=".html,.htm,.md,.markdown,.txt,.json,.yaml,.yml,.xml,.sarif">`;
   bindGroupKeys(root);
+  watchToolbar(root);
   const $ = (id) => root.querySelector(`#${id}`);
   return {
     root,
     toolbar: $('cmpToolbar'),
+    brief: $('cmpBrief'),
     body: $('cmpBody'),
     columns: $('cmpColumns'),
     panel: $('cmpPanel'),
@@ -139,8 +152,9 @@ function frameTop(frame) {
  *
  * @param {HTMLElement} host
  * @param {HTMLElement[]} els
+ * @param {HTMLElement|null} tail what the last column goes before (the Add column tile)
  */
-function placeInOrder(host, els) {
+function placeInOrder(host, els, tail = null) {
   const now = new Map([...host.children].map((el, i) => [el, i]));
   const at = els.map((el) => (now.has(el) ? now.get(el) : -1));
   const keep = steadyRun(at, els.map((el) => (el.querySelector('iframe') ? els.length + 1 : 1)));
@@ -153,7 +167,7 @@ function placeInOrder(host, els) {
     const frame = el.querySelector('iframe');
     const read = frameTop(frame);
     const focused = el.contains(document.activeElement) ? document.activeElement : null;
-    const kept = moveColumn(host, el, els[i + 1] || null);
+    const kept = moveColumn(host, el, els[i + 1] || tail);
     if (scroll && (top || left)) scroll.scrollTo({ left, top, behavior: 'instant' });
     if (frame && read && !kept) {
       frame.addEventListener('load', () => {
@@ -183,6 +197,7 @@ export function renderColumns(refs, set, ui, hooks = {}) {
   const host = refs.columns;
   const ids = new Set(set.columns.map((col) => col.id));
   for (const el of [...host.children]) {
+    if (el.classList.contains('cmp-addcol')) continue;
     if (!ids.has(el.dataset.col)) {
       el.remove();
       ui.records.delete(el.dataset.col);
@@ -190,6 +205,8 @@ export function renderColumns(refs, set, ui, hooks = {}) {
     }
   }
   host.style.setProperty('--cols', String(Math.max(1, set.columns.length)));
+  host.dataset.cols = String(set.columns.length);
+  refs.root.classList.toggle('can-add-col', set.columns.length < MAX_COLUMNS);
   refs.root.classList.toggle('is-focus-layout', set.view.layout === 'focus');
 
   const tabbed = set.view.layout === 'focus' || Boolean(hooks.tabbed);
@@ -201,7 +218,15 @@ export function renderColumns(refs, set, ui, hooks = {}) {
   // and a screen reader meet the columns in the order the screen has them.
   const order = displayColumns(set);
   const els = order.map((col) => columnElement(refs, col));
-  placeInOrder(host, els);
+  let add = host.querySelector(':scope > .cmp-addcol');
+  placeInOrder(host, els, add);
+  if (!add) {
+    // Made again after an open set clears the grid (js/compare/index.js `openSet`).
+    add = document.createElement('div');
+    add.className = 'cmp-addcol';
+    add.innerHTML = addSlotHtml();
+    host.append(add);
+  }
   order.forEach((col, index) => {
     const el = els[index];
     // While blind, not the column's real role (js/compare/blind.js `roleAttr`).
@@ -226,7 +251,7 @@ export function renderColumns(refs, set, ui, hooks = {}) {
         body.className = 'col__body col__body--form';
         body.innerHTML = form.kind === 'replace' ? slotHtml(set, col, { replacing: true })
           : form.kind === 'details' ? detailsFormHtml(set, col)
-            : textFormHtml(set, col, form.kind);
+            : textFormHtml(set, col, form.kind, { wrap: ui.wrapSource !== false });
         const formEl = body.querySelector('form');
         if (form.kind === 'edit') fillTextForm(formEl, col.source?.text || '');
         if (form.focus !== false) (body.querySelector('textarea, input, button'))?.focus({ preventScroll: true });

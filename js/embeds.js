@@ -35,13 +35,18 @@ import { registerActions } from './actions.js';
 import { state } from './state.js';
 import { createStore } from './neorgon-persist.js';
 import { showToast } from './neorgon-dom.js';
-import { staticFrame, interactiveFrame, frameHeadings, scrollInsideFrame } from './compare/frame.js';
+import { staticFrame, interactiveFrame, frameHeadings, scrollInsideFrame, blockedLinkSentence } from './compare/frame.js';
 import { htmlOutline } from './compare/normalize.js';
 import {
-  EMBED_VIEWS, embedViewOf, embedFrameTitle, embedNote, formatMarkup, originalNotes, SCRIPTS_NOTE,
+  EMBED_VIEWS, embedViewOf, embedFrameTitle, embedNote, formatMarkup, originalNotes, SCRIPTS_NOTE, PRINT_CAPTION,
 } from './render/embed.js';
+import { fnv1a } from './hash.js';
+import { reducedMotion } from './motion.js';
 import { embedHeadingPrefix } from './render/outline.js';
 import { fitEmbedFrames } from './embed-fit.js';
+import { checkRadios, bindGroupKeys } from './seg.js';
+import { bindFrameFocus } from './frame-focus.js';
+import { fitScrollRegions } from './scroll-regions.js';
 
 const LIVE = '.block-embed-html--live';
 const views = createStore({ key: 'dossier-site:embed-views', version: 1 });
@@ -62,8 +67,10 @@ const infos = new WeakMap();
 let bound = false;
 
 /**
- * Bind once: the handshake for the sealed host, the view controls, in-page
- * links in the Dossier format, and the hydration of every live shell.
+ * Bind once: the handshake for the sealed host, the view controls and their
+ * arrow keys, in-page links in the Dossier format, the hydration of every
+ * live shell, and the focus ring for every report frame on the page
+ * (js/frame-focus.js), the Compare view's included.
  */
 export function bindEmbeds() {
   if (bound) return;
@@ -73,7 +80,10 @@ export function bindEmbeds() {
   window.addEventListener('afterprint', removePrintCopies);
   registerActions({ 'embed-view': chooseView });
   document.addEventListener('click', localLink);
+  bindFrameFocus();
   const root = document.getElementById('stage') || document.body;
+  // Only the view row: no other group in the stage takes arrow keys here.
+  bindGroupKeys(root, '.embed-bar__views');
   new MutationObserver((records) => {
     for (const record of records) {
       for (const node of record.addedNodes) if (node.nodeType === 1) hydrateIn(node);
@@ -123,12 +133,7 @@ const prints = [];
 function fingerprint(html) {
   const hit = prints.find((entry) => entry.html === html);
   if (hit) return hit.fp;
-  let h = 0x811c9dc5;
-  for (let i = 0; i < html.length; i += 1) {
-    h ^= html.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  const fp = `${html.length.toString(36)}.${(h >>> 0).toString(36)}`;
+  const fp = `${html.length.toString(36)}.${fnv1a(html).toString(36)}`;
   prints.unshift({ html, fp });
   prints.length = Math.min(prints.length, 4);
   return fp;
@@ -205,9 +210,8 @@ function show(wrapper, wanted) {
   const info = infos.get(wrapper);
   const view = embedViewOf({ scripts: info.scripts }, wanted);
   wrapper.dataset.embedView = view;
-  for (const button of wrapper.querySelectorAll('.embed-bar__views > button')) {
-    button.setAttribute('aria-pressed', String(button.dataset.view === (view === 'format' ? 'format' : 'original')));
-  }
+  // Running the scripts is the Original view with its toggle on.
+  checkRadios(wrapper, '.embed-bar__views > [role="radio"]', view === 'format' ? 'format' : 'original', 'view');
   const run = wrapper.querySelector('.embed-bar__scripts');
   if (run) {
     run.setAttribute('aria-pressed', String(view === 'interactive'));
@@ -222,6 +226,8 @@ function show(wrapper, wanted) {
 
   if (view === 'format') {
     body.innerHTML = formatMarkup(info.html, info.prefix);
+    // A table is a focusable region only while it scrolls sideways.
+    fitScrollRegions(body);
     return;
   }
 
@@ -259,17 +265,7 @@ function show(wrapper, wanted) {
   fitEmbedFrames(holder);
 }
 
-function blockedLinkSentence(href) {
-  const raw = String(href || '').trim();
-  if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//')) {
-    return 'That link was not opened: Dossier only opens web and mail links.';
-  }
-  return 'That link points at a file beside the report, which Dossier was not given.';
-}
-
 // ── Printing ─────────────────────────────────────────────────────────────────
-
-const PRINT_CAPTION = '<p class="block-embed__caption">Printed in Dossier format: a frame cannot run across pages.</p>';
 
 /**
  * Printed from the browser's own menu, a frame is one box: the block moved
@@ -386,10 +382,6 @@ function focusHeading(anchor) {
 /** A frame held at most of the window's height, scrolling inside itself. */
 function isHeld(frame) {
   return frame?.getAttribute('data-embed-fit') === 'held';
-}
-
-function reducedMotion() {
-  return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 }
 
 /**

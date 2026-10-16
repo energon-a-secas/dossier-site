@@ -18,7 +18,7 @@
 
 import {
   BLOCKS, blockDef, isKnownType, derivedFields, requiredFields,
-  ENVELOPE, META, PAGE, CHECKED_BY,
+  ENVELOPE, META, PAGE,
 } from './registry/index.js';
 import { wasDerived } from './derive.js';
 
@@ -405,49 +405,4 @@ function levenshtein(a, b) {
     }
   }
   return matrix[b.length][a.length];
-}
-
-/**
- * Count blocks that make claims and categorize evidence.
- *
- * @param {object} model
- * @returns {{blocks: number, withEvidence: number, unsourced: number, byChecker: object}}
- */
-export function claimAudit(model) {
-  const CLAIM_TYPES = new Set([
-    'metrics', 'chart', 'gauge', 'scorecard', 'table', 'findings',
-    'tests', 'compare', 'decision', 'risks', 'prose', 'callout',
-  ]);
-
-  let blocks = 0;
-  let withEvidence = 0;
-  const byChecker = { code: 0, human: 0, llm: 0, none: 0 };
-
-  if (model?.dossier?.pages && Array.isArray(model.dossier.pages)) {
-    for (const page of model.dossier.pages) {
-      if (page?.blocks && Array.isArray(page.blocks)) {
-        for (const block of page.blocks) {
-          if (CLAIM_TYPES.has(block?.type)) {
-            blocks++;
-
-            if (Array.isArray(block.evidence) && block.evidence.length > 0) {
-              withEvidence++;
-              for (const ev of block.evidence) {
-                const checker = ev?.checkedBy || 'none';
-                if (CHECKED_BY.includes(checker)) {
-                  byChecker[checker]++;
-                }
-              }
-            } else {
-              byChecker.none++;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  const unsourced = blocks - withEvidence;
-
-  return { blocks, withEvidence, unsourced, byChecker };
 }

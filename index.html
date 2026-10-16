@@ -30,16 +30,16 @@
   <meta name="apple-mobile-web-app-title" content="Dossier">
   <link rel="manifest" href="/site.webmanifest">
   <meta name="neo-mark" content="on">
-  <title>Dossier | Work report renderer</title>
-  <meta name="description" content="Render AI-written work reports from one JSON file: metric tiles, charts and before-and-after comparisons, kept in your browser and shared by link">
+  <title>Dossier | Read and compare reports</title>
+  <meta name="description" content="Read HTML, Markdown and Dossier reports in one clean format, and compare a human draft, an agent's output and the fixes side by side, all in your browser.">
   <meta property="og:title" content="Dossier">
-  <meta property="og:description" content="Render AI-written work reports from one JSON file: metric tiles, charts and before-and-after comparisons, kept in your browser and shared by link">
+  <meta property="og:description" content="Read HTML, Markdown and Dossier reports in one clean format, and compare a human draft, an agent's output and the fixes side by side, all in your browser.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://dossier.neorgon.com/">
   <meta property="og:site_name" content="Neorgon">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Dossier">
-  <meta name="twitter:description" content="Render AI-written work reports from one JSON file: metric tiles, charts and before-and-after comparisons, kept in your browser and shared by link">
+  <meta name="twitter:description" content="Read HTML, Markdown and Dossier reports in one clean format, and compare a human draft, an agent's output and the fixes side by side, all in your browser.">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://dossier.neorgon.com/">
   <meta property="og:locale" content="en_US">
@@ -105,7 +105,7 @@
     "@context": "https://schema.org",
     "@type": "WebApplication",
     "name": "Dossier",
-    "description": "Render AI-written work reports from one JSON file: metric tiles, charts and before-and-after comparisons, kept in your browser and shared by link",
+    "description": "Read HTML, Markdown and Dossier reports in one clean format, and compare a human draft, an agent's output and the fixes side by side, all in your browser.",
     "url": "https://dossier.neorgon.com/",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Any",
@@ -221,11 +221,15 @@
         <span class="ds-reportbar__origin" id="reportOrigin">Nothing open</span>
         <span class="ds-reportbar__pages" id="reportPages"></span>
         <button type="button" class="btn btn--quiet btn--sm ds-reportbar__check" id="toggleFindings" data-action="findings" aria-expanded="false" aria-controls="findingsPanel" data-needs-report><span>Check report</span> <span class="ds-count" id="findingsCount" hidden></span></button>
+        <button type="button" class="btn btn--quiet btn--sm ds-reportbar__compare" id="compareReport" data-action="cmp-compare-report" data-needs-report><span>Compare<span class="visually-hidden"> with another report</span></span></button>
         <button type="button" class="btn btn--primary btn--sm" id="toggleMode" data-action="toggle-mode" aria-pressed="false" data-needs-report><span>Edit</span></button>
       </div>
 
       <div class="ds-stage" id="stageWrap">
         <div class="ds-report" id="stage" aria-busy="false"></div>
+        <!-- Says which page is shown after a page change (js/pipeline.js
+             announcePage). Outside #stage, which every render replaces. -->
+        <p class="visually-hidden" id="pageLive" role="status" aria-live="polite" aria-atomic="true"></p>
       </div>
 
       <div class="ds-side" id="sidePane">
@@ -243,7 +247,7 @@
             <div class="ds-source__tabs" role="tablist" aria-label="How to edit">
               <button type="button" role="tab" id="tabForm" aria-selected="true"
                       aria-controls="formPane" data-action="source-tab" data-pane="form">Form</button>
-              <button type="button" role="tab" id="tabJson" aria-selected="false"
+              <button type="button" role="tab" id="tabJson" aria-selected="false" tabindex="-1"
                       aria-controls="jsonPane" data-action="source-tab" data-pane="json">JSON</button>
             </div>
           </div>
@@ -293,15 +297,21 @@
           Choose a file or paste its contents: a Dossier document in JSON or
           YAML, an HTML or Markdown report, test results or a log.
         </p>
-        <label for="importFile">Choose a file</label>
-        <input type="file" id="importFile"
+        <!-- A product button drives the hidden input (js/open-dialog.js), and
+             the chosen file's name shows beside it, as a Compare column does. -->
+        <div class="ds-dialog__file">
+          <button type="button" class="btn" data-action="import-choose-file" aria-describedby="importFileName">Choose a file</button>
+          <span class="ds-dialog__file-name" id="importFileName"></span>
+        </div>
+        <input type="file" id="importFile" hidden tabindex="-1" aria-hidden="true"
                accept=".json,.yaml,.yml,.md,.html,.htm,.xml,.sarif,.txt">
         <label for="importText">Or paste it here</label>
         <textarea id="importText" rows="8" aria-describedby="importDetected" spellcheck="false" data-text-surface
                   placeholder='{"dossier": {"version": 1, "title": "...", "pages": []}}'></textarea>
         <p class="ds-dialog__detected" id="importDetected" role="status"></p>
         <div class="ds-dialog__actions">
-          <button type="button" class="btn btn--primary" data-action="import-confirm">Open it</button>
+          <button type="button" class="btn btn--primary" id="importToColumn" data-action="cmp-import-to-column" hidden>Add to column B</button>
+          <button type="button" class="btn btn--primary" id="importConfirm" data-action="import-confirm">Open it</button>
           <button type="submit" class="btn" value="cancel">Cancel</button>
         </div>
         <section class="ds-dialog__examples" aria-labelledby="openExamplesHeading">

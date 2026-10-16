@@ -17,11 +17,80 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
-import { base, file, chooseFile } from './compare-check-helpers.mjs';
+import { base, file, chooseFile } from './check-helpers.mjs';
 
 const browser = await chromium.launch();
 const errors = [];
 const hostileHtml = await fs.readFile(file('fixtures/compare/hostile.html'), 'utf8');
+
+/**
+ * Document named properties shadow both the DOM members this page calls on a
+ * static frame's document and any expando set on it, so one
+ * `<img name="__dossierLinks">` used to turn a frame's link handling off (its
+ * in-page links reloaded the report and its web links stayed in the frame),
+ * and `<img name="querySelectorAll">` took the column's outline and sync.
+ */
+const NAMED = '<!doctype html><html><head><title>Named elements</title></head><body>'
+  + '<h1>Named elements</h1>'
+  + '<img name="__dossierLinks" alt=""><img name="addEventListener" alt=""><img name="querySelectorAll" alt="">'
+  + '<form name="baseURI"></form><img name="ok" id="getElementById" alt=""><img name="hero" id="hero" alt="">'
+  + '<p><a id="toSec" href="#sec2">Down to the second section</a></p>'
+  + '<p><a id="web" href="https://example.test/named">A web link</a></p>'
+  + '<div style="height: 2400px"></div><h2 id="sec2">Second section</h2><p>The end.</p></body></html>';
+
+async function namedElementsCheck() {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  page.on('pageerror', (error) => errors.push(`named elements: ${error.message}`));
+  await ctx.route('https://example.test/**', (route) => route.fulfill({ contentType: 'text/html', body: '<p>web</p>' }));
+  try {
+    await page.goto(`${base}/?check=named${Date.now()}#/~compare`, { waitUntil: 'networkidle' });
+    await page.bringToFront();
+    await page.evaluate(() => {
+      window.__opened = [];
+      window.open = (url) => { window.__opened.push(String(url)); return null; };
+    });
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      page.locator('#cmp-col-k1 [data-action="cmp-choose-file"]').click(),
+    ]);
+    await chooser.setFiles({ name: 'named.html', mimeType: 'text/html', buffer: Buffer.from(NAMED) });
+    await page.locator('#cmp-col-k1 .col__scroll').waitFor();
+    await page.locator('#cmp-col-k1 .col__menu').click();
+    await page.locator('#cmpColumnMenu [data-value="original"]').click();
+    const frameEl = page.locator('#cmp-col-k1 .col__frame');
+    await frameEl.waitFor();
+    await page.frameLocator('#cmp-col-k1 .col__frame').locator('#sec2').waitFor();
+    await page.waitForTimeout(300);
+    const names = await frameEl.evaluate((f) => [...Document.prototype.querySelectorAll.call(f.contentDocument, 'img, form')]
+      .map((el) => `${el.localName}:${el.getAttribute('name')}`));
+    assert.deepEqual(names, ['img:null', 'img:null', 'img:null', 'form:null', 'img:null', 'img:hero'],
+      'The static copy kept a name that shadows its document, or dropped one that does not');
+    let navigated = 0;
+    page.on('framenavigated', (f) => { if (f !== page.mainFrame()) navigated += 1; });
+    const entries = await page.evaluate(() => history.length);
+    const inFrame = page.frameLocator('#cmp-col-k1 .col__frame');
+    await inFrame.locator('#toSec').click();
+    await page.waitForTimeout(300);
+    const after = await frameEl.evaluate((f) => ({ at: f.contentWindow.location.href, y: f.contentWindow.scrollY }));
+    assert.equal(after.at, 'about:srcdoc', 'An in-page link took a named-element report away from its frame');
+    assert.ok(after.y > 0, `An in-page link did not scroll a named-element report (scrollY ${after.y})`);
+    await inFrame.locator('#web').click();
+    await page.waitForTimeout(300);
+    assert.deepEqual(await page.evaluate(() => window.__opened), ['https://example.test/named'], 'A web link in a named-element report did not open in a new tab');
+    assert.equal(await frameEl.evaluate((f) => f.contentWindow.location.href), 'about:srcdoc', 'A web link navigated a named-element report');
+    assert.equal(navigated, 0, 'A link navigated the frame of a named-element report');
+    assert.equal(await page.evaluate(() => history.length), entries, 'A link in a named-element report made a history entry');
+    const synced = await page.evaluate(async () => {
+      const { compare } = await import('/js/compare/index.js');
+      return { registered: compare.sync.has('k1'), headings: compare.ui.records.get('k1')?.headings?.length || 0 };
+    });
+    assert.deepEqual(synced, { registered: true, headings: 2 }, 'A named-element report lost its outline or its sync');
+  } finally {
+    await page.evaluate(() => { indexedDB.deleteDatabase('dossier-compare'); indexedDB.deleteDatabase('dossier'); localStorage.clear(); }).catch(() => {});
+    await ctx.close();
+  }
+}
 
 try {
   const hostile = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -261,7 +330,17 @@ try {
     const html = '<main><div class="stat"><span class="num">201</span><span class="lbl">tickets this year</span></div>'
       + '<p>Up <span class="num">5</span><span class="unit">%</span> since May.</p>'
       + '<svg viewBox="0 0 10 10" role="img"><title>A styled star</title><circle class="star" cx="5" cy="5" r="4"/></svg>'
-      + '<svg viewBox="0 0 10 10" aria-label="A drawn dot"><circle cx="5" cy="5" r="4" fill="#335"/></svg></main>';
+      + '<svg viewBox="0 0 10 10" aria-label="A drawn dot"><circle cx="5" cy="5" r="4" fill="#335"/></svg>'
+      // Boxes the page lays out on their own get a space where two words
+      // would join, and none inside a word; three or more get separators; a
+      // slide footer's counter is chrome.
+      + '<dl><dt>Y1</dt><dd>Upgrade plans<span class="keys">TICK-1 · TICK-2</span></dd></dl>'
+      + '<p><span class="lab">Current plan<small>Rollout</small></span></p>'
+      + '<ul><li><span class="n">1</span><b>Finding</b><span class="d">Scanner flags</span></li></ul>'
+      + '<p>Neo<span class="accent">rgon</span> site</p>'
+      + '<div class="row"><span class="l">Cache upgrades</span><span class="track"><span class="fill"></span></span><span class="v">73</span><span class="t">Themes 2, 3</span></div>'
+      + '<section><footer class="slide-foot"><span class="src">One owner.</span><span class="pg">02 / 13</span></footer></section>'
+      + '<p>Done <span class="frac">3 / 4</span> of the steps</p></main>';
     const out = document.createElement('div');
     out.innerHTML = renderIr(htmlToIr(html).blocks, { colId: 'zz' });
     return { text: out.textContent.replace(/\s+/g, ' '), images: [...out.querySelectorAll('img')].map((img) => img.alt) };
@@ -270,6 +349,10 @@ try {
   assert.match(normalized.text, /Up 5% since May/, 'A styled word in running text was split');
   assert.match(normalized.text, /A styled star\. A drawing coloured by its page/, 'A class-styled drawing was not described');
   assert.deepEqual(normalized.images, ['A drawn dot'], 'Only the drawing with its own fills is drawn');
+  for (const [re, why] of [[/plans TICK-1/, 'A classed box after text was glued onto it'], [/plan Rollout/, 'An unclassed small was glued onto its text'],
+    [/1 Finding Scanner flags/, 'A numbered step glued its parts'], [/Neorgon site/, 'A styled part of a word was split off'],
+    [/Cache upgrades · 73 · Themes 2, 3/, 'Three boxes were not set apart'], [/One owner\./, 'A slide footer lost its note'], [/3 \/ 4/, 'A fraction outside a footer was dropped']]) assert.match(normalized.text, re, why);
+  for (const [re, why] of [[/201 ·/, 'Two boxes got a separator meant for three'], [/02 \/ 13/, 'A slide footer kept its counter']]) assert.doesNotMatch(normalized.text, re, why);
 
   // ── The same report in the Reports view's reader ──────────────────────────
   await hp.locator('#viewReports').click();
@@ -295,7 +378,7 @@ try {
   await hp.evaluate(() => { document.getElementById('app-toast').textContent = ''; });
   await inReader.locator('#useFile').click();
   await hp.waitForTimeout(100);
-  assert.equal(await said(), 'That link points at a file beside the report, which Dossier was not given.', 'The Reports view did not refuse a use link to a file beside the report');
+  assert.equal(await said(), 'That link points at other-use.html, a file beside the report that Dossier does not have.', 'The Reports view did not refuse a use link to a file beside the report, naming it as Compare does');
   await hp.evaluate(() => window.scrollTo(0, 0));
   await inReader.locator('#usePlace').click();
   // The page scrolls (smoothly, unless motion is reduced) until the place is
@@ -350,6 +433,7 @@ try {
   // ── The one-file export's fitter, which handles links where frame.js is not ─
   await hp.evaluate(async (html) => {
     const { fitEmbedFrames } = await import('/js/embed-fit.js');
+    const { guardFrameLinks } = await import('/js/frame-links.js');
     const { staticCopy } = await import('/js/compare/frame.js');
     const { embedDocument } = await import('/js/embed-policy.js');
     const box = document.createElement('div');
@@ -361,7 +445,7 @@ try {
     box.append(f);
     document.body.append(box);
     await new Promise((resolve) => { f.addEventListener('load', resolve, { once: true }); });
-    fitEmbedFrames(box, { links: true });
+    fitEmbedFrames(box, { links: true, guard: guardFrameLinks });
   }, hostileHtml);
   const fitted = hp.frameLocator('#fitCheck iframe');
   await fitted.locator('#svgXlink').click();
@@ -404,8 +488,10 @@ try {
   assert.deepEqual([...outside.values()], [], 'Requests left localhost');
   await hostile.close();
 
+  await namedElementsCheck();
+
   assert.deepEqual(errors, [], 'The page raised errors');
-  console.log('Passed: a hostile report inert in Dossier format, Original (a static copy that stays clean when parsed again, with no animated link address, its scroll contained, link refusals that say why, SVG links, links in declarative shadow roots and middle clicks opening web links in a new tab, links an SVG use draws read back as the report wrote them and never opened by a middle or modifier click, any other navigation stopped with no history entry, and a frame the browser takes away put back with a note and no entry of its own) and Interactive, stat tiles and page-styled drawings in Dossier format, the Reports view reader catching the same links, stopping the same navigations and putting its frame back with a note above it, and the export fitter doing all three, with no request off localhost and no console error outside Interactive.');
+  console.log('Passed: a hostile report inert in Dossier format, Original (a static copy that stays clean when parsed again, with no animated link address, its scroll contained, link refusals that say why, SVG links, links in declarative shadow roots and middle clicks opening web links in a new tab, links an SVG use draws read back as the report wrote them and never opened by a middle or modifier click, any other navigation stopped with no history entry, and a frame the browser takes away put back with a note and no entry of its own) and Interactive, stat tiles, boxes kept apart from their neighbouring words, separators between three or more boxes, slide counters left out and page-styled drawings in Dossier format, the Reports view reader catching the same links, stopping the same navigations and putting its frame back with a note above it, and the export fitter doing all three, a report that names its elements after members of its document keeping its links caught, its scroll and its sync, with no request off localhost and no console error outside Interactive.');
 } finally {
   await browser.close();
 }

@@ -8,8 +8,12 @@
  *
  * The toolbar never wraps: controls fold into Options in tiers, `.tb-x`
  * below 1440 px, `.tb-w` below 1100 px, `.tb-m` below 700 px, and Options
- * lists the folded ones through `data-tier`. Below 700 px one column shows
- * at a time, whatever the layout says. */
+ * lists the folded ones through `data-tier`. The against picker never
+ * shrinks, and a measured fold backs the fixed tiers up: where the row would
+ * still overflow, `#compareView.is-tight` folds `.tb-w` and `.tb-x` as well
+ * (js/compare/toolbar.js `fitToolbar`). Wherever `.tb-x` is folded, Add
+ * column also has a tile after the last column (`.cmp-addcol`). Below
+ * 700 px one column shows at a time, whatever the layout says. */
 
 /* ── The view ─────────────────────────────────────────────────────────── */
 /* The view is the window under the 56 px app header (design spec 11): the
@@ -119,7 +123,9 @@ html[data-dossier-booting] #compareView { visibility: hidden; }
   white-space: nowrap;
 }
 .counter small { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--text-secondary); }
-.tb-options { display: none; }
+/* Never squeezed below its 36 px: the title and the set's name give way. It
+ * shrank to 23 px at 1100 px, under the 24 px target size (WCAG 2.5.8). */
+.tb-options { display: none; flex: none; }
 .focus-switch { display: none; }
 .tb-all { display: none; }
 #compareView.is-focus-layout .focus-switch { display: inline-flex; min-width: 0; }
@@ -127,6 +133,44 @@ html[data-dossier-booting] #compareView { visibility: hidden; }
 .focus-switch > button { display: inline-flex; align-items: center; gap: 6px; }
 .focus-switch .rb { width: 20px; height: 20px; }
 .focus-switch > button[aria-selected="true"] .rb { border-color: var(--on-action); }
+
+/* ── The brief: what every report was asked to write (js/compare/brief.js) ─
+ * One line above the columns, hidden while there is no brief, so a
+ * comparison without one loses no column height. Show all wraps it. */
+.cmp-brief {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 34px;
+  padding: 3px 12px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+.cmp-brief[hidden] { display: none; }
+.cmp-brief__lbl { flex: none; font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); }
+.cmp-brief__text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-reading);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmp-brief.is-open { align-items: flex-start; padding-block: 8px; }
+.cmp-brief.is-open .cmp-brief__text { white-space: pre-wrap; max-width: var(--measure); max-height: min(30vh, 12em); overflow: auto; overscroll-behavior: contain; }
+.cmp-brief .btn { flex: none; height: 28px; }
+.cmp-brief .btn[hidden] { display: none; }
+.cmp-brief__form { flex: 1; display: grid; gap: 6px; max-width: 52rem; padding-block: 6px; }
+.cmp-brief__form label { font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); }
+.cmp-brief__hint { font-weight: 400; color: var(--text-secondary); }
+.cmp-brief__form textarea { width: 100%; max-height: 30vh; resize: vertical; font-family: var(--font-reading); }
+.cmp-brief__actions { display: flex; gap: 8px; }
+.brief-add { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-top: 10px; font-size: var(--text-xs); color: var(--text-secondary); }
+.brief-add[hidden] { display: none; }
 
 /* ── Popovers: Options, menus, the switcher ───────────────────────────── */
 .cmp-pop {
@@ -190,6 +234,12 @@ html[data-dossier-booting] #compareView { visibility: hidden; }
 .cmp-menu > [data-danger] { color: var(--danger); }
 .cmp-menu__sep { height: 1px; margin: 5px 4px; background: var(--border); }
 .cmp-menu__label { padding: 4px 10px 2px; font-size: var(--text-xs); color: var(--text-secondary); }
+/* "Use a saved report": the library's reports, title over kind and pages. */
+.cmp-menu--saved { max-height: min(60vh, 420px); overflow-y: auto; width: min(340px, calc(100vw - 16px)); }
+.cmp-menu--saved [role="menuitem"] { display: grid; gap: 2px; padding-block: 6px; text-align: start; }
+.cmp-menu__title { overflow-wrap: anywhere; }
+.cmp-menu__meta { font-size: var(--text-xs); color: var(--text-secondary); }
+.cmp-menu__note { padding: 6px 8px; font-size: var(--text-xs); color: var(--text-secondary); }
 
 .cmp-switcher { width: 380px; display: grid; gap: 10px; }
 .cmp-switcher .sw__heading { margin: 0; }
@@ -484,8 +534,13 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.5;
-  white-space: pre;
+  /* Long lines wrap, so a number mid-paragraph is reached without scrolling
+   * sideways. Wrap lines off (code) lets them run on. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
+.col-form__text.is-nowrap { white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.col-form__wrap { margin-left: auto; }
 .col-form__error { padding: 8px 10px; border-left: 3px solid var(--danger); background: var(--danger-soft); color: var(--danger); font-size: var(--text-xs); }
 .col-form__error[hidden] { display: none; }
 .col-form__actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -494,6 +549,39 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
 .col-form__field[hidden] { display: none; }
 .col-form__field input, .col-form__field select { font-weight: 400; color: var(--text-primary); }
 .col-form__hint { font-weight: 400; }
+/* Save and Cancel sit at a form's bottom edge, and the last column's bottom
+ * edge is the toasts' corner: a status toast covered Save while saying
+ * "Edit it, then Save". The rightmost form keeps that lane free. */
+.col:last-of-type .col-form:not(.col-form--details),
+#compareView.is-focus-layout .col.is-focus .col-form:not(.col-form--details) { padding-bottom: 88px; }
+
+/* ── The Add column tile ──────────────────────────────────────────────── */
+/* After the last column, wherever the toolbar has folded Add column into
+ * Options (the width tiers below), while the set has room. A short tile at
+ * the top of its own 44 px track, so the role menu it opens sits beside it
+ * and on screen. Spanning both rows, it never makes the head row taller. */
+.cmp-columns { --addcol-w: 44px; }
+.cmp-addcol { display: none; grid-row: span 2; align-self: start; min-width: 0; }
+.cmp-addcol__btn {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 0 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sheet);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.cmp-addcol__btn:hover { border-color: var(--accent); background: var(--surface-1); }
+.cmp-addcol__btn .ic { flex: none; }
+.cmp-addcol__word { writing-mode: vertical-rl; }
 
 /* ── The undo toast ───────────────────────────────────────────────────── */
 .cmp-toast {
@@ -531,6 +619,26 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
   .cmp-options .opt[data-tier="w"] { display: grid; }
   .set-title { max-width: 200px; }
 }
+/* The measured fold (js/compare/toolbar.js `fitToolbar`): the row would
+ * overflow, or cut the title to nothing, at this width with these fonts and
+ * this text spacing, so `.tb-w` and `.tb-x` fold whatever the width tier. */
+@media (min-width: 700px) {
+  #compareView.is-tight .cmp-toolbar .tb-w, #compareView.is-tight .cmp-toolbar .tb-x { display: none; }
+  #compareView.is-tight .tb-options { display: inline-flex; }
+  #compareView.is-tight .cmp-options .opt[data-tier="w"], #compareView.is-tight .cmp-options .opt[data-tier="x"] { display: grid; }
+}
+/* The Add column tile shows where Add column is folded (700 to 1439 px),
+ * and only where its track costs no sideways scroll at the 340 px column
+ * minimum, a classic scrollbar included: two columns from 800 px, three
+ * from 1140 px. Never in the focus layout, never with four columns. */
+@media (min-width: 800px) and (max-width: 1439px) {
+  #compareView.can-add-col:not(.is-focus-layout) .cmp-columns:is([data-cols="1"], [data-cols="2"]) { grid-template-columns: repeat(var(--cols), minmax(var(--col-min), 1fr)) var(--addcol-w); }
+  #compareView.can-add-col:not(.is-focus-layout) .cmp-columns:is([data-cols="1"], [data-cols="2"]) > .cmp-addcol { display: flex; }
+}
+@media (min-width: 1140px) and (max-width: 1439px) {
+  #compareView.can-add-col:not(.is-focus-layout) .cmp-columns[data-cols="3"] { grid-template-columns: repeat(var(--cols), minmax(var(--col-min), 1fr)) var(--addcol-w); }
+  #compareView.can-add-col:not(.is-focus-layout) .cmp-columns[data-cols="3"] > .cmp-addcol { display: flex; }
+}
 
 /* Phone: one column at a time; Options, menus and the switcher as sheets
  * under the header. */
@@ -543,6 +651,8 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
   .focus-switch { display: inline-flex; flex: 1; min-width: 0; }
   .focus-switch > button { flex: 1; justify-content: center; min-width: 0; height: 34px; padding: 0 6px; }
   .focus-switch__word { overflow: hidden; text-overflow: ellipsis; }
+  /* The one column shown spans the window, and the toasts span its foot. */
+  .col-form:not(.col-form--details) { padding-bottom: 88px; }
   .tb-options { order: 2; }
   .tb-row2 { order: 3; display: flex; align-items: center; gap: 8px; width: 100%; }
   .tb-row2 > .tb-against { flex: 1; min-width: 0; }
@@ -571,8 +681,45 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
   .cmp-menu { min-width: min(260px, calc(100vw - 16px)); }
   .cmp-toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
 }
+/* Phone switcher: four tabs (three on the narrowest phones) cannot all carry
+ * a role word. Only the chosen tab keeps its word, at its own width. The
+ * others show their letter, and their word stays as the tab's accessible
+ * name, hidden the way .visually-hidden hides it. The ellipsis above stays
+ * as a backstop for a large browser font. Measured: a tab needs 38 px plus
+ * its word, so four words fit from about 465 px and three blind "Report N"
+ * words from about 366 px. */
+@media (max-width: 479px) {
+  .focus-switch:has(> [role="tab"]:nth-child(4)) > [role="tab"][aria-selected="true"] { flex: none; }
+  .focus-switch:has(> [role="tab"]:nth-child(4)) > [role="tab"]:not([aria-selected="true"]) .focus-switch__word {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
+@media (max-width: 379px) {
+  .focus-switch:has(> [role="tab"]:nth-child(3)) > [role="tab"][aria-selected="true"] { flex: none; }
+  .focus-switch:has(> [role="tab"]:nth-child(3)) > [role="tab"]:not([aria-selected="true"]) .focus-switch__word {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
 @media (max-width: 699px) and (prefers-reduced-motion: no-preference) {
   .cmp-pop.is-sheet:not([hidden]) { animation: cmp-sheet-in var(--dur) var(--ease-out); }
+}
+
+/* Short windows (150 to 200% zoom, a landscape phone): every live column
+ * head keeps its badge row and a one-row difference line, and the reading
+ * text gets the height. The who line, the stats and the per-kind counts of
+ * the difference line stay in the accessibility tree (and the counts in the
+ * count's title), hidden the way .visually-hidden hides them, and the column
+ * menu brings them back (`show-head-details`). All heads share one row, so
+ * one column's wrapped counts made every head taller. Scoped to heads with a
+ * menu or close button: an exported file's heads have none and keep every
+ * line. The 560 px is mirrored in js/compare/popover.js as SHORT. */
+@media (max-height: 560px) {
+  #compareView .col__head:has(> .col__row > :is(.col__menu, .col__close)) { padding-top: 6px; }
+  #compareView:not(.show-head-details) .col__head:has(> .col__row > :is(.col__menu, .col__close)) > :is(.col__who, .col__stats),
+  #compareView:not(.show-head-details) .col__head:has(> .col__row > :is(.col__menu, .col__close)) > .col__diff > .key {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  #compareView .col__head:has(> .col__row > :is(.col__menu, .col__close)) > .col__diff { min-height: 30px; padding-block: 3px 4px; }
 }
 @keyframes cmp-sheet-in { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
 
@@ -583,7 +730,10 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
 /* ── Print: columns one after another, each with its head ─────────────── */
 @media print {
   html[data-dossier-view="compare"] #compareView { display: block; height: auto; }
-  .cmp-toolbar, .cmp-pop, .cmp-scrim, .cmp-toast, .cmp-panel, .ruler, .col-note, .drop { display: none !important; }
+  .cmp-toolbar, .cmp-pop, .cmp-scrim, .cmp-toast, .cmp-panel, .cmp-addcol, .ruler, .col-note, .drop { display: none !important; }
+  .cmp-brief { border: 0; padding: 0 0 12px; }
+  .cmp-brief__text { white-space: pre-wrap; max-height: none; overflow: visible; }
+  .cmp-brief .btn { display: none; }
   .cmp-columns { display: block; padding: 0; overflow: visible; }
   .col, #compareView.is-focus-layout .col:not(.is-focus) { display: block; border: 0; box-shadow: none; break-before: page; }
   .col:first-child { break-before: auto; }
@@ -604,7 +754,11 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
  * third cue (design spec 3.3, 7.3.6). */
 
 /* ── The against picker and its menu ──────────────────────────────────── */
-.tb-against { display: inline-flex; min-width: 0; }
+/* Never narrower than its picker: with `min-width: 0` it shrank while the
+ * picker kept its width, so Previous and the counter painted over the base's
+ * name and a click on the name stepped back instead of opening the menu
+ * (1100 to 1260 px). The title gives way instead, and `is-tight` past that. */
+.tb-against { display: inline-flex; flex: none; }
 .picker.against { cursor: pointer; }
 .picker.against .rb { width: 20px; height: 20px; }
 .picker.against .picker__name { overflow: hidden; text-overflow: ellipsis; }
@@ -629,6 +783,9 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
 .dm__bases [role="radio"]:focus-visible { outline-offset: -2px; }
 .dm__bases [role="radio"][aria-checked="true"] { background: var(--manila); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
 .dm__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "Each against its source" carries a hint under its name. */
+.dm__bases [role="radio"]:has(.dm__hint) { flex-wrap: wrap; row-gap: 0; padding-block: 6px; }
+.dm__hint { flex-basis: 100%; font-size: var(--text-xs); font-weight: 400; color: var(--text-secondary); }
 .dm__opts { display: grid; gap: 2px; padding-top: 10px; border-top: 1px solid var(--border); }
 .dm__opts .btn { justify-content: flex-start; }
 .dm__empty { font-size: var(--text-xs); color: var(--text-secondary); }
@@ -643,9 +800,28 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
 .col__diff .key > span:not(.visually-hidden) { padding: 0 4px; border-radius: 2px; color: var(--text-primary); font-family: var(--font-reading); font-size: var(--text-xs); white-space: nowrap; font-variant-numeric: var(--numerals-data); }
 .col__diff .k-chg { background: var(--diff-change-unit); }
 .col__diff .key--plain > span:not(.visually-hidden) { padding: 0; background: none; color: var(--text-secondary); font-family: inherit; text-decoration: none; }
-.col__diff .k-ins { background: var(--diff-ins-word); text-decoration: underline 2px var(--diff-ins-line); text-underline-offset: 2px; }
-.col__diff .k-del { background: var(--diff-del-word); color: var(--text-secondary); text-decoration: line-through 2px var(--diff-del-line); }
+.col__diff .k-ins, .cmp-numbers .k-ins { background: var(--diff-ins-word); text-decoration: underline 2px var(--diff-ins-line); text-underline-offset: 2px; }
+.col__diff .k-del, .cmp-numbers .k-del { background: var(--diff-del-word); color: var(--text-secondary); text-decoration: line-through 2px var(--diff-del-line); }
+.col__diff .k-mov { outline: 1px dotted var(--diff-change-bar); outline-offset: -1px; }
 .col__diff .col__words { flex: none; margin-left: auto; }
+/* "2 numbers changed": a button that lists them (js/compare/numbers.js); in a
+ * saved file, words in secondary ink. */
+.col__diff .col__nums { flex: none; }
+.col__diff span.col__nums { color: var(--text-secondary); font-size: var(--text-xs); }
+.cmp-numbers { width: min(420px, calc(100vw - 16px)); display: grid; gap: 8px; }
+.cmp-numbers h2 { margin: 0; }
+.nums__note { margin: 0; font-size: var(--text-xs); color: var(--text-secondary); }
+.nums__list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-height: 50vh; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.nums__list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.nums__list .k-ins, .nums__list .k-del { padding: 0 4px; border-radius: 2px; font-family: var(--font-reading); font-variant-numeric: var(--numerals-data); }
+.nums__list li > button { margin-left: auto; }
+.nums__where { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--text-secondary); }
+/* A too-different column whose Word marks is off reads "32 differences from
+ * B [Word marks]" on one row (design spec 7.3.4). Its changed, added and
+ * removed parts stay in the line for a screen reader, and in the count's
+ * title. With Word marks on the key is coloured and shows; a saved file has
+ * no toggle, so its parts stay visible. */
+.col__diff:has(> .col__words) > .key--plain { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* ── Unit marks ────────────────────────────────────────────────────────── */
 .reader .unit { position: relative; }
@@ -680,8 +856,12 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
   font: 700 var(--text-sm)/1 var(--font-ui);
   text-align: center;
 }
-.reader .u-changed::after, .reader .u-bar-chg::after { content: "~"; color: var(--diff-change-bar); }
-.reader .u-added::after, .reader .u-bar-add::after { content: "+"; color: var(--diff-ins-line); }
+/* Decorative: the hidden "Changed" or "Added" prefix (js/compare/marks.js)
+ * says it, so the glyph has empty alt text and is not read as "tilde" or
+ * "plus" after every marked unit. The first declaration is for engines that
+ * do not take the alt form. */
+.reader .u-changed::after, .reader .u-bar-chg::after { content: "~"; content: "~" / ""; color: var(--diff-change-bar); }
+.reader .u-added::after, .reader .u-bar-add::after { content: "+"; content: "+" / ""; color: var(--diff-ins-line); }
 /* A list item's gutter is past its marker. */
 .reader li.unit::before { left: calc(-21px - 1.3em); }
 .reader li.u-added::before, .reader li.u-bar-add::before { left: calc(-22px - 1.3em); }
@@ -697,6 +877,13 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
 .reader tr.u-bar-add > :first-child { box-shadow: inset 2px 0 0 var(--diff-ins-line); padding-left: 8px; }
 .u-label { display: block; margin-bottom: 2px; font: 600 var(--text-xs)/1.4 var(--font-ui); color: var(--diff-ins-line); }
 .reader li > .u-label { display: inline; margin-right: 6px; }
+/* A moved part: a dotted bar, and an arrow at its start (js/compare/marks.js). */
+.reader .u-moved::before, .reader .u-bar-mov::before { content: ""; position: absolute; top: -6px; bottom: -6px; left: -21px; border-left: 3px dotted var(--diff-change-bar); }
+.reader .u-move-start::after { content: "\2195"; content: "\2195" / ""; position: absolute; top: -2px; left: -26px; width: 12px; padding: 1px 0 2px; background: var(--surface-1); font: 700 var(--text-sm)/1 var(--font-ui); text-align: center; color: var(--diff-change-bar); }
+.reader li.u-move-start::after { left: calc(-26px - 1.3em); }
+.reader tr.u-moved > :first-child, .reader tr.u-bar-mov > :first-child { border-left: 3px dotted var(--diff-change-bar); padding-left: 8px; }
+/* "Moved from after ...", and a changed part with no word marks saying why. */
+.u-label--moved, .u-label--changed { color: var(--text-secondary); }
 
 /* The change the counter points at: an outline and a tag matching it.
  * Raised over its neighbours: every unit is positioned, so the next one's
@@ -761,6 +948,7 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
 }
 .reader .ghost::after {
   content: "\2212";
+  content: "\2212" / "";
   position: absolute;
   top: 7px;
   left: -26px;
@@ -809,6 +997,7 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
 .ruler .t-ins { background: var(--diff-ins-line); }
 .ruler .t-del { background: var(--diff-del-line); }
 .ruler .t-chg { background: var(--diff-change-bar); }
+.ruler .t-mov { height: 5px; margin-top: -1px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--diff-change-bar); }
 .ruler .t.is-current { left: -5px; right: 0; height: 7px; margin-top: -2px; border-radius: 2px 0 0 2px; background: var(--diff-current); }
 .ruler .vp { position: absolute; left: 0; right: 0; border: 1px solid var(--text-muted); border-right: 0; border-radius: 2px 0 0 2px; pointer-events: none; }
 #compareView.diff-off .ruler { display: none; }
@@ -826,6 +1015,11 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
   background: var(--surface-1);
   scrollbar-width: thin;
 }
+/* Focus that scrolls the panel stops clear of its sticky head and foot,
+ * whose heights js/compare/panel.js measures (the foot grows with a wrapped
+ * record sentence and the copy fallback). Docked, over the columns and as
+ * the phone sheet alike. */
+.cmp-panel { scroll-padding-block: calc(var(--panel-head-h, 56px) + 8px) calc(var(--panel-foot-h, 104px) + 8px); }
 #compareView.panel-open.panel-overlay .cmp-panel {
   position: absolute;
   top: 0;
@@ -924,6 +1118,11 @@ html[data-chrome="off"] .cmp-scrim { top: 0; }
 .crit__sum { min-width: 0; margin-left: auto; overflow: hidden; font-size: var(--text-xs); color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
 .crit[open] .crit__sum { display: none; }
 .crit__rows { display: grid; gap: 4px; padding: 0 0 12px; }
+/* No report yet: a criterion is a plain row to set up, not a disclosure
+ * that opens on nothing (js/compare/review.js). */
+.crit__rows:empty { display: none; }
+.crit--idle > .crit__head { display: flex; align-items: center; min-height: 44px; margin: 0; padding: 0 36px 0 0; }
+.panel__empty { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); font-size: var(--text-xs); line-height: 1.5; color: var(--text-secondary); }
 .crit__row { display: flex; align-items: center; gap: 8px; }
 .crit__row .seg { flex: 1; min-width: 0; }
 /* Segments share the row, and none is narrower than its word and check:

@@ -8,14 +8,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { checkFitAndCopies } from './check-html-import-fit.mjs';
+import { checkOpenDialog } from './check-open-dialog.mjs';
+import { checkYamlLazy } from './check-yaml-lazy.mjs';
 
-const base = process.env.DOSSIER_URL || 'http://127.0.0.1:8899';
+import { base, file, out, verifyUrl } from './check-helpers.mjs';
 const browser = await chromium.launch();
 const context = await browser.newContext({ colorScheme: 'dark', viewport: { width: 1440, height: 1000 } });
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));
-await fs.mkdir('.verify', { recursive: true });
 
 async function exportHtml(target) {
   return target.evaluate(async () => {
@@ -38,6 +39,98 @@ async function sandboxClash(target) {
       return tokens.includes('allow-scripts') && tokens.includes('allow-same-origin');
     })
     .map((f) => f.title || f.className));
+}
+
+/**
+ * embed.html runs what its parent posts, so it must only do that for the
+ * sealed frame Dossier builds (sandbox="allow-scripts", an opaque origin).
+ * GitHub Pages cannot send frame-ancestors, so any site could frame it: here
+ * a page on another origin frames it with no sandbox, with allow-same-origin,
+ * and with allow-scripts alone, and offers markup that would report back.
+ * The host must never announce itself and the markup must never run.
+ */
+async function embedRefusesStrangers(ctx) {
+  const target = `${base}/embed.html?v=${Date.now()}`;
+  await ctx.route('http://attacker.test/**', (route) => route.fulfill({
+    contentType: 'text/html',
+    body: `<!doctype html><body><script>
+      window.__log = [];
+      window.__loaded = false;
+      addEventListener('message', (e) => {
+        window.__log.push(e.data && e.data.type);
+        if (e.data && e.data.type === 'dossier-embed-ready') {
+          e.source.postMessage({ type: 'dossier-embed-content', html: '<script>parent.postMessage({type: "ran", origin: self.origin}, "*")<\\/script>' }, '*');
+        }
+      });
+      const f = document.createElement('iframe');
+      const sb = new URLSearchParams(location.search).get('sandbox');
+      if (sb !== null) f.setAttribute('sandbox', sb);
+      f.addEventListener('load', () => { window.__loaded = true; });
+      f.src = ${JSON.stringify(target)};
+      document.body.appendChild(f);
+    </script></body>`,
+  }));
+  const stranger = await ctx.newPage();
+  try {
+    for (const sandbox of [null, 'allow-scripts allow-same-origin', 'allow-scripts']) {
+      await stranger.goto(`http://attacker.test/frame.html${sandbox === null ? '' : `?sandbox=${encodeURIComponent(sandbox)}`}`);
+      await stranger.waitForFunction(() => window.__loaded === true, null, { timeout: 5000 })
+        .catch(() => assert.fail(`embed.html never loaded in the stranger's frame (${sandbox ?? 'no sandbox'})`));
+      await stranger.waitForTimeout(1500);
+      const heard = await stranger.evaluate(() => window.__log);
+      assert.deepEqual(heard, [], `embed.html framed by another origin (${sandbox ?? 'no sandbox'}) answered: ${JSON.stringify(heard)}`);
+    }
+  } finally {
+    await stranger.close();
+    await ctx.unroute('http://attacker.test/**');
+  }
+}
+
+/**
+ * A report that names its elements after members of its document
+ * (`<img name="__dossierLinks">`, `<img name="addEventListener">`) used to
+ * turn its frame's link handling off: in the Reports view its in-page link
+ * reloaded the report in its frame and added a history entry. The static
+ * copy now takes those names out, and the link scrolls the page.
+ */
+async function namedElementsInReader(browser) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const reader = await ctx.newPage();
+  const seen = [];
+  reader.on('pageerror', (error) => seen.push(error.message));
+  const html = '<!doctype html><html><head><title>Named elements</title></head><body><h1>Named elements</h1>'
+    + '<img name="__dossierLinks" alt=""><img name="addEventListener" alt=""><img name="querySelectorAll" alt="">'
+    + '<form name="baseURI"></form><img name="hero" id="hero" alt="">'
+    + '<p><a id="toSec" href="#sec2">Down to the second section</a></p>'
+    + '<div style="height: 2400px"></div><h2 id="sec2">Second section</h2><p>The end.</p></body></html>';
+  try {
+    await reader.goto(`${base}/?check=named-reader-${Date.now()}`, { waitUntil: 'networkidle' });
+    await reader.bringToFront();
+    await reader.evaluate(() => document.getElementById('openReport').click());
+    await reader.locator('#importText').fill(html);
+    await reader.locator('#importDialog [data-action="import-confirm"]').click();
+    const frame = reader.locator('#stage iframe.block-embed--static');
+    await reader.frameLocator('#stage iframe.block-embed--static').locator('#sec2').waitFor();
+    await reader.waitForTimeout(300);
+    const names = await frame.evaluate((f) => [...Document.prototype.querySelectorAll.call(f.contentDocument, 'img, form')]
+      .map((el) => el.getAttribute('name')));
+    assert.deepEqual(names, [null, null, null, null, 'hero'], 'The Reports view frame kept a name that shadows its document');
+    let navigated = 0;
+    reader.on('framenavigated', (f) => { if (f !== reader.mainFrame()) navigated += 1; });
+    const entries = await reader.evaluate(() => history.length);
+    const before = await reader.evaluate(() => scrollY);
+    await reader.frameLocator('#stage iframe.block-embed--static').locator('#toSec').click();
+    await reader.waitForFunction((y) => scrollY > y + 1000, before, { timeout: 3000 })
+      .catch(() => assert.fail('An in-page link in a named-element report did not scroll the page to its target'));
+    assert.equal(navigated, 0, 'An in-page link navigated a named-element report in the Reports view');
+    assert.equal(await frame.evaluate((f) => f.contentWindow.location.href), 'about:srcdoc');
+    assert.equal(await reader.evaluate(() => history.length), entries, 'An in-page link made a history entry');
+    assert.equal(await reader.locator('#stage [data-embed-restored]').count(), 0, 'The frame left its report and was put back');
+    assert.deepEqual(seen, [], 'The page raised errors');
+  } finally {
+    await reader.evaluate(() => { indexedDB.deleteDatabase('dossier'); }).catch(() => {});
+    await ctx.close();
+  }
 }
 
 /** Choose a theme in the Display dialog, the way a reader does. */
@@ -165,7 +258,7 @@ try {
   await page.locator('#displayDialog').getByRole('button', { name: 'Close', exact: true }).click();
   await checkContrast(page);
   await checkPalette(page, 'Dark');
-  await page.screenshot({ path: '.verify/appearance-dark.png', fullPage: true });
+  await page.screenshot({ path: out('appearance-dark.png'), fullPage: true });
   await chooseTheme(page, 'Light');
   assert.equal(await page.locator('html').getAttribute('data-appearance'), 'light');
   await checkContrast(page);
@@ -180,7 +273,7 @@ try {
   assert.equal(await page.locator('html').getAttribute('data-appearance'), 'light', 'Explicit light choice was lost');
   await page.locator('#welcomeExamples [data-file="responses.json"]').click();
   await page.locator('.report-title').waitFor();
-  await page.screenshot({ path: '.verify/appearance-light.png', fullPage: true });
+  await page.screenshot({ path: out('appearance-light.png'), fullPage: true });
   await chooseTheme(page, 'Dark');
   await page.emulateMedia({ colorScheme: 'light' });
   assert.equal(await page.locator('html').getAttribute('data-appearance'), 'dark', 'OS preference overrode the saved choice');
@@ -193,12 +286,18 @@ try {
   await page.emulateMedia({ colorScheme: 'light' });
   await chooseTheme(page, 'Dark');
   assert.equal(await page.locator('html').getAttribute('data-appearance'), 'dark');
-  await fs.writeFile('.verify/dark-report.html', await exportHtml(page));
+  await fs.writeFile(out('dark-report.html'), await exportHtml(page));
 
   // ── An imported HTML report opens static; its scripts run only on request ──
   await page.locator('#openReport').click();
-  await page.locator('#importFile').setInputFiles('fixtures/foreign/presentation.html');
+  // A product button drives the hidden file input, and names the file.
+  const [presentation] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.locator('#importDialog [data-action="import-choose-file"]').click(),
+  ]);
+  await presentation.setFiles(file('fixtures/foreign/presentation.html'));
   await page.waitForFunction(() => document.getElementById('importDetected').textContent.startsWith('HTML report.'));
+  assert.equal(await page.locator('#importFileName').innerText(), 'presentation.html', 'The Open dialog does not name the chosen file');
   await page.getByRole('button', { name: 'Open it', exact: true }).click();
   assert.equal(await page.locator('#importDialog').isVisible(), false);
   assert.equal(await page.locator('.report-title').innerText(), 'Sample HTML presentation');
@@ -235,12 +334,13 @@ try {
   assert.deepEqual(isolation, { parentBlocked: true, storageBlocked: true, networkBlocked: true });
   assert.deepEqual(requests, [], 'Imported HTML attempted a network request');
   assert.deepEqual(await sandboxClash(page), [], 'A frame is both scripted and same origin');
+  await embedRefusesStrangers(context);
   await page.reload({ waitUntil: 'networkidle' });
   // The choice is the reader's and is remembered for this report.
   await page.frameLocator('#stage iframe.block-embed--interactive').locator('body[data-ready="true"]').waitFor();
   assert.equal(await page.locator('.report-title').innerText(), 'Sample HTML presentation', 'Saved HTML did not restore');
   assert.equal(await page.locator('html').getAttribute('data-appearance'), 'dark');
-  await fs.writeFile('.verify/html-import-export.html', await exportHtml(page));
+  await fs.writeFile(out('html-import-export.html'), await exportHtml(page));
   await page.getByRole('button', { name: 'Run the report’s scripts' }).click();
   await page.locator('#stage iframe.block-embed--static').waitFor();
   // Reader state, never document state.
@@ -255,7 +355,7 @@ try {
   await context.route(/fonts\.(googleapis|gstatic)\.com/, (route) => { remote.push(route.request().url()); return route.abort(); });
   requests.length = 0;
   await page.locator('#openReport').click();
-  await page.locator('#importFile').setInputFiles('fixtures/embed/tall-report.html');
+  await page.locator('#importFile').setInputFiles(file('fixtures/embed/tall-report.html'));
   await page.waitForFunction(() => document.getElementById('importDetected').textContent.startsWith('HTML report.'));
   await page.getByRole('button', { name: 'Open it', exact: true }).click();
   const tall = page.frameLocator('#stage iframe.block-embed--static');
@@ -291,7 +391,10 @@ try {
   assert.ok(requests.some((url) => url.includes('/runbook')), 'The web link did not open');
   assert.equal(await page.evaluate(() => document.querySelector('#stage iframe').contentWindow.location.href), 'about:srcdoc');
   await tall.getByRole('link', { name: 'appendix beside this file' }).click();
-  await page.locator('#app-toast').filter({ hasText: 'beside the report' }).waitFor();
+  // The same sentence as Compare's (js/compare/frame.js), naming the file.
+  const appendixRefused = 'That link points at appendix.html, a file beside the report that Dossier does not have.';
+  await page.locator('#app-toast').filter({ hasText: appendixRefused }).waitFor();
+  assert.equal((await page.locator('#app-toast').innerText()).trim(), appendixRefused, 'The Reports view refused a link with a different sentence than Compare');
   assert.equal(await tall.locator('a', { hasText: 'this script link' }).getAttribute('href'), null, 'A script link survived the static copy');
   // An in-page link scrolls the page, since the frame has nothing to scroll.
   const headingTop = (id) => page.evaluate((key) => {
@@ -318,7 +421,7 @@ try {
     return top >= 0 && top < 200 && f.contentDocument.activeElement === h;
   }, null, { timeout: 4000 }).catch(() => assert.fail('The outline did not bring the heading, and focus, to it in the Original view'));
   // Dossier format: the same headings, in the reader's typography.
-  await page.getByRole('button', { name: 'Dossier format', exact: true }).click();
+  await page.getByRole('radio', { name: 'Dossier format', exact: true }).click();
   const reader = page.locator('#stage .block-embed-reader');
   await reader.waitFor();
   assert.equal(await page.locator('#stage .block-embed-html iframe').count(), 0, 'Dossier format kept a frame');
@@ -360,15 +463,15 @@ try {
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: width < 700 ? 844 : 1000 });
     for (const view of ['Original', 'Dossier format']) {
-      await page.getByRole('button', { name: view, exact: true }).click();
+      await page.getByRole('radio', { name: view, exact: true }).click();
       if (view === 'Original') await fitted();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `${width}px ${view} overflows the page`);
     }
   }
   // The file carries the view on screen: Original, here.
-  await page.getByRole('button', { name: 'Original', exact: true }).click();
+  await page.getByRole('radio', { name: 'Original', exact: true }).click();
   await fitted();
-  await fs.writeFile('.verify/html-import-static.html', await exportHtml(page));
+  await fs.writeFile(out('html-import-static.html'), await exportHtml(page));
   // Printed from the browser's menu, the frame gives way on paper to a
   // Dossier format copy, which goes once printing is over.
   await page.evaluate(() => dispatchEvent(new Event('beforeprint')));
@@ -407,12 +510,12 @@ try {
   const offlineContext = await browser.newContext();
   const offline = await offlineContext.newPage();
   const offlineRequests = [];
-  const exports = ['html-import-export.html', 'html-import-static.html', 'dark-report.html'].map((name) => `${base}/.verify/${name}`);
+  const exports = ['html-import-export.html', 'html-import-static.html', 'dark-report.html'].map((name) => verifyUrl(name));
   await offline.route('**/*', (route) => {
     if (exports.includes(route.request().url())) return route.continue();
     offlineRequests.push(route.request().url()); return route.abort();
   });
-  await offline.goto(`${base}/.verify/html-import-export.html`);
+  await offline.goto(verifyUrl('html-import-export.html'));
   const exportedFrame = offline.frameLocator('iframe');
   await exportedFrame.locator('body[data-ready="true"]').waitFor();
   assert.equal(await offline.locator('iframe').getAttribute('sandbox'), 'allow-scripts');
@@ -420,7 +523,7 @@ try {
   assert.equal(await exportedFrame.locator('#second').isVisible(), true);
   // The static view travels as a static frame, fitted to its document by the
   // file's own script, with its in-page links still working.
-  await offline.goto(`${base}/.verify/html-import-static.html`);
+  await offline.goto(verifyUrl('html-import-static.html'));
   assert.equal(await offline.locator('iframe').getAttribute('sandbox'), 'allow-same-origin');
   await offline.waitForFunction(() => {
     const f = document.querySelector('iframe');
@@ -432,7 +535,7 @@ try {
   await offline.waitForFunction(() => scrollY > 500, null, { timeout: 4000 }).catch(() => assert.fail('An in-page link in the exported file did not scroll'));
   assert.equal(await offline.evaluate(() => document.querySelector('iframe').contentWindow.location.href), 'about:srcdoc');
   assert.deepEqual(offlineRequests, [], 'Export needs a hosted helper or another network resource');
-  await offline.goto(`${base}/.verify/dark-report.html`);
+  await offline.goto(verifyUrl('dark-report.html'));
   assert.equal(await offline.locator('html').getAttribute('data-appearance'), 'dark');
   await checkContrast(offline);
   const screenBg = await offline.locator('.report-shell').evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -442,7 +545,7 @@ try {
   await offlineContext.close();
 
   // Paste and drop use the same import path as the file picker.
-  const source = await fs.readFile('fixtures/foreign/presentation.html', 'utf8');
+  const source = await fs.readFile(file('fixtures/foreign/presentation.html'), 'utf8');
   await page.evaluate((html) => {
     const data = new DataTransfer();
     data.items.add(new File([html], 'another-report.html', { type: 'text/html' }));
@@ -451,7 +554,16 @@ try {
   await page.waitForFunction(async () => (await (await import('/js/store.js')).listReports()).length === 3);
   await page.frameLocator('#stage iframe.block-embed--static').locator('#first h1').waitFor();
   await page.locator('#openReport').click();
+  // A chosen file's name goes once its text is replaced: the line names
+  // only what will open.
+  const [chosen] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.locator('#importDialog [data-action="import-choose-file"]').click(),
+  ]);
+  await chosen.setFiles(file('fixtures/foreign/presentation.html'));
+  await page.waitForFunction(() => document.getElementById('importFileName').textContent === 'presentation.html');
   await page.locator('#importText').fill('# A Markdown report\n\nA preserved paragraph.');
+  assert.equal(await page.locator('#importFileName').innerText(), '', 'The Open dialog still names a file whose text was replaced');
   await page.getByRole('button', { name: 'Open it', exact: true }).click();
   await page.locator('.block-prose').filter({ hasText: 'A preserved paragraph.' }).waitFor();
 
@@ -477,12 +589,15 @@ try {
       await page.locator('#displayOptions').waitFor({ state: 'hidden' });
     }
   }
-  await page.screenshot({ path: '.verify/appearance-tablet.png', fullPage: true });
+  await page.screenshot({ path: out('appearance-tablet.png'), fullPage: true });
 
   await checkFitAndCopies(page);
+  await namedElementsInReader(browser);
+  await checkOpenDialog(browser);
+  await checkYamlLazy(browser);
 
   assert.deepEqual(errors, [], 'Page raised JavaScript errors');
-  console.log('Passed: logo, system and saved themes, contrast, paper printing, HTML file/paste/drop imports opening static, auto height (shrinking again for a full-height root, held for an app shell, whose own scrolling pane links, the outline and the export reach), links, outline, Dossier format levels and alignment, printing a frame, scripts on request with sandbox isolation and no refused loads, persistence, offline exports and responsive layout.');
+  console.log('Passed: logo, system and saved themes, contrast, paper printing, HTML file/paste/drop imports opening static, auto height (shrinking again for a full-height root, held for an app shell, whose own scrolling pane links, the outline and the export reach), links, outline, Dossier format levels and alignment, printing a frame, scripts on request with sandbox isolation and no refused loads, persistence, offline exports and responsive layout, embed.html refusing a frame from another origin, the Choose a file button naming the chosen file, a report that names its elements after members of its document keeping its links in the Reports view, the Open dialog (emptied on close, failures named in its own error line, Markdown titled from its text, binary and oversized input refused) and js-yaml loading only when YAML arrives.');
 } finally {
   await browser.close();
 }

@@ -10,7 +10,9 @@
 
 .block {
   min-width: 0;
-  scroll-margin-top: 72px;
+  /* On top of the root's scroll-padding (the header's height, css/shell.css):
+   * a jump lands 72 px from the window's top, 16 px under the header. */
+  scroll-margin-top: 16px;
   overflow-wrap: anywhere;
 }
 
@@ -811,7 +813,7 @@
 .block-embed--interactive { height: clamp(480px, calc(100dvh - 180px), 1000px); }
 /* Anchors laid over the frame's headings, for the rail outline. */
 .block-embed__anchors { position: absolute; inset: 0; pointer-events: none; }
-.embed-anchor { position: absolute; top: 0; left: 0; width: 100%; height: 0; border-radius: var(--radius-sm); scroll-margin-top: 72px; }
+.embed-anchor { position: absolute; top: 0; left: 0; width: 100%; height: 0; border-radius: var(--radius-sm); scroll-margin-top: 16px; }
 .embed-anchor:focus { outline: none; }
 
 /* Dossier format: the compare reader's typography at the Reports reading
@@ -827,14 +829,17 @@
 }
 .block-embed-reader .reader__doc { margin-inline: 0; }
 .block-embed-reader .reader__doc > .embed-note { margin: 0 0 12px; }
-/* Doubled class: css/compare.css loads later and sets 16 px for a column.
- * The headings keep the reading face (`.block h3` above sets the UI face),
- * and sit a size under the compare reader's: in a report, the imported
- * report's top heading is never larger than the report's own title. */
-.block-embed-reader.reader .r-h { scroll-margin-top: 72px; font-family: inherit; }
-.block-embed-reader.reader .r-h1 { font-size: var(--text-lg); }
-.block-embed-reader.reader .r-h2 { font-size: calc(var(--compare-reading-size) * 1.08); }
-.block-embed-reader.reader .r-h3 { font-size: var(--compare-reading-size); }
+/* Doubled class: css/compare.css loads later and sets its own scroll margin
+ * for a column. The headings keep the reading face (`.block h3` above sets
+ * the UI face) and the Compare reader's scale (design spec 7.3.5, one
+ * typography): h1 24 px, h2 20 px, h3 1.08 of the body. The report's own
+ * title is 24 px (css/report.css), so an imported report's top heading is
+ * never larger than it. 16 px of scroll margin on top of the root's
+ * scroll-padding lands an outline jump 72 px down, under the header. */
+.block-embed-reader.reader .r-h { scroll-margin-top: 16px; font-family: inherit; }
+.block-embed-reader.reader .r-h1 { font-size: var(--text-xl); }
+.block-embed-reader.reader .r-h2 { font-size: var(--text-lg); }
+.block-embed-reader.reader .r-h3 { font-size: calc(var(--compare-reading-size) * 1.08); }
 
 .block-embed__caption { padding: 10px 16px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: var(--text-xs); }
 .block-embed-html--format > .block-embed__caption { margin: -20px -16px 16px; }

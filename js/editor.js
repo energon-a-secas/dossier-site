@@ -7,7 +7,9 @@
  * format action reserialises with stable key order.
  */
 
-import { parse } from './parse.js';
+import {
+  parse, initYaml, yamlReady, needsYaml,
+} from './parse.js';
 
 /**
  * Create an editor container with textarea and controls.
@@ -63,10 +65,23 @@ export function createEditor(sourceText = '', opts = {}) {
   let escapeArmed = false;
   let parseTimer = null;
 
-  function parseAndSave() {
+  /**
+   * @param {{waited?: boolean}} [opts] `waited` once the YAML parser was
+   *   awaited for this text, so a parser that failed to load (offline) shows
+   *   its fatal banner instead of being waited for again
+   */
+  function parseAndSave({ waited = false } = {}) {
     clearTimeout(parseTimer);
     parseTimer = null;
     const text = textarea.value;
+    // YAML reads once its parser is in, which nothing loads at boot. The
+    // text is parsed when it lands, unless the reader has typed on since.
+    if (!waited && needsYaml(text) && !yamlReady()) {
+      initYaml().then(() => {
+        if (textarea.value === text) parseAndSave({ waited: true });
+      });
+      return;
+    }
     const result = parse(text);
 
     if (result.model) {
@@ -184,6 +199,13 @@ export function createEditor(sourceText = '', opts = {}) {
     errorBanner.classList.add('hidden');
   };
   container.focusEditor = () => textarea.focus();
+  // A page that is hiding gets no more timer turns: parse and save the edit
+  // still waiting now (js/source-pane.js flushEditor, from js/boot.js).
+  container.flush = () => {
+    if (parseTimer !== null) parseAndSave();
+  };
+  /** True while typing waits for the parse. */
+  container.pending = () => parseTimer !== null;
   return container;
 }
 

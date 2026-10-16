@@ -23,12 +23,19 @@
  * are held for a moment, so the leader's own scroll event does not pull
  * them back to where the alignment would put them.
  *
+ * Heading pairs are aligned once per unordered pair of columns, from each
+ * column's headings prepared once (js/compare/align.js), and the mirror is
+ * kept for the other direction. They are worked out in idle time after a
+ * column registers, so the first scroll of a long report does not stop the
+ * page while they are: with 400 headings it used to, for seconds.
+ *
  * A scroller is anything with `y()`, `set(y, smooth)`, `height()`, `view()`,
  * `anchors()` and `listen(fn)`: a column's own scrolling element
  * (`elementScroller`) or a static Original frame (js/compare/frame.js).
  */
 
-import { alignHeadings, mapPosition } from './align.js';
+import { alignHeadings, mapPosition, prepareHeadings } from './align.js';
+import { reducedMotion } from '../motion.js';
 
 /** Where a reader's eye rests, as a fraction of the column's height. */
 export const READING_LINE = 0.3;
@@ -106,10 +113,6 @@ export function followerTarget({
   return Math.max(0, Math.min(followRange, mapped - f * followView));
 }
 
-export function reducedMotion() {
-  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
 /**
  * @param {{onScroll?: (colId: string) => void}} [hooks] called after any
  *   column scrolls (the view updates the section counter from it)
@@ -151,10 +154,56 @@ export function createSync(hooks = {}) {
   /** A column as one side of a cached pair: its id and the version registered. */
   const sideOf = (col) => `${col.id}:${col.version}`;
 
+  /** A column's headings, prepared once for every pair it is aligned in. */
+  function preparedOf(col) {
+    if (!col.prepared) col.prepared = prepareHeadings(col.headings);
+    return col.prepared;
+  }
+
+  /**
+   * The aligned pairs of two columns. One alignment per unordered pair: the
+   * side whose key sorts first leads it, and the mirror is stored for the
+   * other direction, so `targetFor` never allocates.
+   */
   function pairsBetween(a, b) {
     const key = `${sideOf(a)}|${sideOf(b)}`;
-    if (!pairCache.has(key)) pairCache.set(key, alignHeadings(a.headings, b.headings));
-    return pairCache.get(key);
+    const cached = pairCache.get(key);
+    if (cached) return cached;
+    const flip = sideOf(b) < sideOf(a);
+    const x = flip ? b : a;
+    const y = flip ? a : b;
+    const forward = alignHeadings(preparedOf(x), preparedOf(y));
+    const mirror = forward.map((p) => ({ a: p.b, b: p.a, sim: p.sim }));
+    pairCache.set(`${sideOf(x)}|${sideOf(y)}`, forward);
+    pairCache.set(`${sideOf(y)}|${sideOf(x)}`, mirror);
+    return flip ? mirror : forward;
+  }
+
+  const idle = typeof requestIdleCallback === 'function'
+    ? { start: (fn) => requestIdleCallback(fn, { timeout: 2000 }), stop: (h) => cancelIdleCallback(h) }
+    : { start: (fn) => setTimeout(fn, 50), stop: (h) => clearTimeout(h) };
+
+  /**
+   * Align a newly registered column with every other one in idle time, one
+   * pair per idle slot, so the work is done before the reader scrolls.
+   */
+  function warm(col) {
+    if (mode === 'off') return;
+    const others = [...cols.values()].filter((other) => other !== col);
+    let next = 0;
+    const run = () => {
+      col.idle = 0;
+      if (cols.get(col.id) !== col) return;
+      while (next < others.length) {
+        const other = others[next];
+        next += 1;
+        if (cols.get(other.id) !== other || !col.headings.length || !other.headings.length) continue;
+        pairsBetween(col, other);
+        break;
+      }
+      if (next < others.length) col.idle = idle.start(run);
+    };
+    if (others.length) col.idle = idle.start(run);
   }
 
   /** Where the follower should be, given the leader's position. */
@@ -219,7 +268,7 @@ export function createSync(hooks = {}) {
       if (!scroller) return;
       const col = {
         id: colId, scroller, headings: headings || [], version: Math.random().toString(36).slice(2),
-        driven: null, hold: 0, anchorCache: null, anchorAt: 0, offs: [],
+        driven: null, hold: 0, anchorCache: null, anchorAt: 0, offs: [], prepared: null, idle: 0,
       };
       col.offs.push(scroller.listen(() => onScroll(col)));
       if (element) {
@@ -232,10 +281,13 @@ export function createSync(hooks = {}) {
         });
       }
       cols.set(colId, col);
+      warm(col);
     },
     unregister(colId) {
       const col = cols.get(colId);
       if (!col) return;
+      if (col.idle) idle.stop(col.idle);
+      col.idle = 0;
       for (const off of col.offs) off();
       cols.delete(colId);
       if (leader === colId) leader = null;

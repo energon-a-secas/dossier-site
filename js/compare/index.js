@@ -8,10 +8,19 @@
  * of the Reports view's state (`state.model` and the rest stay that view's).
  *
  * A set is saved in IndexedDB (js/compare/store.js) a moment after each
- * change, and at once when the view is left or the page hides. A new blank
- * set and the bundled example are not saved until something is put in them
- * or what they hold is changed (a view change alone does not count), so
- * opening, reading and closing them leaves no clutter behind.
+ * change, and at once when the view is left or another set opens. A write
+ * started as the page unloads never commits, so when the page hides with a
+ * change still waiting (or still being written), the change also goes into a
+ * small synchronous journal in localStorage (js/compare/journal.js), which
+ * the next visit replays before it opens a set. A new blank set and the
+ * bundled example are not saved until something is put in them or what they
+ * hold is changed (a view change alone does not count), so opening, reading
+ * and closing them leaves no clutter behind.
+ *
+ * Every save says which stored revision it was made on. When another tab has
+ * saved the set since, the two versions are merged key by key
+ * (js/compare/merge.js) and the merge is saved, so a note typed here and a
+ * mark clicked there both stay.
  *
  * The analysis features (differences, the side panels, Blind) plug in
  * through `compare.hooks` and `enableFeature`, so this file does not need to
@@ -29,15 +38,18 @@ import { createReading } from './reading.js';
 import { bindPopovers, closePopover, isPhone, PHONE } from './popover.js';
 import { createSync, elementScroller } from './sync.js';
 import { frameScroller, blockedLinkSentence } from './frame.js';
-import { blankSet, filledColumns, sameContent } from './model.js';
+import { blankSet, sameContent } from './model.js';
 import { sanitizeSet } from './records.js';
-import { readSet, writeSet, listSets, onExternalChange } from './store.js';
+import { initYaml, yamlReady, needsYaml } from '../parse.js';
+import { readSet, listSets, onExternalChange } from './store.js';
+import { createSaving } from './saving.js';
 import { registerCompareActions } from './actions.js';
 import { initAnalysis } from './analysis.js';
 import { initExport } from './export.js';
+import { initBrief } from './brief.js';
+import { initBridge } from './bridge.js';
 
 const prefs = createStore({ key: 'dossier-site:compare', version: 1 });
-const SAVE_DELAY_MS = 400;
 
 /**
  * Everything the view knows. One object, so the action handlers and the
@@ -48,6 +60,13 @@ export const compare = {
   set: null,
   /** True once the set exists in IndexedDB. */
   saved: false,
+  /**
+   * The open set as it was last known to be stored (read, written, or heard
+   * from another tab), and its revision (`updated`). A save expects the
+   * stored set still to be at `rev`; `base` is what a merge starts from.
+   */
+  base: null,
+  rev: undefined,
   /** The bundled example, open and unchanged. */
   example: false,
   /**
@@ -64,17 +83,25 @@ export const compare = {
   /**
    * Seams for the analysis features. Each is optional.
    *   headInfo(col, record) -> extra fields for the column head
-   *     ({isBase, baseStats, baseLetter, diffLine}); merged over the stats
+   *     ({isBase, baseStats, baseLetter, diffLine}); merged over the stats.
+   *     A column's head names its own reference, the column it is marked
+   *     against, which with "Each against its source" is not always the base
    *   bodyHooks(col) -> extra hooks for js/compare/column.js (`marks`)
    *   bodyKeyExtra(col) -> a string that, when it changes, redraws the body
    *   step(dir) -> true when it moved (changes), else headings are stepped
    *   counter() -> {main, sub, unit} for the toolbar counter, or null
    *   loadPayload(route) -> open a comparison carried in the address (#dc=)
    *   afterRender: [fn(compare)] run after every render
+   *   afterCommit: [fn(before, next)] run after a committed set is drawn
    *   onScroll: [fn(colId)] a column scrolled (by the reader or by sync)
    *   onRegister: [fn(colId)] a column's headings became readable (a frame loaded)
+   *   beforeSwitch: [fn()] run before the open set changes, the view is left
+   *     or the page hides; flush edits still waiting (a note being typed)
+   *   pending: [fn() -> boolean] an edit is waiting that is not in the set yet
    */
-  hooks: { afterRender: [], onScroll: [], onRegister: [] },
+  hooks: {
+    afterRender: [], afterCommit: [], onScroll: [], onRegister: [], beforeSwitch: [], pending: [],
+  },
 };
 
 const {
@@ -82,10 +109,17 @@ const {
   readingPlace, catchUp, caughtUp,
 } = createReading(compare);
 
+// Saving (js/compare/saving.js): the timer, the write, other tabs' saves,
+// edits still waiting, and the page-hide journal.
+const {
+  save, flushPending, onHide, replayOnce, tookOtherTabsWrite,
+} = createSaving({
+  compare, render, rememberScroll, remember, syncAddress,
+});
+
 let loading = Promise.resolve();
 /** The page title the Reports view uses, put back when Compare is left. */
 let reportsTitle = '';
-let warnedSave = false;
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -109,6 +143,9 @@ export function initCompare() {
   // and its link; each plugs in through `compare.hooks`.
   const analysis = initAnalysis(api);
   initExport(api, analysis);
+  // The brief above the columns, and the way between Reports and Compare.
+  initBrief(api);
+  initBridge(api);
 
   document.addEventListener('dossier-view', (event) => {
     const { view: next, previous } = event.detail || {};
@@ -118,9 +155,9 @@ export function initCompare() {
   document.addEventListener('dossier-route', (event) => {
     routeCompare(event.detail || {});
   });
-  window.addEventListener('pagehide', () => save.flush());
+  window.addEventListener('pagehide', onHide);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') save.flush();
+    if (document.visibilityState === 'hidden') onHide();
   });
   window.addEventListener('resize', debounce(() => {
     compare.sync.remeasure();
@@ -132,6 +169,9 @@ export function initCompare() {
     matchMedia(PHONE).addEventListener?.('change', () => render());
   }
   onExternalChange(onOtherTab);
+  // A journal the last visit left (a change it could not save as it
+  // unloaded) is saved now, whichever view this visit opens on.
+  replayOnce();
 }
 
 /**
@@ -142,20 +182,28 @@ export function routeCompare(route = parseRoute()) {
   const isPayload = route.payload && route.key === 'dc';
   if (route.view !== 'compare' && !isPayload) return loading;
   loading = (async () => {
+    await replayOnce();
     if (isPayload) {
       if (typeof compare.hooks.loadPayload === 'function' && await compare.hooks.loadPayload(route)) return;
       await ensureSet();
       return;
     }
+    let missing = false;
     if (route.id && compare.set?.id !== route.id) {
       const found = await readSet(route.id);
       if (found) {
         openSet(found, { saved: true });
         return;
       }
-      say('That comparison is not saved in this browser, so the last one is open instead.');
+      missing = true;
     }
     await ensureSet();
+    // Say what is open instead. It used to say "the last one" over a new
+    // blank set, in a browser that had never saved a comparison.
+    if (missing) {
+      say(`That comparison is not saved in this browser, so ${compare.saved ? 'the last one is open instead.'
+        : compare.example ? 'the example stays open.' : 'a new comparison is open instead.'}`);
+    }
     syncAddress();
   })().catch((err) => {
     // eslint-disable-next-line no-console
@@ -216,6 +264,9 @@ async function ensureSet() {
  *   `push` adds a history entry, so Back returns to the previous comparison
  */
 function openSet(set, { saved = false, example = false, push = false } = {}) {
+  // An edit still waiting (a note being typed) lands in the set it was typed
+  // in, before that set stops being the open one.
+  flushPending();
   save.flush();
   closePopover({ restore: false });
   compare.sync.clear();
@@ -226,8 +277,22 @@ function openSet(set, { saved = false, example = false, push = false } = {}) {
   compare.set = set;
   compare.saved = saved;
   compare.example = example;
+  compare.base = saved ? set : null;
+  compare.rev = saved ? set.updated : undefined;
   if (saved) remember(set.id);
   render();
+  // A Dossier column saved as YAML (Edit source keeps the typed text) reads
+  // only once the YAML parser is in, which nothing loads at boot, so those
+  // columns are drawn again when it lands.
+  if (!yamlReady() && set.columns.some((c) => c.source?.kind === 'dossier' && needsYaml(c.source.text))) {
+    initYaml().then(() => {
+      if (!yamlReady() || compare.set?.id !== set.id) return;
+      for (const c of compare.set.columns) {
+        if (c.source?.kind === 'dossier' && needsYaml(c.source.text)) compare.ui.records.delete(c.id);
+      }
+      render();
+    });
+  }
   syncAddress({ push });
 }
 
@@ -266,55 +331,11 @@ function commit(next, { save: shouldSave = true } = {}) {
   const before = compare.set;
   compare.set = next;
   render();
+  for (const fn of compare.hooks.afterCommit || []) fn(before, next);
   if (!shouldSave) return;
   if (!compare.saved && sameContent(before, next)) return;
   compare.example = false;
-  save();
-}
-
-/**
- * A save waits a moment for the next keystroke; `flush` saves now and
- * resolves once the write (or the one already under way) has landed.
- */
-const save = (() => {
-  let timer = 0;
-  let writing = Promise.resolve();
-  const run = () => {
-    timer = 0;
-    writing = persistNow();
-    return writing;
-  };
-  const schedule = () => {
-    clearTimeout(timer);
-    timer = setTimeout(run, SAVE_DELAY_MS);
-  };
-  schedule.pending = () => Boolean(timer);
-  schedule.flush = () => {
-    if (!timer) return writing;
-    clearTimeout(timer);
-    return run();
-  };
-  return schedule;
-})();
-
-/** Write the open set now. A set with nothing in it is not saved. */
-async function persistNow() {
-  const set = compare.set;
-  if (!set || compare.example) return;
-  if (!compare.saved && !filledColumns(set).length) return;
-  const written = await writeSet(set);
-  if (!written) {
-    if (!warnedSave) {
-      warnedSave = true;
-      say('This comparison could not be saved in this browser, so it stays open only until the tab closes.');
-    }
-    return;
-  }
-  if (compare.set?.id !== written.id) return;
-  const first = !compare.saved;
-  compare.saved = true;
-  remember(written.id);
-  if (first) syncAddress();
+  save({ columns: before?.columns !== next.columns });
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
@@ -391,6 +412,7 @@ function enter() {
 function leave() {
   rememberScroll();
   closePopover({ restore: false });
+  flushPending();
   save.flush();
   if (reportsTitle) document.title = reportsTitle;
 }
@@ -402,6 +424,8 @@ async function onOtherTab(ids, kind) {
   if (!set || !ids.includes(set.id)) return;
   if (kind === 'delete') {
     compare.saved = false;
+    compare.base = null;
+    compare.rev = undefined;
     if (currentView() === 'compare') {
       // Under Blind the title stays hidden, even here.
       const what = set.view.blind ? 'This comparison' : `"${set.title}"`;
@@ -409,15 +433,8 @@ async function onOtherTab(ids, kind) {
     }
     return;
   }
-  // Another tab saved this set. Take its version unless this tab has a save
-  // of its own waiting, which would otherwise be lost.
-  if (save.pending()) return;
-  const fresh = await readSet(set.id);
-  if (fresh && compare.set?.id === fresh.id) {
-    rememberScroll();
-    compare.set = fresh;
-    render();
-  }
+  // Another tab saved this set: taken, or merged with an edit waiting here.
+  await tookOtherTabsWrite();
 }
 
 // ── The API the action handlers use ──────────────────────────────────────────
@@ -427,7 +444,8 @@ export const api = {
   commit,
   render,
   openSet,
-  persistNow,
+  /** Save the open set now (in turn with any write under way). */
+  persistNow: () => save.now(),
   rememberScroll,
   scheduleCounter,
   /** Save a change still waiting now; resolves once it is written. */
@@ -445,10 +463,12 @@ export const api = {
     if (!clean) return false;
     openSet(clean, { saved: false, push: true });
     compare.example = false;
-    await persistNow();
+    await save.now();
     return true;
   },
   openSwitcher: null,
+  /** Set by js/compare/actions.js from the column's own actions, for js/compare/bridge.js. */
+  focusColumn: null, setColumnSource: null, openBundle: null,
   /** A feature turns its controls on (see `enableFeature`). */
   enableFeature: (name) => enableFeature(name),
 };

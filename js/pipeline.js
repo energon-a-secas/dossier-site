@@ -197,6 +197,7 @@ export function rerender(state, els) {
     stage.setAttribute('aria-busy', 'false');
     if (els.outline) els.outline.replaceChildren();
     if (els.findingsCount) updateFindingCount(state, els.findingsCount);
+    reportDocumentTitle(state);
     return;
   }
 
@@ -210,6 +211,7 @@ export function rerender(state, els) {
 
   if (els.outline) renderOutline(state, els.outline);
   if (els.findingsCount) updateFindingCount(state, els.findingsCount);
+  reportDocumentTitle(state);
 }
 
 /**
@@ -246,6 +248,9 @@ function renderOutline(state, host) {
         subLink.dataset.blockId = heading.id;
         subLink.textContent = heading.text || '';
         subLink.className = 'ds-outline__heading';
+        // h1 and h2 of an imported report share the base indent; h3 (or a
+        // level-3 heading block) is the nested step, so it reads as a child.
+        subLink.dataset.level = String(Number(heading.level) >= 3 ? 3 : 2);
         subLi.appendChild(subLink);
         sub.appendChild(subLi);
       }
@@ -261,6 +266,13 @@ function renderOutline(state, host) {
  * replaced the old context bar above the report.
  */
 export function updateReportBar(state, model = state.model || state.lastGood) {
+  // A notice that another tab changed the report (js/report-sync.js) belongs
+  // to the report it was shown for; another report opening takes it away.
+  const notice = document.getElementById('reportConflict');
+  if (notice && notice.dataset.reportId !== String(state.reportId)) {
+    notice.remove();
+    state.reportConflict = null;
+  }
   const origin = document.getElementById('reportOrigin');
   if (origin) origin.textContent = originText(state, model);
   const pages = document.getElementById('reportPages');
@@ -268,6 +280,89 @@ export function updateReportBar(state, model = state.model || state.lastGood) {
     const count = (reportOf(model)?.pages || []).length;
     pages.textContent = count ? `${count} page${count === 1 ? '' : 's'}` : '';
   }
+}
+
+// ── Page changes ─────────────────────────────────────────────────────────────
+
+/** The title in index.html, for a Reports view with nothing open. */
+const APP_TITLE = typeof document === 'undefined' ? 'Dossier' : document.title || 'Dossier';
+
+/**
+ * Where focus was when a page change began, for `restorePageFocus`: a
+ * report tab, an outline page link, or something inside the report. Focus
+ * anywhere else (the body, the header, the editor, the rail's filter) is not
+ * the page's and is never moved.
+ *
+ * @returns {'tab'|'outline'|'content'|null}
+ */
+export function pageFocusOrigin(active, els) {
+  if (!active || !(active instanceof Element)) return null;
+  if (active.closest('.report-tabs')) return 'tab';
+  if (active.closest('#outline a.ds-outline__page')) return 'outline';
+  if (els.stage?.contains(active)) return 'content';
+  return null;
+}
+
+/**
+ * A page change rebuilds the report and the outline, which took the focused
+ * tab or link with them and left focus on the body: the next Tab went back to
+ * the first tab (WCAG 2.4.3). Focus goes to the same control for the new
+ * page, or to the new page's heading when it was inside the old page.
+ */
+export function restorePageFocus(origin, els) {
+  if (!origin) return;
+  const active = document.activeElement;
+  if (active && active !== document.body && active.isConnected) return;
+  const heading = () => {
+    const el = els.stage?.querySelector('.report-page__head h2') || els.stage?.querySelector('.report-title');
+    // On the live heading, not in the renderer, which the export shares.
+    if (el && !el.hasAttribute('tabindex')) el.tabIndex = -1;
+    return el;
+  };
+  let target = null;
+  if (origin === 'tab') target = els.stage?.querySelector('.report-tab[aria-current="page"]');
+  else if (origin === 'outline') target = els.outline?.querySelector('a.ds-outline__page[aria-current="page"]');
+  else target = heading();
+  target?.focus({ preventScroll: true });
+  // An outline link in a drawer that closed behind it cannot take focus:
+  // the new page's heading does.
+  if (document.activeElement !== target) heading()?.focus({ preventScroll: true });
+}
+
+/**
+ * Say which page is shown, once per page change ("Page 2 of 3: Scores &
+ * runs"). A polite live region rather than the toast: a toast on every page
+ * flip is noise on screen. Cleared first and filled on the next frame, so
+ * stepping back to the same page is said again. Never called on an edit.
+ */
+export function announcePage(state) {
+  const live = document.getElementById('pageLive');
+  const pages = reportOf(state.model || state.lastGood)?.pages || [];
+  if (!live || pages.length < 2) return;
+  const at = pages.findIndex((p) => p.id === state.page);
+  if (at < 0) return;
+  live.textContent = '';
+  requestAnimationFrame(() => {
+    live.textContent = `Page ${at + 1} of ${pages.length}: ${pages[at].title || 'Untitled page'}`;
+  });
+}
+
+/**
+ * The tab's title names the report and, past one page, the page: what a
+ * reader sees in the tab strip and history, and what a screen reader says
+ * on a page change. The Compare view keeps its own.
+ */
+export function reportDocumentTitle(state) {
+  if (typeof document === 'undefined' || document.documentElement.dataset.dossierView === 'compare') return;
+  const report = reportOf(state.model || state.lastGood);
+  if (!report) {
+    document.title = APP_TITLE;
+    return;
+  }
+  const name = report.title || 'Untitled report';
+  const pages = report.pages || [];
+  const page = pages.length > 1 ? pages.find((p) => p.id === state.page) : null;
+  document.title = page ? `${page.title || 'Untitled page'} | ${name} | Dossier` : `${name} | Dossier`;
 }
 
 export function originText(state, model = state.model || state.lastGood) {

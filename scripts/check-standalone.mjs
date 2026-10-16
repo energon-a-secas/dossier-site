@@ -23,7 +23,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PORT = Number(process.env.DOSSIER_PORT || 8979);
-const OUT = path.join(root, '.verify');
+// A folder for this run's port, so two receipts at once never share a file.
+const OUT = path.join(root, '.verify', String(PORT));
 
 const findings = [];
 const note = (msg) => findings.push(msg);
@@ -92,11 +93,11 @@ async function main() {
     const blocked = [];
     await check.route('**/*', (route) => {
       const url = route.request().url();
-      if (url.startsWith(`http://localhost:${PORT}/.verify/`)) return route.continue();
+      if (url.startsWith(`http://localhost:${PORT}/.verify/${PORT}/`)) return route.continue();
       blocked.push(url);
       return route.abort();
     });
-    await check.goto(`http://localhost:${PORT}/.verify/receipt-standalone.html`, { waitUntil: 'load' });
+    await check.goto(`http://localhost:${PORT}/.verify/${PORT}/receipt-standalone.html`, { waitUntil: 'load' });
 
     const seen = await check.evaluate(() => {
       const cs = getComputedStyle(document.documentElement);

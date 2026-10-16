@@ -15,10 +15,11 @@
  */
 
 import { showToast } from './neorgon-dom.js';
-import { initYaml } from './parse.js';
+import { initYaml, needsYaml } from './parse.js';
 import { detect } from './adapters/index.js';
-import { htmlHasScripts } from './adapters/html.js';
-import { HTML_MAX_CHARS, htmlTooLargeMessage } from './embed-policy.js';
+import { HTML_MAX_CHARS, reportTooLargeMessage } from './embed-policy.js';
+import { notText } from './text-check.js';
+import { markDetected, tooLargeSentence } from './open-line.js';
 import { authored, commitModel, rerender } from './pipeline.js';
 import { persistCurrent, refreshLibrary, readStored } from './library.js';
 import { setPreference } from './state.js';
@@ -32,10 +33,14 @@ import {
 import { readUrlPayload, say, sentence } from './share.js';
 import { parseRoute, routeFor } from './router.js';
 import { reportOf } from './render/index.js';
-import { readText, readRecord } from './read.js';
+import { readText, readRecord, plainFatal } from './read.js';
 
-// The pure half lives in js/read.js; these names stay importable from here.
-export { readText, readRecord, carriesDerived } from './read.js';
+// The pure half lives in js/read.js, and the Open dialog's line in
+// js/open-line.js; these names stay importable from here.
+export {
+  readText, readRecord, carriesDerived, plainFatal,
+} from './read.js';
+export { describeDetected, markDetected, htmlSentence } from './open-line.js';
 
 // ── Tickets ──────────────────────────────────────────────────────────────────
 
@@ -84,6 +89,8 @@ function openFailed(state, els, ticket) {
 export function applyRead(state, read) {
   commitModel(state, { model: read.model, document: read.document, findings: read.findings, text: read.text });
   state.reportId = null;
+  // No stored revision yet: the first save creates the record (js/library.js).
+  state.reportRev = null;
   state.isExample = false;
   state.fromUrl = false;
 }
@@ -105,18 +112,41 @@ export function onComparisonBundle(fn) {
   bundleOpener = typeof fn === 'function' ? fn : null;
 }
 
-/** Pasted text, a chosen file or a dropped file. */
-export function openText(state, els, text, label) {
-  if (bundleOpener && detect(text)?.bundle) {
+/**
+ * Pasted text, a chosen file or a dropped file.
+ *
+ * Every kind gets the cap HTML and the Compare view have, checked on the raw
+ * text before anything detects or parses it, and binary input is refused
+ * (js/text-check.js). YAML is read once its parser is in, which only text
+ * that no adapter claims and that does not open as JSON loads.
+ *
+ * A failure while the Open dialog is open is said in the dialog's own line,
+ * a status region inside the modal, and not in the toast, which a modal
+ * dialog covers (no z-index rises above the top layer). Dropped on the page,
+ * it is the toast.
+ *
+ * @param {string} text
+ * @param {string} label the file name, or "Pasted text"
+ * @returns {Promise<boolean>} true when it opened, or went to the Compare view
+ */
+export async function openText(state, els, text, label) {
+  const name = label && label !== 'Pasted text' ? label : undefined;
+  if (typeof text === 'string' && text.length > HTML_MAX_CHARS) {
+    return refuseOpen(els, name ? reportTooLargeMessage(text.length, name) : tooLargeSentence(text));
+  }
+  const binary = notText(text);
+  if (!binary && bundleOpener && detect(text)?.bundle) {
     bundleOpener(text, label);
     return true;
   }
-  const read = readText(text);
+  if (!binary && needsYaml(text) && !detect(text)) await initYaml();
+  const read = readText(text, { name });
   if (!read.ok) {
-    const message = read.fatal.message;
-    say(read.label || !text || !String(text).trim() ? message : `${label} could not be read: ${message}`);
-    if (els.importDetected && text && String(text).trim()) els.importDetected.textContent = message;
-    return false;
+    const empty = !text || !String(text).trim();
+    const plain = plainFatal(read.fatal, text);
+    const inDialog = Boolean(els.importDialog?.open);
+    if (empty) return refuseOpen(els, inDialog ? 'Paste a report or choose a file first.' : plain);
+    return refuseOpen(els, read.label || (inDialog && !name) ? plain : `${label} could not be read. ${plain}`);
   }
   beginOpen();
   applyRead(state, read);
@@ -125,6 +155,18 @@ export function openText(state, els, text, label) {
     announce: read.label ? sentence(`Opened the ${read.label} report "${titleOf(state)}"`) : undefined,
   });
   return true;
+}
+
+/**
+ * Say why an open was refused: in the Open dialog's line, marked as an
+ * error, while the dialog is open; in the toast otherwise.
+ *
+ * @returns {false}
+ */
+function refuseOpen(els, message) {
+  if (els.importDialog?.open) markDetected(els, message, true);
+  else say(message);
+  return false;
 }
 
 /**
@@ -147,7 +189,10 @@ export function finishOpen(state, els, { persist = true, announce } = {}) {
   showSourceTab(state, els, state.preferences.sourceTab);
   refreshFindings(state, els);
   const listed = persist ? persistCurrent(state, els) : refreshLibrary(state, els);
-  if (state.findings.some((f) => f.level === 'error')) showFindings(state, els, true);
+  // A report with errors opens unobstructed for reading: the red count on
+  // Check report carries the signal, and the panel opens on its own only
+  // where it docks, beside the editor (design 7.3.13).
+  if (currentMode() === 'build' && state.findings.some((f) => f.level === 'error')) showFindings(state, els, true);
   if (announce !== false) say(announce || sentence(`Opened "${titleOf(state)}"`));
   return Promise.resolve(listed).catch(() => {});
 }
@@ -202,7 +247,12 @@ export async function openStored(state, els, id, { announce } = {}) {
   const ticket = beginOpen();
   const record = await readStored(id);
   if (ticket !== openGeneration()) return false;
-  if (!record) return openFailed(state, els, ticket);
+  if (!record) {
+    // A report that cannot be read back (storage cleared, or deleted
+    // elsewhere) leaves the list instead of staying there to fail again.
+    refreshLibrary(state, els);
+    return openFailed(state, els, ticket);
+  }
   const { read, stale } = readRecord(record);
   if (!read.ok) {
     say(`That saved report could not be read: ${read.fatal.message}`);
@@ -210,6 +260,8 @@ export async function openStored(state, els, id, { announce } = {}) {
   }
   applyRead(state, read);
   state.reportId = id;
+  // The stored revision this tab now holds; a save checks it (js/store.js).
+  state.reportRev = record.meta?.updated ?? null;
   setPreference(state, 'lastReportId', id);
   keepMode(state);
   // Opening is not editing: only a stale record (readRecord) is saved, once,
@@ -371,46 +423,6 @@ export async function openLink(state, els) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-export function describeDetected(els, text) {
-  if (!els.importDetected) return;
-  if (!text || !text.trim()) {
-    els.importDetected.textContent = '';
-    return;
-  }
-  const adapter = detect(text);
-  if (adapter?.bundle) {
-    els.importDetected.textContent = 'A Dossier comparison. It opens in the Compare view.';
-    return;
-  }
-  els.importDetected.textContent = adapter?.id === 'html'
-    ? htmlSentence(text)
-    : adapter ? `Looks like ${adapter.label}. It will be turned into a report.`
-      : 'Looks like a Dossier document.';
-}
-
-let lastHtml = { text: null, sentence: '' };
-
-/**
- * What opening this HTML does now: a static copy in its own layout, with
- * nothing in it running. The old sentence promised "inline controls enabled"
- * for every HTML file, which stopped being true when imports became static by
- * default. Over the size cap it is the refusal itself, before Open is
- * pressed. One entry of memory, because this runs on every keystroke in the
- * paste box and a large report is parsed to find its scripts.
- *
- * @param {string} text
- * @returns {string}
- */
-export function htmlSentence(text) {
-  if (text.length > HTML_MAX_CHARS) return htmlTooLargeMessage(text.length);
-  if (lastHtml.text === text) return lastHtml.sentence;
-  const sentence = htmlHasScripts(text)
-    ? 'HTML report. It opens as a static copy in its own layout, with its scripts off. You can run them from the report.'
-    : 'HTML report. It opens as a static copy in its own layout. You can also read it in Dossier format.';
-  lastHtml = { text, sentence };
-  return sentence;
-}
 
 export function blankReport() {
   return {

@@ -39,7 +39,8 @@
   const APPEARANCE_KEY = 'dossier-site:appearance';
   const PREFERENCES_KEY = 'dossier-site:preferences';
   const READING_KEY = 'dossier-site:reading';
-  // Mirrors READING in js/display.js. The first value of each is the default,
+  // The same list as READING in js/display.js, held equal by
+  // tests/reading-parity.test.mjs. The first value of each is the default,
   // and a stored value outside the list reads as the default.
   const READING = {
     readingSize: ['medium', 'small', 'large', 'xlarge'],

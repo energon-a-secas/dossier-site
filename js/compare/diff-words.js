@@ -2,35 +2,43 @@
  * Myers' O(ND) diff, and the word marks of one changed unit built on it.
  * DOM-free: node imports it.
  *
- * Every run has an edit cap and a deadline, so two very different units
- * cost a bounded amount: past the cap a unit is marked as changed without
- * word marks. A small equality caught between two edits is folded into
- * them, so "changed the cache TTL" reads as one replacement rather than
- * four (diff-match-patch's semantic cleanup, with a stricter threshold so a
- * figure both sides share stays visible).
+ * Every run has an edit cap and draws on a work budget, both counted in
+ * steps, never in time, so the same two reports always get the same marks
+ * whatever the machine or its load: a budget in milliseconds marked 300
+ * changed paragraphs on a fast machine and none on a slow one. Past the cap
+ * a unit is marked as changed without word marks, and says so. A small
+ * equality caught between two edits is folded into them, so "changed the
+ * cache TTL" reads as one replacement rather than four (diff-match-patch's
+ * semantic cleanup, with a stricter threshold so a figure both sides share
+ * stays visible).
  */
 
 import { inlineTokens, tokensToInline, wordKey, withoutLinks } from './diff-tokens.js';
 
 /** A word diff that keeps less than this share of the longer side is not worth marking. */
 const WORDS_MIN_KEPT = 0.25;
-const WORD_MAX_D = 400;
-
-export const now = () => (globalThis.performance?.now ? globalThis.performance.now() : Date.now());
+/** The edit cap of one unit's word diff. Word marks turned on by hand raise it. */
+export const WORD_MAX_D = 400;
+export const WORD_MAX_D_FORCED = 4000;
 
 // ── Myers ────────────────────────────────────────────────────────────────────
 
 /**
  * Myers' O(ND) diff of two integer sequences.
  *
+ * `budget` is shared work: each edit step `d` costs its 2d + 1 diagonals and
+ * each matching step along a diagonal costs one, so a column's units and
+ * all their word diffs draw on one bounded amount of work.
+ *
  * @param {ArrayLike<number>} a
  * @param {ArrayLike<number>} b
- * @param {{maxD?: number, deadline?: number}} [limits]
+ * @param {{maxD?: number, budget?: {left: number}|null}} [limits]
  * @returns {Array<{t: 'eq'|'del'|'ins', a: number, b: number, n: number}>|null}
  *   runs in order (`a` and `b` are where each run starts in its sequence),
- *   or null when the edit distance passed `maxD` or the deadline passed
+ *   or null when the edit distance passed `maxD` or the budget ran out
+ *   (then `budget.left` is below 0)
  */
-export function myers(a, b, { maxD = Infinity, deadline = Infinity } = {}) {
+export function myers(a, b, { maxD = Infinity, budget = null } = {}) {
   const n = a.length;
   const m = b.length;
   let pre = 0;
@@ -54,21 +62,28 @@ export function myers(a, b, { maxD = Infinity, deadline = Infinity } = {}) {
     const trace = [];
     let done = false;
     for (let d = 0; d <= max && !done; d += 1) {
-      if ((d & 15) === 0 && now() > deadline) return null;
+      if (budget) {
+        budget.left -= 2 * d + 1;
+        if (budget.left < 0) return null;
+      }
       trace.push(v.slice(off - d - 1, off + d + 2));
+      let steps = 0;
       for (let k = -d; k <= d; k += 2) {
         let x = (k === -d || (k !== d && v[off + k - 1] < v[off + k + 1])) ? v[off + k + 1] : v[off + k - 1] + 1;
         let y = x - k;
+        const from = x;
         while (x < N && y < M && a[pre + x] === b[pre + y]) {
           x += 1;
           y += 1;
         }
+        steps += x - from;
         v[off + k] = x;
         if (x >= N && y >= M) {
           done = true;
           break;
         }
       }
+      if (budget) budget.left -= steps;
     }
     if (!done) return null;
     // Walk back through the snapshots. Each holds k from -d-1 to d+1.
@@ -237,24 +252,30 @@ function reorder(runs) {
 
 /**
  * The word marks of a changed unit: segments of the new unit's text, each
- * `{type: 'eq'|'ins'|'del', inl}`, ready for js/compare/ir-render.js.
+ * `{type: 'eq'|'ins'|'del', inl}`, ready for js/compare/ir-render.js, with
+ * the words kept and the words of the longer side (`kept`, `total`), which
+ * js/compare/diff.js sums to tell a light edit from a rewrite.
  *
  * @param {Array} baseInl inline runs of the base unit
  * @param {Array} inl inline runs of this column's unit
- * @param {{ignoreCase?: boolean, ignorePunctuation?: boolean}} opts
- * @param {number} [deadline]
- * @returns {{segments: Array<{type: string, inl: Array}>, edits: number}|null}
- *   null when the words cannot be marked within the cap, or would be noise
+ * @param {{ignoreCase?: boolean, ignorePunctuation?: boolean, force?: boolean}} opts
+ *   `force`: Word marks turned on by hand, so mark even a unit that is mostly new
+ * @param {{left: number}|null} [budget] shared work (see `myers`)
+ * @param {{maxD?: number}} [limits]
+ * @returns {{segments: Array<{type: string, inl: Array}>, edits: number, kept: number, total: number}
+ *   | {reason: 'cap'|'budget', segments?: undefined}}
+ *   a reason instead of segments when the words cannot be marked within the
+ *   cap or the budget, or would be noise (`cap`)
  */
-export function wordDiff(baseInl, inl, opts = {}, deadline = Infinity) {
+export function wordDiff(baseInl, inl, opts = {}, budget = null, { maxD = WORD_MAX_D } = {}) {
   const aTok = inlineTokens(baseInl);
   const bTok = inlineTokens(inl);
   const key = wordKey(opts);
   const aIdx = compared(aTok, opts);
   const bIdx = compared(bTok, opts);
   const [a, b] = intern(aIdx.map((i) => key(aTok[i].text)), bIdx.map((i) => key(bTok[i].text)));
-  const runs0 = myers(a, b, { maxD: Math.min(WORD_MAX_D, a.length + b.length), deadline });
-  if (!runs0) return null;
+  const runs0 = myers(a, b, { maxD: Math.min(maxD, a.length + b.length), budget });
+  if (!runs0) return { reason: budget && budget.left < 0 ? 'budget' : 'cap' };
   const lenA = (from, n) => {
     let s = 0;
     for (let i = from; i < from + n; i += 1) s += aTok[aIdx[i]].text.length;
@@ -267,13 +288,18 @@ export function wordDiff(baseInl, inl, opts = {}, deadline = Infinity) {
   };
   const runs = cleanupSemantic(runs0, lenA, lenB);
   let kept = 0;
+  let keptWords = 0;
   let edits = 0;
   for (const run of runs) {
-    if (run.t === 'eq') kept += run.n;
-    else edits += 1;
+    if (run.t === 'eq') {
+      kept += run.n;
+      for (let i = run.a; i < run.a + run.n; i += 1) if (aTok[aIdx[i]].kind === 'w') keptWords += 1;
+    } else edits += 1;
   }
-  if (!edits) return { segments: [{ type: 'eq', inl }], edits: 0 };
-  if (kept < WORDS_MIN_KEPT * Math.max(a.length, b.length)) return null;
+  const words = (tokens) => tokens.reduce((n, tok) => n + (tok.kind === 'w' ? 1 : 0), 0);
+  const total = Math.max(words(aTok), words(bTok));
+  if (!edits) return { segments: [{ type: 'eq', inl }], edits: 0, kept: keptWords, total };
+  if (!opts.force && kept < WORDS_MIN_KEPT * Math.max(a.length, b.length)) return { reason: 'cap' };
 
   // Lay the edits over this column's own tokens, spaces and ignored
   // punctuation included, so its text reads as it was written. Removed words
@@ -327,6 +353,8 @@ export function wordDiff(baseInl, inl, opts = {}, deadline = Infinity) {
   return {
     segments: out.map((seg) => ({ type: seg.type, inl: tokensToInline(seg.tokens) })),
     edits,
+    kept: keptWords,
+    total,
   };
 }
 

@@ -18,10 +18,16 @@
  * the field, `author` fills `owner`, and everything else is named in one info
  * finding so the reader knows what was left out.
  *
+ * With no front-matter title, the report is named from its own text: the
+ * one level-1 heading (which then is not repeated as a page title), the file
+ * name, or the first heading of any level. Every agent Markdown file without
+ * front matter used to open as "Document", so the saved list filled with
+ * entries no one could tell apart.
+ *
  * Pure, DOM-free.
  */
 
-import { META, KINDS, STATUSES } from '../registry/types.js';
+import { META, PAGE, KINDS, STATUSES } from '../registry/types.js';
 
 /** Front-matter keys copied as one-line strings, with the field's own limit. */
 const STRING_KEYS = ['title', 'subtitle', 'owner'];
@@ -29,9 +35,11 @@ const ENUM_KEYS = { kind: KINDS, status: STATUSES, chrome: META.chrome.values ||
 
 /**
  * @param {string} source
+ * @param {{name?: string}} [opts] the file name the text came from, when it
+ *   came from a file
  * @returns {{ document: Document|null, findings: Array }}
  */
-export function toDossier(source) {
+export function toDossier(source, { name } = {}) {
   const findings = [];
 
   if (!source || typeof source !== 'string') {
@@ -51,17 +59,21 @@ export function toDossier(source) {
   }
 
   const meta = frontMatter ? metaFromFrontMatter(parseYamlFront(frontMatter), findings) : {};
+  const blocks = parseMarkdown(body);
+  const tops = blocks.filter((block) => block.type === 'heading' && block.level === 1);
+  // One H1 and no front-matter title: the H1 is the report's title, and its
+  // page gets the neutral title the no-H1 path uses, so it is not shown twice.
+  const promoted = !meta.title && tops.length === 1 ? tops[0] : null;
 
   // `version` is the format's version, always 1. A front-matter version is
   // the document's own revision and is not copied over it.
   const doc = {
     version: 1,
     ...meta,
-    title: meta.title || 'Document',
+    title: meta.title || titleFrom(blocks, tops, name),
     pages: [],
   };
 
-  const blocks = parseMarkdown(body);
   let pages = [];
   let currentPage = null;
   let currentBlocks = [];
@@ -73,7 +85,7 @@ export function toDossier(source) {
         pages.push(currentPage);
         currentBlocks = [];
       }
-      currentPage = { title: block.text, blocks: [] };
+      currentPage = { title: block === promoted ? 'Content' : clamp(plainHeading(block.text), PAGE.title.maxLen), blocks: [] };
     } else if (block.type === 'heading') {
       currentBlocks.push({
         type: 'heading',
@@ -101,6 +113,49 @@ export function toDossier(source) {
 
   const document = { dossier: doc };
   return { document, findings };
+}
+
+/**
+ * The report's title when front matter gives none: the one H1; with several,
+ * the file name or the first H1; with none, the file name or the first
+ * heading of any level; then "Document".
+ */
+function titleFrom(blocks, tops, name) {
+  const file = fileTitle(name);
+  const heading = (block) => (block ? plainHeading(block.text) : '');
+  let title = '';
+  if (tops.length === 1) title = heading(tops[0]);
+  else if (tops.length > 1) title = file || heading(tops[0]);
+  else title = file || heading(blocks.find((block) => block.type === 'heading'));
+  return clamp(title, META.title.maxLen) || 'Document';
+}
+
+/**
+ * A file name as a title: the base name, without a Markdown or text
+ * extension, with runs of `_` and `-` read as spaces. The Open dialog's
+ * "Pasted text" label is not a file name.
+ */
+function fileTitle(name) {
+  if (typeof name !== 'string' || !name.trim() || name === 'Pasted text') return '';
+  const base = name.split(/[\\/]/).pop().replace(/\.(md|markdown|txt)$/i, '');
+  return base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** A heading's words without the simple inline Markdown around them. */
+function plainHeading(text) {
+  return String(text || '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/(^|\W)[*_]+|[*_]+(?=\W|$)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Cut a title to a field's limit, ending on an ellipsis when it was cut. */
+function clamp(text, max) {
+  const value = String(text || '').trim();
+  if (!max || value.length <= max) return value;
+  return `${value.slice(0, max - 1).trimEnd()}\u2026`;
 }
 
 /**

@@ -6,9 +6,11 @@
  *
  * The HTML file is the comparison as it is on screen: Dossier-format columns
  * as their drawn text with every difference mark, original columns as
- * script-less srcdoc frames, the review, and one inline function
+ * script-less srcdoc frames, the review, and one inline script: the runtime
  * (js/compare/export-runtime.js) for sync and the previous and next change
- * buttons. Its policy allows that one script by hash and no network at all.
+ * buttons, handed the app's link guard (js/frame-links.js) so a link in an
+ * original column never takes the column away from its report. Its policy
+ * allows that one script by hash and no network at all.
  *
  * A file made while Blind is on keeps the secret in its markup as well as
  * on screen: every column carries the neutral role, and the column ids our
@@ -19,18 +21,21 @@
 
 import { escHtml, copyText, downloadText } from '../neorgon-dom.js';
 import { registerActions } from '../actions.js';
-import { say, sentence, encodeComparison, decodeComparison, COMPARISON_LINK_MAX } from '../share.js';
+import {
+  say, sentence, encodeComparison, decodeComparison, comparisonLinkId, COMPARISON_LINK_MAX,
+} from '../share.js';
 import { routeFor } from '../router.js';
 import { embedDocument } from '../embed-policy.js';
 import { staticCopy } from './frame.js';
-import { alignHeadings } from './align.js';
-import { toBundle, fromBundle } from './records.js';
+import { toBundle, fromBundleWithNotice, demotedSentence } from './records.js';
+import { readSet } from './store.js';
 import { nameOf, displayColumns, roleAttr, reportNumbers } from './blind.js';
 import { icon } from './icons.js';
 import {
-  tally, tallySentence, recordSentence, reviewMarkdown, MARK_WORDS,
+  tally, tallySentence, recordSentence, reviewMarkdown, blindOrderSentence, MARK_WORDS,
 } from './review-model.js';
 import { comparisonRuntime } from './export-runtime.js';
+import { guardFrameLinks } from '../frame-links.js';
 
 /** Our own stylesheets the file needs, by file name. */
 const SHEETS = /\/css\/(tokens|style|viz|report|blocks|comparison|compare)\.css(\?|$)/;
@@ -103,6 +108,15 @@ function readerCopy(record, groups, ids = null) {
   for (const name of copy.querySelectorAll('[data-base-ref]')) name.replaceWith(name.textContent);
   for (const el of copy.querySelectorAll('.u-current')) el.classList.remove('u-current');
   for (const el of copy.querySelectorAll('[data-text-surface]')) el.removeAttribute('data-text-surface');
+  // A table fits on screen and drops its region pattern there
+  // (js/scroll-regions.js); the file's width is not known, so every table
+  // keeps the pattern that lets a keyboard scroll it.
+  for (const el of copy.querySelectorAll('[data-region-label]')) {
+    el.setAttribute('role', 'region');
+    el.setAttribute('tabindex', '0');
+    el.setAttribute('aria-label', el.dataset.regionLabel);
+    el.removeAttribute('data-region-label');
+  }
   copy.removeAttribute('style');
   return copy.outerHTML;
 }
@@ -119,6 +133,8 @@ function frameCopy(set, col, record) {
 
 function headCopy(colEl, ids = null) {
   const head = colEl.querySelector('.col__head').cloneNode(true);
+  // "2 numbers changed" stays as words: the file has no list to open.
+  for (const b of head.querySelectorAll('.col__nums')) b.replaceWith(Object.assign(document.createElement('span'), { className: 'col__nums', textContent: b.textContent }));
   for (const button of head.querySelectorAll('button')) button.remove();
   if (ids) renameIds(head, ids.from, ids.to);
   return head.innerHTML;
@@ -143,13 +159,25 @@ function reviewHtml(set, cols) {
       <button type="button" class="btn btn--quiet btn--sm btn--icon" id="xReviewClose" aria-label="Close review">${icon('x')}</button></div>
     <div class="panel__body">
       <p class="panel__intro">The reviewer's own marks. Dossier counts them and never scores a report.</p>
-      <p class="panel__intro">${escHtml(recordSentence(set))}</p>
+      <p class="panel__intro">${escHtml(recordSentence(set, { copy: true }))}</p>
+      ${blindOrderSentence(set) ? `<p class="panel__intro">${escHtml(blindOrderSentence(set))}</p>` : ''}
       <ul class="tally">${tallyRows}</ul>
       ${r.criteria.length ? `<table class="x-marks"><thead><tr><th scope="col">Criterion</th>${cols.map((col) => `<th scope="col">${escHtml(name(col).ref)}</th>`).join('')}</tr></thead><tbody>${marks}</tbody></table>` : ''}
       <h3>Preferred</h3><p>${escHtml(pref)}</p>
       ${notes ? `<h3>Notes</h3>${notes}` : ''}
       ${r.summary.trim() ? `<h3>Summary</h3><p class="x-text">${escHtml(r.summary)}</p>` : ''}
     </div></section>`;
+}
+
+/**
+ * The brief, open and without buttons: the file has no editor. Shared by
+ * every report, so it stays in a blind file too.
+ */
+function briefCopy(set) {
+  const brief = String(set.prompt || '').trim();
+  if (!brief) return '';
+  return `<section class="cmp-brief is-open" aria-labelledby="xBriefLbl"><span class="cmp-brief__lbl" id="xBriefLbl">Brief</span>`
+    + `<p class="cmp-brief__text">${escHtml(brief)}</p></section>`;
 }
 
 const EXTRA_CSS = `
@@ -160,6 +188,7 @@ const EXTRA_CSS = `
 .x-marks th, .x-marks td { padding: 5px 4px; border-bottom: 1px solid var(--border); text-align: left; }
 #compareView .tally { list-style: none; }
 @media (max-width: 699px) { .x-toolbar .x-meta, .x-toolbar .x-title { display: none; } }
+@media (max-width: 699px) { .x-toolbar .focus-switch { flex: 1 1 100%; } }
 `;
 
 /**
@@ -193,7 +222,7 @@ async function comparisonHtml() {
       const groups = new Map();
       if (base && compare.sync.has(col.id)) {
         if (col.id === base) baseHeadings.forEach((_, i) => groups.set(i, i));
-        else for (const pair of alignHeadings(baseHeadings, compare.sync.headings(col.id))) groups.set(pair.b, pair.a);
+        else for (const pair of compare.sync.pairs(base, col.id)) groups.set(pair.b, pair.a);
       }
       body = `<div class="col__body">${readerCopy(record, groups, ids)}</div>`;
     } else {
@@ -207,9 +236,12 @@ async function comparisonHtml() {
       + `<span class="rb" aria-hidden="true">${escHtml(name.mark)}</span><span class="focus-switch__word">${escHtml(name.blind ? name.label : name.role)}</span></button>`);
   }
   const title = set.view.blind ? 'Blind review' : set.title;
-  const against = base && set.view.diff.on ? `Differences against ${nameOf(set, base).ref}` : 'Differences off';
+  let against = 'Differences off';
+  if (base && set.view.diff.on) against = analysis.isEach(set) ? 'Differences against each column\'s source' : `Differences against ${nameOf(set, base).ref}`;
   const when = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-  const script = `(${comparisonRuntime.toString()})(document);`;
+  // The link guard travels beside the runtime, inside the one hashed script,
+  // so an Original column's links stay in it (js/frame-links.js).
+  const script = `(${comparisonRuntime.toString()})(document, ${guardFrameLinks.toString()});`;
   const hash = await sha256(script);
   const policy = `default-src 'none'; script-src 'sha256-${hash}'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; frame-src 'self'; base-uri 'none'; form-action 'none'`;
   const html = document.documentElement;
@@ -250,6 +282,7 @@ ${EXTRA_CSS}
     <button type="button" class="btn toggle" id="xRemoved" aria-pressed="${Boolean(set.view.diff.showRemoved)}"><span class="box">${icon('check')}</span>Removed words</button>
     <button type="button" class="btn" id="xReview" aria-pressed="false" aria-controls="xPanel">Review</button>
   </div>
+  ${briefCopy(set)}
   <div class="cmp-body">
     <div class="cmp-columns" style="--cols: ${Math.max(1, columns.length)}">${columns.join('\n')}</div>
     <aside class="cmp-panel" id="xPanel" aria-labelledby="xReviewTitle" hidden>${reviewHtml(set, cols)}</aside>
@@ -273,7 +306,11 @@ function closeDialog() {
 async function exportHtml() {
   try {
     const set = current.api.compare.set;
-    downloadText(await comparisonHtml(), `${slug(set.view.blind ? 'blind-review' : set.title)}.html`, 'text/html');
+    // A comparison named after its report would download under the report's
+    // own name: "-comparison" keeps the two apart in a downloads folder.
+    const stem = slug(set.view.blind ? 'blind-review' : set.title);
+    const name = set.view.blind || /(^|-)comparison$/.test(stem) ? stem : `${stem}-comparison`;
+    downloadText(await comparisonHtml(), `${name}.html`, 'text/html');
     return true;
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -291,6 +328,10 @@ function exportBundle() {
 async function copyReview() {
   const set = current.api.compare.set;
   const cols = displayColumns(set).filter((col) => col.source);
+  if (!cols.length) {
+    say('Put a report in a column before copying the review.');
+    return false;
+  }
   const ok = await copyText(reviewMarkdown(set, cols, (col) => nameOf(set, col)));
   say(ok ? 'Copied the review as Markdown.' : 'The review could not be copied here. Open the Review panel and use its Copy button.');
   return ok;
@@ -342,7 +383,9 @@ export async function comparisonChoices() {
     { action: 'cmp-share-link', name: 'Copy link', ...link },
     { action: 'cmp-export-html', name: 'One HTML file', note: 'The comparison as you see it, marks and review included. Opens with no network. The one to send.' },
     { action: 'cmp-export-bundle', name: 'Comparison file', note: 'Every report, the view and the review, as .dossier-compare.json. Opens again in Dossier.' },
-    { action: 'cmp-export-review', name: 'Copy review as Markdown', note: 'Your marks, notes and summary, for a ticket or a message.' },
+    displayColumns(set).some((col) => col.source)
+      ? { action: 'cmp-export-review', name: 'Copy review as Markdown', note: 'Your marks, notes and summary, for a ticket or a message.' }
+      : { action: 'cmp-export-review', name: 'Copy review as Markdown', note: 'No column holds a report yet, so there is no review to copy.', disabled: true },
   ];
 }
 
@@ -358,20 +401,38 @@ export function initExport(api, analysis) {
     'cmp-export-bundle': () => { closeDialog(); exportBundle(); },
     'cmp-export-review': () => { closeDialog(); return copyReview(); },
   });
-  // A `#dc=` link: open the comparison it carries as a new one in this browser.
+  // A `#dc=` link: open the comparison it carries, saved in this browser
+  // under an id taken from the link itself, so opening the same link again
+  // reopens that copy instead of saving another.
   api.compare.hooks.loadPayload = async () => {
-    const bundle = await decodeComparison(location.hash);
+    const hash = location.hash;
+    const bundle = await decodeComparison(hash);
     history.replaceState(history.state, '', `${location.pathname}${location.search}${routeFor({ view: 'compare' })}`);
-    const set = bundle ? fromBundle(bundle) : null;
-    if (!set) {
+    const id = bundle ? await comparisonLinkId(hash) : null;
+    const found = id ? await readSet(id) : null;
+    if (found) {
+      api.openSet(found, { saved: true, push: true });
+      api.compare.example = false;
+      const again = 'It was already saved in this browser, so it opens with any changes made to it here';
+      // Under Blind the title stays hidden.
+      say(found.view.blind
+        ? `Opened the comparison from the link, under Blind review. ${again}.`
+        : sentence(`Opened the comparison "${found.title}" from the link. ${again}`));
+      return true;
+    }
+    const read = bundle ? fromBundleWithNotice(bundle, id ? { id } : undefined) : null;
+    if (!read) {
       say('That comparison link is incomplete or damaged. Ask for the link again, or for the comparison file.');
       return false;
     }
+    const { set, demoted } = read;
     await api.openBundleSet(set);
     // A comparison sent under Blind opens under Blind: its title stays hidden.
-    say(set.view.blind
+    const opened = set.view.blind
       ? 'Opened the comparison from the link, under Blind review. It is now saved in this browser.'
-      : sentence(`Opened the comparison "${set.title}" from the link. It is now saved in this browser`));
+      : sentence(`Opened the comparison "${set.title}" from the link. It is now saved in this browser`);
+    // A column that asked to run its scripts opened in Original instead.
+    say(demoted.length ? `${opened} ${demotedSentence(set, demoted)}` : opened);
     return true;
   };
 }

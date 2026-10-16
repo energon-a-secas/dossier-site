@@ -8,7 +8,7 @@
  * brought in step, so a mark clicked or a note typed never redraws the
  * control in use. Notes save a moment after the last keystroke, like the
  * rest of the set. Everything is keyboard operable: arrows move within a
- * mark group (js/compare/toolbar.js `bindGroupKeys`), and the preferred
+ * mark group (js/seg.js `bindGroupKeys`), and the preferred
  * report is a native radio group.
  *
  * A mark group behaves as radios do: choosing the chosen mark again keeps
@@ -16,6 +16,11 @@
  * pressed Space to confirm was left with no mark. Marks are cleared with
  * "Clear marks" in the criterion's menu (js/compare/crit-menu.js), which has
  * an undo.
+ *
+ * With no report in any column the panel shows the criteria to set up and
+ * nothing to mark, prefer, note or copy: what was entered before stays in the
+ * set and comes back with the first report. Once Blind is off, a review
+ * entered blind says which column each report number was (`.rec__order`).
  */
 
 import { escHtml, copyText } from '../neorgon-dom.js';
@@ -29,10 +34,14 @@ import { MARKS, LIMITS, repair } from './model.js';
 import {
   MARK_WORDS, setMark, setPreferred, setNote, setSummary, addCriterion, renameCriterion,
   moveCriterion, removeCriterion, tally, tallySentence, criterionSummary, recordSentence,
-  reviewMarkdown,
+  reviewMarkdown, blindOrderSentence,
 } from './review-model.js';
 
-const NOTE_DELAY_MS = 300;
+/**
+ * How long a note or the summary waits for the next keystroke before it
+ * goes into the set. Short, because the set's own save waits too.
+ */
+const NOTE_DELAY_MS = 150;
 
 /** @param {object} api from js/compare/index.js */
 export function createReview(api) {
@@ -60,11 +69,17 @@ export function createReview(api) {
 
   function criterionHtml(s, crit, i, cols) {
     const id = escHtml(crit.id);
-    return `<div class="crit-wrap" data-crit="${id}">
-      <details class="crit" data-crit="${id}"${isOpen(s, crit, i) ? ' open' : ''}>
+    // No report to mark, so the criterion is a plain row rather than a
+    // disclosure that opens on nothing. Its menu still renames, moves and
+    // removes it, so the criteria can be set up before the reports go in.
+    const body = cols.length
+      ? `<details class="crit" data-crit="${id}"${isOpen(s, crit, i) ? ' open' : ''}>
         <summary>${icon('right', 'chev')}<span class="crit__name">${escHtml(crit.label)}</span><span class="crit__sum"></span></summary>
         <div class="crit__rows">${cols.map((col) => markGroup(s, crit, col)).join('')}</div>
-      </details>
+      </details>`
+      : `<div class="crit crit--idle" data-crit="${id}"><p class="crit__head"><span class="crit__name">${escHtml(crit.label)}</span></p><div class="crit__rows"></div></div>`;
+    return `<div class="crit-wrap" data-crit="${id}">
+      ${body}
       <button type="button" class="btn btn--quiet btn--sm btn--icon crit__more" data-action="cmp-crit-menu" data-crit="${id}"
         aria-haspopup="menu" aria-expanded="false" aria-controls="cmpCritMenu${i}" aria-label="Options for ${escHtml(crit.label)}" title="Criterion options">${icon('more')}</button>
       <div class="cmp-menu crit__menu" id="cmpCritMenu${i}" role="menu" aria-label="${escHtml(crit.label)} options" hidden></div>
@@ -92,6 +107,18 @@ export function createReview(api) {
   /** A criterion's menu button, to put focus back on. */
   const moreOf = (critId) => host?.querySelector(`.crit__more[data-crit="${CSS.escape(critId)}"]`) || null;
 
+  /**
+   * Focus moved by the panel itself, then scrolled into view as little as
+   * needed, clear of the sticky head and foot (the panel's scroll padding,
+   * css/compare.css). With preventScroll alone, Add criterion took focus
+   * under the foot after a Remove, with no focus ring in sight.
+   */
+  const focusShown = (el) => {
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  };
+
   function build(s) {
     const cols = filled(s);
     const tallyRows = cols.map((col) => `<div class="tally__row" data-col="${col.id}" data-role="${roleAttr(s, col)}">`
@@ -109,14 +136,18 @@ export function createReview(api) {
         + `<textarea data-note="${col.id}" rows="2" maxlength="${LIMITS.note}" data-text-surface aria-label="Notes on ${escHtml(name.blind ? name.label : `${name.ref}, ${col.label}`)}"></textarea></label>`;
     }).join('');
     const full = s.review.criteria.length >= LIMITS.criteria;
+    const reviewable = cols.length > 0;
     host.innerHTML = `
       <p class="panel__intro">Your marks only. Dossier counts what you enter and never scores a report.</p>
       <p class="blind-hint"></p>
-      ${cols.length ? `<div class="tally" role="group" aria-label="What you entered">${tallyRows}</div>` : '<p class="panel__intro">Put a report in a column to review it.</p>'}
+      <p class="brief-add"><button type="button" class="btn btn--quiet btn--sm" data-action="cmp-brief-edit">${icon('plus')}Add the brief</button> <span>What every report was asked to write, shown above the columns.</span></p>
+      ${reviewable
+    ? `<div class="tally" role="group" aria-label="What you entered">${tallyRows}</div>`
+    : '<p class="panel__empty">Put a report in a column to review it. You can set up the criteria now.</p>'}
       <h3>Criteria</h3>
       <div class="crits">${s.review.criteria.map((crit, i) => criterionHtml(s, crit, i, cols)).join('')}</div>
       <button type="button" class="btn btn--quiet btn--sm add-crit" data-action="cmp-crit-add"${full ? ` disabled title="Up to ${LIMITS.criteria} criteria"` : ''}>${icon('plus')}Add criterion</button>
-      <fieldset class="prefer"><legend>Preferred</legend>${prefer}
+      ${reviewable ? `<fieldset class="prefer"><legend>Preferred</legend>${prefer}
         <label><input type="radio" name="cmp-pref" value="none"><span>None is adequate</span></label></fieldset>
       <h3>Notes</h3>
       <div class="notes">${notes}</div>
@@ -125,11 +156,12 @@ export function createReview(api) {
       <div class="panel__foot">
         <button type="button" class="btn" data-action="cmp-copy-review">${icon('copy')}Copy review as Markdown</button>
         <p class="rec" role="status"></p>
+        <p class="rec__order" hidden></p>
         <div class="copy-fallback" hidden>
           <p>Copying did not work in this browser. The review is selected below: copy it with Ctrl+C, or Command+C on a Mac.</p>
           <textarea readonly rows="6" aria-label="The review as Markdown"></textarea>
         </div>
-      </div>`;
+      </div>` : ''}`;
   }
 
   /** Bring every control in step with the set, without rebuilding any. */
@@ -139,13 +171,16 @@ export function createReview(api) {
       ? 'Blind is on: names, roles and authors are hidden. Marks you enter now are recorded as blind. A report that corrects another still reads as an edit of it.'
       : 'Blind is off, so you can see who wrote each report. Turn on Blind before you mark to hide names, roles and authors.';
     host.querySelector('.blind-hint').classList.toggle('is-on', Boolean(s.view.blind));
+    const briefAdd = host.querySelector('.brief-add');
+    if (briefAdd) briefAdd.hidden = Boolean(String(s.prompt || '').trim());
     for (const row of host.querySelectorAll('.tally__row')) {
       row.querySelector('.tally__text').textContent = tallySentence(tally(s, row.dataset.col));
     }
     for (const crit of s.review.criteria) {
       const el = host.querySelector(`.crit[data-crit="${CSS.escape(crit.id)}"]`);
       if (!el) continue;
-      el.querySelector('.crit__sum').textContent = criterionSummary(s, crit, cols, refOf(s));
+      const sum = el.querySelector('.crit__sum');
+      if (sum) sum.textContent = criterionSummary(s, crit, cols, refOf(s));
       for (const group of el.querySelectorAll('.marks')) {
         const buttons = [...group.querySelectorAll('[data-action="cmp-mark"]')];
         const chosen = s.review.marks[crit.id]?.[buttons[0]?.dataset.col] || null;
@@ -162,7 +197,16 @@ export function createReview(api) {
     }
     const summary = host.querySelector('textarea[data-summary]');
     if (summary && summary !== document.activeElement) summary.value = s.review.summary || '';
-    host.querySelector('.rec').textContent = recordSentence(s);
+    const rec = host.querySelector('.rec');
+    if (rec) rec.textContent = recordSentence(s);
+    // Which column each report number was: only once Blind is off, so the
+    // panel never gives the order away while it is on.
+    const order = host.querySelector('.rec__order');
+    if (order) {
+      const text = blindOrderSentence(s);
+      if (order.textContent !== text) order.textContent = text;
+      order.hidden = !text;
+    }
   }
 
   /** Draw into the panel body: build when the shape changed, then sync. */
@@ -173,8 +217,14 @@ export function createReview(api) {
     const shape = JSON.stringify([s.id, s.view.blind, filled(s).map((c) => [c.id, c.label, c.role]),
       s.review.criteria.map((c) => [c.id, c.label]), s.review.criteria.length >= LIMITS.criteria]);
     if (host.dataset.shape !== shape) {
-      const focus = document.activeElement && host.contains(document.activeElement) ? focusKey(document.activeElement) : null;
+      // Focus is put back across a rebuild of the same set only. After a set
+      // switch it landed in the other set's matching note, which `sync` left
+      // blank (it skips the focused field), and the next keystroke replaced
+      // that set's own note.
+      const sameSet = host.dataset.setId === s.id;
+      const focus = sameSet && document.activeElement && host.contains(document.activeElement) ? focusKey(document.activeElement) : null;
       host.dataset.shape = shape;
+      host.dataset.setId = s.id;
       build(s);
       if (focus) restoreFocus(focus);
     }
@@ -196,20 +246,33 @@ export function createReview(api) {
 
   // ── Editing ────────────────────────────────────────────────────────────────
 
+  /**
+   * A note or the summary still waiting for the next keystroke, by key
+   * (`n:<column>` or `summary`): the edit, the set it was typed in, and its
+   * timer. An edit lands only in the set it was typed in. It used to land in
+   * whichever set was open when its timer fired, so a note typed just before
+   * Back went into the comparison opened next, over that one's own note.
+   * js/compare/index.js runs `flushNotes` before the open set changes, the
+   * view is left or the page hides, so the timer never gets that far.
+   */
   const timers = new Map();
-  function noteLater(key, apply) {
-    clearTimeout(timers.get(key));
-    timers.set(key, setTimeout(() => {
-      timers.delete(key);
-      api.commit(apply(set()));
-    }, NOTE_DELAY_MS));
-  }
-  function noteNow(key, apply) {
-    if (!timers.has(key)) return;
-    clearTimeout(timers.get(key));
+  function land(key) {
+    const entry = timers.get(key);
+    if (!entry) return;
+    clearTimeout(entry.timer);
     timers.delete(key);
-    api.commit(apply(set()));
+    if (set()?.id === entry.setId) api.commit(entry.apply(set()));
   }
+  function noteLater(key, apply) {
+    const entry = timers.get(key);
+    if (entry) clearTimeout(entry.timer);
+    timers.set(key, { apply, setId: set()?.id, timer: setTimeout(() => land(key), NOTE_DELAY_MS) });
+  }
+  function flushNotes() {
+    for (const key of [...timers.keys()]) land(key);
+  }
+  (compare.hooks.beforeSwitch ||= []).push(flushNotes);
+  (compare.hooks.pending ||= []).push(() => timers.size > 0);
 
   refs.panel.addEventListener('input', (event) => {
     const area = event.target;
@@ -218,8 +281,8 @@ export function createReview(api) {
   });
   refs.panel.addEventListener('focusout', (event) => {
     const area = event.target;
-    if (area.matches?.('textarea[data-note]')) noteNow(`n:${area.dataset.note}`, (s) => setNote(s, area.dataset.note, area.value));
-    else if (area.matches?.('textarea[data-summary]')) noteNow('summary', (s) => setSummary(s, area.value));
+    if (area.matches?.('textarea[data-note]')) land(`n:${area.dataset.note}`);
+    else if (area.matches?.('textarea[data-summary]')) land('summary');
   });
   refs.panel.addEventListener('change', (event) => {
     const input = event.target;
@@ -255,7 +318,7 @@ export function createReview(api) {
       const value = input.value.trim();
       input.remove();
       if (keep && value && value !== crit.label) api.commit(renameCriterion(set(), critId, value));
-      moreOf(critId)?.focus({ preventScroll: true });
+      focusShown(moreOf(critId));
     };
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') { event.preventDefault(); finish(true); }
@@ -302,7 +365,7 @@ export function createReview(api) {
       // Clearing is not a verdict: the record keeps how the rest was entered.
       api.commit({ ...next, review: { ...next.review, blindAtVerdict: before.review.blindAtVerdict } });
       // The button is disabled now; the criterion's first mark keeps focus.
-      host?.querySelector(`.crit[data-crit="${CSS.escape(crit.id)}"] [data-action="cmp-mark"][tabindex="0"]`)?.focus({ preventScroll: true });
+      focusShown(host?.querySelector(`.crit[data-crit="${CSS.escape(crit.id)}"] [data-action="cmp-mark"][tabindex="0"]`));
       undoToast(refs.toast, sentence(`Cleared the marks for "${crit.label}"`), () => {
         const now = set();
         // Removed in the meantime: there is nothing to put the marks back on.
@@ -328,7 +391,7 @@ export function createReview(api) {
       closeCritMenus(refs.panel);
       api.commit(moveCriterion(set(), critId, Number(el.dataset.dir) || 0));
       // The criterion's menu button, at its new place.
-      moreOf(critId)?.focus({ preventScroll: true });
+      focusShown(moreOf(critId));
     },
     'cmp-crit-remove': (el) => {
       closeCritMenus(refs.panel);
@@ -338,7 +401,7 @@ export function createReview(api) {
       const at = before.review.criteria.indexOf(crit);
       const marks = before.review.marks[crit.id] || {};
       api.commit(removeCriterion(before, crit.id));
-      host?.querySelector('[data-action="cmp-crit-add"]')?.focus({ preventScroll: true });
+      focusShown(host?.querySelector('[data-action="cmp-crit-add"]'));
       undoToast(refs.toast, sentence(`Removed the criterion "${crit.label}" and its marks`), () => {
         // Only the criterion and its marks come back, at its old place: a
         // note, a mark or a summary entered since stays. Putting the whole
@@ -359,5 +422,5 @@ export function createReview(api) {
     'cmp-copy-review': () => copyReview(),
   });
 
-  return { render };
+  return { render, flush: flushNotes };
 }

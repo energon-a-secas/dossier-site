@@ -194,3 +194,54 @@ test('sample templates are valid according to their schema', () => {
     }
   }
 });
+
+// ── Words a reader uses (js/forms.js) ──────────────────────────────────────
+// The editor named fields by their format keys ("Item-0", "Chrome") and
+// showed raw enum values ("in-review"), while the report beside it read "In
+// review". These hold the form to the reader's words.
+
+test('field, item and option labels are words a reader uses', async () => {
+  const { fieldLabel, itemLabel, optionLabel } = await import('../js/forms.js');
+  const { enumWord } = await import('../js/render/format.js');
+  assert.equal(fieldLabel('chrome'), 'Opens in');
+  assert.equal(fieldLabel('checkedBy'), 'Checked by');
+  assert.equal(fieldLabel('why_not'), 'Why not');
+  assert.equal(fieldLabel('highlightChanges'), 'Highlight changes');
+  assert.equal(itemLabel('tags', 0), 'Tag 1');
+  assert.equal(itemLabel('criteria', 1), 'Criterion 2');
+  assert.equal(itemLabel('evidence', 0), 'Source 1');
+  assert.equal(itemLabel('columns', 2), 'Column 3');
+  assert.equal(itemLabel('class', 0), 'Class 1', 'a trailing "ss" lost its s');
+  assert.equal(optionLabel('status', 'in-review'), 'In review');
+  assert.equal(optionLabel('status', 'rolled-back'), 'Rolled back');
+  assert.equal(optionLabel('chrome', 'auto'), "Reader's last choice");
+  assert.equal(optionLabel('checkedBy', 'llm'), 'A model');
+  assert.equal(optionLabel('constructor', 'toString'), 'ToString', 'an inherited property was read as a field\'s words');
+  assert.equal(enumWord('constructor'), 'Constructor');
+  assert.equal(typeof enumWord('constructor'), 'string');
+});
+
+test('every enum value in the format has an option label a reader can read', async () => {
+  const { optionLabel } = await import('../js/forms.js');
+  const { ENVELOPE, META } = await import('../js/registry/index.js');
+  const seen = [];
+  const sweep = (fields) => {
+    for (const [name, raw] of Object.entries(fields || {})) {
+      const def = typeof raw === 'string' ? { type: raw } : raw || {};
+      if (def.type === 'enum') {
+        for (const value of def.values || []) seen.push([name, value, optionLabel(name, value)]);
+      }
+      if (def.type === 'object') sweep(def.fields);
+      if (def.type === 'array' && def.of) sweep({ [name]: def.of });
+    }
+  };
+  for (const block of BLOCKS) sweep(block.fields);
+  sweep(META);
+  sweep(ENVELOPE);
+  assert.ok(seen.length > 40, `only ${seen.length} enum values found: the sweep missed fields`);
+  for (const [name, value, label] of seen) {
+    assert.ok(label, `${name} "${value}" has no option label`);
+    assert.match(label, /^[A-Z]/, `${name} "${value}" reads "${label}"`);
+    assert.ok(!label.includes('-'), `${name} "${value}" reads "${label}", with the format's hyphen`);
+  }
+});

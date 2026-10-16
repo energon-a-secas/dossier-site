@@ -274,6 +274,12 @@ test('the live app gets the view controls, and the source only as escaped text',
   assert.match(html, /data-action="embed-view" data-view="original"/);
   assert.match(html, /data-action="embed-view" data-view="format"/);
   assert.match(html, /data-view="interactive"[^>]*>.*Run the report/s, 'a report with scripts offers to run them');
+  // One radio group, in the Compare toolbar's order (js/seg.js): Dossier
+  // format, Original, then the scripts toggle beside the view it changes.
+  assert.match(html, /class="seg embed-bar__views" role="radiogroup"/);
+  const at = (view) => html.indexOf(`data-view="${view}"`);
+  assert.ok(at('format') < at('original') && at('original') < at('interactive'), 'the view row is not Dossier format, Original, then the scripts toggle');
+  assert.equal((html.match(/role="radio"/g) || []).length, 2, 'the view row is not two radios');
   assert.match(html, /data-embed-prefix="imp"/);
   assert.ok(!/<img\b/.test(html), 'source markup reached the page as markup');
   const passive = blockHtml({ type: 'embed', html: '<h1>Plan</h1>', scripts: false }, { interactive: true });
@@ -418,6 +424,19 @@ test('identical sides say so rather than implying a change', async () => {
     {},
   );
   assert.ok(html.includes('identical'), 'two identical sides did not say so');
+});
+
+test('blank lines in prose are paragraph spacing, not empty paragraphs or changes', async () => {
+  const { compareHtml } = await import('../js/render/compare.js');
+  const html = compareHtml({ type: 'compare', kind: 'text', left: { value: 'One.\n\nTwo.' }, right: { value: 'One.\n\n\nTwo.' } }, {});
+  assert.ok(!html.includes('&nbsp;'), 'a blank line became an empty paragraph');
+  for (const side of html.split('compare__panel compare__face').slice(1)) {
+    assert.equal((side.match(/<p class="compare__line/g) || []).length, 2, 'a side did not render exactly two paragraphs');
+    assert.match(side, /compare__line--para">Two\./, 'the paragraph after a blank line is not spaced as one');
+  }
+  assert.ok(html.includes('identical'), 'sides that differ only in blank lines were reported as changed');
+  const code = compareHtml({ type: 'compare', kind: 'code', left: { value: 'a\n\nb' }, right: { value: 'a\n\nb' } }, {});
+  assert.ok(code.includes('&nbsp;'), 'code lost its blank row');
 });
 
 test('the line diff gives up loudly rather than stalling', async () => {

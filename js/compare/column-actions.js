@@ -1,22 +1,33 @@
 /**
  * What a column's own controls do: its menu, the forms inside it (paste,
- * Edit source, label and role), choosing or dropping a file into it, and the
- * in-page links of its text. Registered through js/actions.js with the
- * `cmp-` prefix, like the rest of the Compare view (js/compare/actions.js).
+ * Edit source with its Wrap lines toggle, label and role), choosing or
+ * dropping a file into it, and the in-page links of its text. Registered
+ * through js/actions.js with the `cmp-` prefix, like the rest of the Compare
+ * view (js/compare/actions.js).
+ *
+ * A report too large for a column is refused where it was given (a toast, or
+ * the form's error line with the text kept), never stored as an empty column
+ * under a "Saved" toast. A comparison still named "Untitled comparison", or
+ * after its first report, follows the first report's title
+ * (js/compare/naming.js).
  */
 
 import { registerActions } from '../actions.js';
 import { readText, onComparisonBundle } from '../open.js';
+import { initYaml, needsYaml } from '../parse.js';
 import { view as currentView } from '../chrome.js';
 import { routeFor } from '../router.js';
 import { say, sentence } from '../share.js';
 import {
   addColumn, updateColumn, removeColumn, moveColumn, duplicateColumn, setView,
-  letterOf, columnById, MAX_COLUMNS, LIMITS, MODE_WORDS,
+  letterOf, columnById, MAX_COLUMNS, MAX_SOURCE_CHARS, LIMITS, MODE_WORDS,
 } from './model.js';
-import { fromBundle } from './records.js';
-import { readSource, readFile } from './sources.js';
-import { openPopover, closePopover, undoToast } from './popover.js';
+import { fromBundleWithNotice, demotedSentence } from './records.js';
+import { readSource, readFile, tooLargeMessage } from './sources.js';
+import { followTitle } from './naming.js';
+import {
+  openPopover, closePopover, undoToast, isShort,
+} from './popover.js';
 import { effectiveMode } from './column.js';
 import { columnEl } from './view.js';
 import { nameOf } from './blind.js';
@@ -35,7 +46,8 @@ function columnName(set, colId, lower = false) {
 
 /**
  * @param {object} api from js/compare/index.js
- * @returns {{openBundle: (value: object) => Promise<boolean>, focusColumn: Function}}
+ * @returns {{openBundle: (value: object) => Promise<boolean>, focusColumn: Function,
+ *   setSource: (colId: string, source: object, opts?: {quiet?: boolean}) => boolean}}
  */
 export function registerColumnActions(api) {
   const { compare } = api;
@@ -73,14 +85,32 @@ export function registerColumnActions(api) {
     focusColumn(colId);
   }
 
-  /** Put a source into a column, closing any form it had open. */
-  function setSource(colId, source) {
+  /** Why a source cannot go into a column: over the cap, or nothing in it. */
+  function refusal(source, blind) {
+    const length = typeof source?.text === 'string' ? source.text.length : 0;
+    if (length > MAX_SOURCE_CHARS) return tooLargeMessage(length, blind ? 'The new report' : source.name || 'This report');
+    return 'There was nothing to read in that, so the column was left as it was.';
+  }
+
+  /**
+   * Put a source into a column, closing any form it had open. A source the
+   * column cannot keep changes nothing: the reason is said (unless `quiet`,
+   * for a form that shows it itself) and false comes back.
+   *
+   * @returns {boolean}
+   */
+  function setSource(colId, source, { quiet = false } = {}) {
     const col = columnById(set(), colId);
-    if (!col) return;
+    if (!col) return false;
     const before = set();
+    const updated = updateColumn(before, colId, { source });
+    if (updated === before) {
+      if (!quiet) say(refusal(source, nameOf(before, colId).blind));
+      return false;
+    }
     compare.ui.forms.delete(colId);
     compare.ui.scroll.delete(colId);
-    api.commit(updateColumn(before, colId, { source }));
+    api.commit(followTitle(before, updated));
     if (col.source) {
       // While blind, not the file's name: it can say who wrote the report.
       const what = nameOf(before, colId).blind ? 'the new report' : source.name;
@@ -90,8 +120,10 @@ export function registerColumnActions(api) {
       });
     }
     focusColumn(colId);
+    return true;
   }
 
+  /** @returns {Promise<string|null>} the reason the text was not used, or null */
   async function takeText(colId, text, name) {
     const read = await readSource(text, name);
     if (!read.ok) return read.message;
@@ -99,23 +131,34 @@ export function registerColumnActions(api) {
       await openBundle(read.bundle);
       return null;
     }
-    setSource(colId, read.source);
+    if (!setSource(colId, read.source, { quiet: true })) return refusal(read.source, nameOf(set(), colId).blind);
     return null;
   }
 
   async function openBundle(value) {
-    const next = fromBundle(value);
-    if (!next) {
+    const read = fromBundleWithNotice(value);
+    if (!read) {
       say('That comparison file is from a version of Dossier this one does not read.');
       return false;
     }
+    const next = read.set;
     await api.openBundleSet(next);
     // A comparison saved under Blind opens under Blind: its title stays hidden.
-    say(next.view.blind ? 'Opened the comparison, under Blind review.' : sentence(`Opened the comparison "${next.title}"`));
+    const opened = next.view.blind ? 'Opened the comparison, under Blind review.' : sentence(`Opened the comparison "${next.title}"`);
+    // A column that asked to run its scripts opened in Original: say so, and
+    // where the reader turns them on if they want to.
+    say(read.demoted.length ? `${opened} ${demotedSentence(next, read.demoted)}` : opened);
     return true;
   }
 
   // ── Column menu ────────────────────────────────────────────────────────────
+
+  /** The short-window item: what Blind leaves in a head is only the counts. */
+  function headDetailsLabel(s) {
+    const showing = root.classList.contains('show-head-details');
+    const what = s.view.blind ? 'counts' : 'role, author and counts';
+    return `${showing ? 'Hide' : 'Show'} ${what}`;
+  }
 
   function columnMenu(colId) {
     const s = set();
@@ -153,6 +196,9 @@ export function registerColumnActions(api) {
           item('cmp-move', 'Move right', ' data-dir="1"', at === s.columns.length - 1)]),
       // A phone shows one column at a time already.
       focused ? item('cmp-layout', 'Show all columns', ' data-value="columns" data-wide-only') : item('cmp-focus-col', 'Focus on this column', ' data-wide-only'),
+      // A short window shrinks every head to its badge row and difference
+      // line; this brings the rest back (js/compare/actions.js).
+      ...(isShort() ? [item('cmp-head-details', headDetailsLabel(s))] : []),
       '<div role="separator" class="cmp-menu__sep"></div>',
       item('cmp-remove', 'Remove column', ' data-danger'),
     ].join('');
@@ -173,6 +219,14 @@ export function registerColumnActions(api) {
     },
     'cmp-paste': (el) => openForm(el.dataset.col, 'paste'),
     'cmp-cancel-form': (el) => closeForm(el.dataset.col),
+    // Turning wrapping on or off is a class on the open form, not a render:
+    // the unsaved text and the caret stay where they are.
+    'cmp-wrap-source': (el) => {
+      const on = el.getAttribute('aria-pressed') !== 'true';
+      el.setAttribute('aria-pressed', String(on));
+      el.closest('form')?.querySelector('.col-form__text')?.classList.toggle('is-nowrap', !on);
+      compare.ui.wrapSource = on;
+    },
     'cmp-choose-file': (el) => {
       fileTarget = el.dataset.col;
       refs.file.value = '';
@@ -283,13 +337,20 @@ export function registerColumnActions(api) {
     }
     // Edit source: the kind stays what it was; a Dossier document must still read.
     if (!text.trim()) { showError('The source is empty. Cancel keeps the report as it was.'); return; }
+    // Over the cap the edit is refused here, with the text still in the box,
+    // rather than saved as an empty column.
+    if (text.length > MAX_SOURCE_CHARS) { showError(tooLargeMessage(text.length, 'The edited source')); return; }
     if (col.source.kind === 'dossier') {
+      // A Dossier source may be YAML, which reads once its parser is in.
+      if (needsYaml(text)) await initYaml();
       const read = readText(text);
       if (!read.ok) { showError(`This does not read as a Dossier document: ${read.fatal?.message || 'no reason given'}`); return; }
     }
     const before = set();
+    const next = updateColumn(before, colId, { source: { ...col.source, text } });
+    if (next === before) { showError('The edited source could not be kept. Cancel keeps the report as it was.'); return; }
     compare.ui.forms.delete(colId);
-    api.commit(updateColumn(before, colId, { source: { ...col.source, text } }));
+    api.commit(next);
     focusColumn(colId);
     toast(`Saved the source of ${columnName(before, colId, true)}.`, () => {
       api.commit(before);
@@ -320,7 +381,7 @@ export function registerColumnActions(api) {
     if (index >= 0) compare.sync.jump(colEl.dataset.col, index);
   });
 
-  return { openBundle, focusColumn };
+  return { openBundle, focusColumn, setSource };
 }
 
 /**

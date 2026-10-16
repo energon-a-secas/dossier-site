@@ -16,6 +16,7 @@ import { bindComparisons } from './comparison-controls.js';
 import { authored } from './pipeline.js';
 import { embedViewFor } from './embeds.js';
 import { fitEmbedFrames } from './embed-fit.js';
+import { guardFrameLinks } from './frame-links.js';
 
 /**
  * Export the document as JSON.
@@ -168,11 +169,12 @@ function extractTokens() {
 /**
  * Native disclosures and the shared comparison controls work offline, and an
  * imported HTML report's static frame is sized to its document and keeps
- * working links. Both functions travel as their own source; neither reaches
- * outside its body.
+ * working links, through the same link policy the app uses
+ * (js/frame-links.js). Every function travels as its own source; none
+ * reaches outside its body.
  */
 function generateInlineScript() {
-  return `<script>(${bindComparisons.toString()})(document);\n(${fitEmbedFrames.toString()})(document, { links: true });</script>`;
+  return `<script>(${bindComparisons.toString()})(document);\n(${fitEmbedFrames.toString()})(document, { links: true, guard: ${guardFrameLinks.toString()} });</script>`;
 }
 
 

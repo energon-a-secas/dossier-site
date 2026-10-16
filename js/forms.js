@@ -7,8 +7,62 @@
  * read-only lines instead.
  */
 
-import { escHtml, uid } from './neorgon-dom.js';
+import { uid } from './neorgon-dom.js';
 import { blockDef, derivedFields, META } from './registry/index.js';
+import { enumWord } from './render/format.js';
+
+// ── Words a reader uses ──────────────────────────────────────────────────────
+// The form names every field once, in the reader's words. The registry's
+// field names and enum values are the format's words ("chrome", "in-review"),
+// written to the document as they are; only the text people see changes.
+
+/** Field names whose sentence-case spelling is not what a reader calls them. */
+const FIELD_LABELS = { chrome: 'Opens in', href: 'Link', src: 'Image address', alt: 'Alt text' };
+/** What one item of a list field is called, where dropping an "s" is wrong. */
+const ITEM_NOUNS = {
+  axes: 'Axis', criteria: 'Criterion', categories: 'Category', series: 'Series', evidence: 'Source',
+  spark: 'Point', highlight: 'Line', grid: 'Row', rows: 'Row',
+};
+/** Option words for fields whose values mean something particular there. */
+const FIELD_OPTIONS = {
+  chrome: { auto: "Reader's last choice", hidden: 'Reading', shown: 'Editing' },
+  checkedBy: { code: 'A machine', human: 'A person', llm: 'A model', none: 'Nobody' },
+};
+/**
+ * Help that replaces the registry note in the form only: the registry's note
+ * quotes the raw values, and it also feeds schema.json, where they belong.
+ */
+const FIELD_NOTES = {
+  chrome: "How the report opens for someone who receives it. Reader's last choice keeps their own setting.",
+};
+
+/** A field name as a label: "checkedBy" reads "Checked by", "why_not" reads "Why not". */
+export function fieldLabel(name) {
+  const raw = String(name ?? '');
+  if (Object.hasOwn(FIELD_LABELS, raw)) return FIELD_LABELS[raw];
+  const words = raw.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_+/g, ' ').trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** What one item of the list field `arrayName` is called: "tags" gives "Tag". */
+function itemNoun(arrayName) {
+  const raw = String(arrayName ?? '');
+  if (Object.hasOwn(ITEM_NOUNS, raw)) return ITEM_NOUNS[raw];
+  const label = fieldLabel(raw);
+  return /[^s]s$/.test(label) ? label.slice(0, -1) : label;
+}
+
+/** An item's label: "Tag 1", "Criterion 2", "Source 1". */
+export function itemLabel(arrayName, index) {
+  return `${itemNoun(arrayName)} ${index + 1}`;
+}
+
+/** An enum value as an option's text: the field's own word, else the renderer's. */
+export function optionLabel(fieldName, value) {
+  const words = Object.hasOwn(FIELD_OPTIONS, fieldName) ? FIELD_OPTIONS[fieldName] : null;
+  if (words && Object.hasOwn(words, value)) return words[value];
+  return enumWord(value);
+}
 
 /**
  * Generate a form for editing a block of a given type.
@@ -26,7 +80,10 @@ export function blockForm(type, value = {}, onChange = () => {}) {
   const fs = document.createElement('fieldset');
   fs.className = 'block-form';
 
+  // The section's summary already names the block, so the legend is for
+  // assistive technology only: the group keeps its name, the eye sees it once.
   const legend = document.createElement('legend');
+  legend.className = 'sr-only';
   legend.textContent = def.name;
   fs.appendChild(legend);
 
@@ -40,7 +97,7 @@ export function blockForm(type, value = {}, onChange = () => {}) {
         const container = document.createElement('div');
         container.className = 'form-derived-field';
         const label = document.createElement('label');
-        label.textContent = humanLabel(name);
+        label.textContent = fieldLabel(name);
         const valueEl = document.createElement('div');
         valueEl.className = 'derived-value';
         valueEl.textContent = formatValue(derivedValue);
@@ -81,8 +138,10 @@ export function metaForm(input = {}, onChange = () => {}) {
   const fs = document.createElement('fieldset');
   fs.className = 'meta-form';
 
+  // Named by its section's summary, "Report details", on screen.
   const legend = document.createElement('legend');
-  legend.textContent = 'Document properties';
+  legend.className = 'sr-only';
+  legend.textContent = 'Report details';
   fs.appendChild(legend);
 
   // Accept the wrapped document or the report inside it. The caller had the
@@ -114,206 +173,104 @@ export function metaForm(input = {}, onChange = () => {}) {
 }
 
 /**
- * Create a single form control for a field.
+ * Create a single form control for a field, labelled `label`. A scalar is a
+ * `.form-field` with a `<label for>`; an object or a list is a fieldset whose
+ * legend is its name, with no label of its own (a label pointing at a
+ * fieldset labels nothing).
  *
  * @private
+ * @param {{itemNoun?: string}} [opts] what this list's items are called, when
+ *   the list is itself an item ("Cell" for the rows of a table)
  */
-function createControl(name, fieldDef, value, onChange) {
+function createControl(name, fieldDef, value, onChange, label = fieldLabel(name), opts = {}) {
   if (typeof fieldDef === 'string') fieldDef = { type: fieldDef };
-  const { type, note, maxLen, required, values: enumValues, of, fields: objFields, min, max } = fieldDef;
+  const { type, required, values: enumValues, of, fields: objFields } = fieldDef;
+  const maxLen = fieldDef.maxLen;
+  const note = Object.hasOwn(FIELD_NOTES, name) ? FIELD_NOTES[name] : fieldDef.note;
+
+  if (type === 'object' || type === 'array') {
+    const group = document.createElement('fieldset');
+    group.className = type === 'object' ? 'object-field' : 'array-field';
+    const legend = document.createElement('legend');
+    legend.textContent = label;
+    if (required) legend.appendChild(requiredMark());
+    group.appendChild(legend);
+    if (note) group.appendChild(helpText(note));
+    if (type === 'object') objectBody(group, objFields, value, onChange);
+    else arrayBody(group, name, of, value, onChange, opts.itemNoun || itemNoun(name));
+    return group;
+  }
 
   const container = document.createElement('div');
   container.className = 'form-field';
-
   const labelId = uid('label-');
-  const label = document.createElement('label');
-  label.htmlFor = labelId;
-  label.textContent = humanLabel(name);
-  if (required) {
-    const mark = document.createElement('span');
-    mark.className = 'required-mark';
-    mark.textContent = '*';
-    mark.setAttribute('aria-label', 'required');
-    label.appendChild(mark);
-  }
-  container.appendChild(label);
+  const labelEl = document.createElement('label');
+  labelEl.htmlFor = labelId;
+  labelEl.textContent = label;
+  if (required) labelEl.appendChild(requiredMark());
+  container.appendChild(labelEl);
 
   let control;
+  const text = (el) => {
+    el.id = labelId;
+    el.value = value || '';
+    if (required) el.required = true;
+    el.addEventListener('input', (e) => onChange(e.target.value || undefined));
+    return el;
+  };
+  const input = (kind) => {
+    const el = document.createElement('input');
+    el.type = kind;
+    return el;
+  };
 
   if (type === 'string') {
-    control = document.createElement('input');
-    control.type = 'text';
-    control.id = labelId;
-    control.value = value || '';
+    control = text(input('text'));
     if (maxLen) control.maxLength = maxLen;
-    if (required) control.required = true;
-    control.addEventListener('input', (e) => {
-      onChange(e.target.value || undefined);
-    });
   } else if (type === 'text') {
-    control = document.createElement('textarea');
-    control.id = labelId;
-    control.value = value || '';
+    control = text(document.createElement('textarea'));
     if (maxLen) control.setAttribute('maxlength', maxLen);
-    if (required) control.required = true;
-    control.addEventListener('input', (e) => {
-      onChange(e.target.value || undefined);
-    });
-  } else if (type === 'number') {
-    control = document.createElement('input');
-    control.type = 'number';
+  } else if (type === 'number' || type === 'integer') {
+    control = input('number');
+    if (type === 'integer') control.step = '1';
     control.id = labelId;
     control.value = value !== undefined ? value : '';
     if (required) control.required = true;
     control.addEventListener('input', (e) => {
       const v = e.target.value;
-      onChange(v === '' ? undefined : parseFloat(v));
-    });
-  } else if (type === 'integer') {
-    control = document.createElement('input');
-    control.type = 'number';
-    control.step = '1';
-    control.id = labelId;
-    control.value = value !== undefined ? value : '';
-    if (required) control.required = true;
-    control.addEventListener('input', (e) => {
-      const v = e.target.value;
-      onChange(v === '' ? undefined : parseInt(v, 10));
+      onChange(v === '' ? undefined : (type === 'integer' ? parseInt(v, 10) : parseFloat(v)));
     });
   } else if (type === 'boolean') {
-    control = document.createElement('input');
-    control.type = 'checkbox';
+    control = input('checkbox');
     control.id = labelId;
     control.checked = !!value;
-    control.addEventListener('change', (e) => {
-      onChange(e.target.checked || undefined);
-    });
+    control.addEventListener('change', (e) => onChange(e.target.checked || undefined));
   } else if (type === 'enum') {
     control = document.createElement('select');
     control.id = labelId;
     if (required) control.required = true;
-
     const blankOption = document.createElement('option');
     blankOption.value = '';
-    blankOption.textContent = 'Select...';
+    blankOption.textContent = 'Not set';
     control.appendChild(blankOption);
-
     for (const v of (enumValues || [])) {
       const opt = document.createElement('option');
       opt.value = v;
-      opt.textContent = String(v);
+      opt.textContent = optionLabel(name, v);
       if (v === value) opt.selected = true;
       control.appendChild(opt);
     }
-
-    control.addEventListener('change', (e) => {
-      onChange(e.target.value || undefined);
-    });
+    control.addEventListener('change', (e) => onChange(e.target.value || undefined));
   } else if (type === 'url') {
-    control = document.createElement('input');
-    control.type = 'url';
-    control.id = labelId;
-    control.value = value || '';
-    if (required) control.required = true;
-    control.addEventListener('input', (e) => {
-      onChange(e.target.value || undefined);
-    });
+    control = text(input('url'));
   } else if (type === 'date') {
-    control = document.createElement('input');
-    control.type = 'date';
-    control.id = labelId;
-    control.value = value || '';
-    if (required) control.required = true;
-    control.addEventListener('input', (e) => {
-      onChange(e.target.value || undefined);
-    });
-  } else if (type === 'array') {
-    const arrayContainer = document.createElement('div');
-    arrayContainer.className = 'array-field';
-    control = arrayContainer;
-
-    const items = Array.isArray(value) ? [...value] : [];
-    const itemsContainer = document.createElement('div');
-    itemsContainer.className = 'array-items';
-
-    const updateArray = (newItems) => {
-      onChange(newItems.length > 0 ? newItems : undefined);
-    };
-
-    const renderItems = () => {
-      itemsContainer.replaceChildren();
-      items.forEach((item, idx) => {
-        const itemEl = document.createElement('div');
-        itemEl.className = 'array-item';
-
-        const itemControl = createControl(
-          `item-${idx}`,
-          of,
-          item,
-          (newVal) => {
-            items[idx] = newVal;
-            updateArray([...items]);
-          }
-        );
-
-        const removeBtn = document.createElement('button');
-        removeBtn.type = 'button';
-        removeBtn.className = 'array-remove-btn';
-        removeBtn.setAttribute('aria-label', `Remove item ${idx + 1}`);
-        removeBtn.textContent = 'Remove';
-        removeBtn.addEventListener('click', () => {
-          items.splice(idx, 1);
-          renderItems();
-          updateArray([...items]);
-        });
-
-        itemEl.appendChild(itemControl);
-        itemEl.appendChild(removeBtn);
-        itemsContainer.appendChild(itemEl);
-      });
-    };
-
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'array-add-btn';
-    addBtn.textContent = `Add ${humanLabel(name)}`;
-    addBtn.addEventListener('click', () => {
-      items.push(null);
-      renderItems();
-      updateArray([...items]);
-    });
-
-    renderItems();
-    arrayContainer.appendChild(itemsContainer);
-    arrayContainer.appendChild(addBtn);
-  } else if (type === 'object') {
-    const objContainer = document.createElement('fieldset');
-    objContainer.className = 'object-field';
-    control = objContainer;
-
-    const objLegend = document.createElement('legend');
-    objLegend.textContent = humanLabel(name);
-    objContainer.appendChild(objLegend);
-
-    const objValue = (typeof value === 'object' && value !== null) ? { ...value } : {};
-    for (const [objFieldName, objFieldDef] of Object.entries(objFields || {})) {
-      const objControl = createControl(
-        objFieldName,
-        objFieldDef,
-        objValue[objFieldName],
-        (newVal) => {
-          objValue[objFieldName] = newVal;
-          onChange({ ...objValue });
-        }
-      );
-      if (objControl) objContainer.appendChild(objControl);
-    }
+    control = text(input('date'));
   } else if (['any', 'block', 'evidence-item'].includes(type)) {
     control = document.createElement('textarea');
     control.id = labelId;
     control.value = JSON.stringify(value ?? null, null, 2);
     control.spellcheck = false;
-    control.setAttribute('aria-label', `${humanLabel(name)} as JSON`);
+    control.setAttribute('aria-label', `${label} as JSON`);
     control.addEventListener('input', () => {
       try {
         const next = JSON.parse(control.value);
@@ -327,18 +284,86 @@ function createControl(name, fieldDef, value, onChange) {
     return null;
   }
 
-  if (control && control !== container) {
-    container.appendChild(control);
-  }
-
-  if (note && type !== 'boolean') {
-    const helpText = document.createElement('small');
-    helpText.className = 'help-text';
-    helpText.textContent = note;
-    container.appendChild(helpText);
-  }
-
+  container.appendChild(control);
+  if (note && type !== 'boolean') container.appendChild(helpText(note));
   return container;
+}
+
+function objectBody(group, objFields, value, onChange) {
+  const objValue = (typeof value === 'object' && value !== null) ? { ...value } : {};
+  for (const [objFieldName, objFieldDef] of Object.entries(objFields || {})) {
+    const objControl = createControl(objFieldName, objFieldDef, objValue[objFieldName], (newVal) => {
+      objValue[objFieldName] = newVal;
+      onChange({ ...objValue });
+    });
+    if (objControl) group.appendChild(objControl);
+  }
+}
+
+/** A list's items, each labelled "<noun> <n>", with Remove and Add buttons. */
+function arrayBody(group, name, of, value, onChange, noun) {
+  const items = Array.isArray(value) ? [...value] : [];
+  const itemsContainer = document.createElement('div');
+  itemsContainer.className = 'array-items';
+  const word = noun.toLowerCase();
+  // An item that is itself a list (a table's row) holds cells.
+  const innerOpts = (typeof of === 'object' && of?.type === 'array') || of === 'array' ? { itemNoun: 'Cell' } : {};
+  const updateArray = (newItems) => onChange(newItems.length > 0 ? newItems : undefined);
+
+  const renderItems = () => {
+    itemsContainer.replaceChildren();
+    items.forEach((item, idx) => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'array-item';
+      const itemControl = createControl(name, of, item, (newVal) => {
+        items[idx] = newVal;
+        updateArray([...items]);
+      }, `${noun} ${idx + 1}`, innerOpts);
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'array-remove-btn';
+      removeBtn.setAttribute('aria-label', `Remove ${word} ${idx + 1}`);
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', () => {
+        items.splice(idx, 1);
+        renderItems();
+        updateArray([...items]);
+      });
+      if (itemControl) itemEl.appendChild(itemControl);
+      itemEl.appendChild(removeBtn);
+      itemsContainer.appendChild(itemEl);
+    });
+  };
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'array-add-btn';
+  addBtn.textContent = `Add ${word}`;
+  addBtn.addEventListener('click', () => {
+    items.push(null);
+    renderItems();
+    updateArray([...items]);
+  });
+
+  renderItems();
+  group.appendChild(itemsContainer);
+  group.appendChild(addBtn);
+}
+
+/** The required star: seen, not read, so a group's name stays its bare label. */
+function requiredMark() {
+  const mark = document.createElement('span');
+  mark.className = 'required-mark';
+  mark.textContent = '*';
+  mark.setAttribute('aria-hidden', 'true');
+  return mark;
+}
+
+function helpText(note) {
+  const el = document.createElement('small');
+  el.className = 'help-text';
+  el.textContent = note;
+  return el;
 }
 
 /**
@@ -356,18 +381,6 @@ function createErrorFieldset(message) {
   msg.textContent = message;
   fs.appendChild(msg);
   return fs;
-}
-
-/**
- * Convert field name to human-readable label.
- *
- * @private
- */
-function humanLabel(name) {
-  return name
-    .split(/(?=[A-Z])/)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
 }
 
 /**

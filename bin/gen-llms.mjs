@@ -7,6 +7,8 @@
  */
 
 import { BLOCKS, blockDef, groups } from '../js/registry/index.js';
+import { MAX_COLUMNS, ROLES, KINDS, MODES, LIMITS, BUNDLE_VERSION, MAX_SOURCE_CHARS } from '../js/compare/model.js';
+import { COMPARISON_LINK_MAX } from '../js/share.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -88,7 +90,7 @@ function generateLlmsTxt() {
 
   lines.push('## Evidence, which is the point');
   lines.push('');
-  lines.push('Any block takes an `evidence` array. The report header counts how many claims have none, so this is the field that decides whether a reader believes the rest.');
+  lines.push('Any block takes an `evidence` array. The reader sees it under the block as a "How this was checked" disclosure that names who checked each source, and a block without one shows nothing, so this is the field that decides whether a reader believes the rest.');
   lines.push('');
   lines.push('```json');
   lines.push(JSON.stringify({
@@ -125,6 +127,8 @@ function generateLlmsTxt() {
   lines.push('- The one HTML file export opens with no account, no install and no network. That is the one to attach to a ticket.');
   lines.push('- Keep a link under about 8,000 characters. Above that some chat clients cut it, and the file is the better answer.');
   lines.push('');
+
+  lines.push(...comparisonSection());
 
   lines.push('## Check it before you ship it');
   lines.push('');
@@ -210,6 +214,11 @@ function generateSkillMd() {
   lines.push('5. Unknown block types cause an error. Unknown fields on known blocks are carried through but never rendered.');
   lines.push('');
 
+  lines.push('## Handing over a comparison');
+  lines.push('');
+  lines.push(`To put whole reports side by side, emit \`{"dossierCompare": {...}}\` with up to ${MAX_COLUMNS} columns, each with a role (${ROLES.join(', ')}) and a source. See llms.txt for the full rules.`);
+  lines.push('');
+
   lines.push('## Validate');
   lines.push('');
   lines.push('```bash');
@@ -220,4 +229,56 @@ function generateSkillMd() {
   lines.push('');
 
   return lines.join('\n');
+}
+
+/**
+ * The comparison bundle's contract, read from the modules that enforce it
+ * (js/compare/model.js and js/compare/records.js sanitizeSet, js/share.js),
+ * so the doc cannot drift from what the Open dialog accepts.
+ */
+function comparisonSection() {
+  // A function, not a module constant: the generators run at the top of this
+  // file, before any later `const` is initialised.
+  const COUNT_WORDS = ['none', 'one', 'two', 'three', 'four', 'five', 'six'];
+  const n = (value) => value.toLocaleString('en-US');
+  const quote = (list) => list.map((item) => `\`${item}\``).join(', ');
+  const example = {
+    dossierCompare: {
+      version: BUNDLE_VERSION,
+      title: 'Incident review: human draft, agent report and fixes',
+      prompt: 'Optional: the brief every column answered.',
+      columns: [
+        { id: 'k1', role: 'human', label: 'Human draft', author: '', source: { kind: 'html', name: 'draft.html', text: '<!doctype html>...' } },
+        { id: 'k2', role: 'agent', label: 'Agent report', author: 'model name', source: { kind: 'markdown', name: 'agent.md', text: '# Incident...' } },
+        { id: 'k3', role: 'fix', fixes: 'k2', label: 'Fixes', source: { kind: 'html', name: 'fixed.html', text: '<!doctype html>...' } },
+      ],
+    },
+  };
+  return [
+    '## Handing over a comparison',
+    '',
+    `The Compare view puts two to ${COUNT_WORDS[MAX_COLUMNS] || MAX_COLUMNS} whole reports side by side (Human, Agent, Fixes, Other), so a reviewer can read a human draft, an agent's report and its fixes together. A comparison travels as one JSON bundle:`,
+    '',
+    '```json',
+    JSON.stringify(example, null, 2),
+    '```',
+    '',
+    `- \`version\` must be ${BUNDLE_VERSION}, or the bundle is refused.`,
+    `- At most ${MAX_COLUMNS} columns; extra columns are dropped.`,
+    `- \`role\` is one of ${quote(ROLES)}; anything else becomes \`other\`.`,
+    '- `fixes` is only for role `fix` and names another column\'s id.',
+    '- Column ids are `k<n>`; a missing id is assigned.',
+    `- \`source.kind\` is one of ${quote(KINDS)}, and \`source.text\` is not blank and at most ${n(MAX_SOURCE_CHARS)} characters. A source outside those rules leaves an empty slot.`,
+    `- \`label\` is up to ${LIMITS.label} characters, \`author\` up to ${LIMITS.author}, \`title\` up to ${LIMITS.title}, \`prompt\` up to ${n(LIMITS.prompt)}.`,
+    `- \`mode\` is optional: ${quote(MODES)}. A column that asks to run its scripts opens in \`original\` until the reader runs them.`,
+    '- Unknown fields are dropped.',
+    '- Leave out `review`: the reviewer fills it in, and the tool never scores content. `view` is optional; the default is Dossier format with section sync.',
+    '',
+    'Handing it over:',
+    '',
+    '- Save it as `<name>.dossier-compare.json` and open it with the Open dialog (drop, pick or paste). It is detected and opens in Compare.',
+    `- Or link it as \`#dc=<base64url of deflate-raw JSON>\`, only while the payload is under ${n(COMPARISON_LINK_MAX)} characters; otherwise send the file.`,
+    '- `node bin/validate.mjs` checks reports, not comparison bundles.',
+    '',
+  ];
 }

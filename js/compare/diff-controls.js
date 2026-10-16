@@ -8,15 +8,32 @@
  * the Compare view. The toggles themselves are drawn by js/compare/toolbar.js
  * (hidden until a feature switches itself on); the against picker and its
  * menu are drawn here, since only this feature knows what goes in them.
+ *
+ * The menu offers "Each against its source" when a Fixes column fixes
+ * another (js/compare/model.js `diffAgainst`), and a column picked as the
+ * base stays the base, even when it already was by default: a Fixes column
+ * getting its report no longer moves it.
+ *
+ * Also here: the list of numbers that changed in a column (`cmp-numbers`,
+ * js/compare/numbers.js), a popover from the button in its head, each with
+ * a way to the change it is in. Differences are off, and say why, until two
+ * columns hold reports.
  */
 
 import { escHtml } from '../neorgon-dom.js';
 import { registerActions } from '../actions.js';
 import { say } from '../share.js';
 import { icon } from './icons.js';
-import { setView, ROLE_WORDS } from './model.js';
+import {
+  setView, ROLE_WORDS, EACH, fixPair, columnById,
+} from './model.js';
 import { nameOf, displayColumns, roleAttr } from './blind.js';
-import { openPopover } from './popover.js';
+import { openPopover, closePopover } from './popover.js';
+import { numberChanges } from './numbers.js';
+
+const KIND_NAMES = {
+  h: 'Heading', p: 'Paragraph', li: 'List item', tr: 'Table row', pre: 'Code block',
+};
 
 const OPTIONS = [
   ['showRemoved', 'Show removed words'],
@@ -26,8 +43,9 @@ const OPTIONS = [
 
 /**
  * @param {object} api from js/compare/index.js
- * @param {{baseId: () => string|null, panel: object, goToSection: (el: HTMLElement) => void,
- *   wordMarks: Set<string>, onWordMarks: () => void}} parts
+ * @param {{baseId: () => string|null, isEach: () => boolean, refFor: Function, planFor: Function,
+ *   refOf: (colId: string) => string, panel: object, goToSection: (el: HTMLElement) => void,
+ *   goToChange: (colId: string, n: number) => boolean, wordMarks: Set<string>, onWordMarks: () => void}} parts
  */
 export function bindDiffControls(api, parts) {
   const { compare } = api;
@@ -43,14 +61,31 @@ export function bindDiffControls(api, parts) {
   menu.hidden = true;
   root.append(menu);
 
+  const numbersPop = document.createElement('div');
+  numbersPop.className = 'cmp-pop cmp-numbers';
+  numbersPop.id = 'cmpNumbers';
+  numbersPop.setAttribute('role', 'dialog');
+  numbersPop.setAttribute('aria-labelledby', 'cmpNumbersHeading');
+  numbersPop.hidden = true;
+  root.append(numbersPop);
+
+  /** The choice in force: EACH, or the base column's id. */
+  const currentChoice = () => (parts.isEach() ? EACH : parts.baseId());
+
   function menuHtml(s) {
     const base = parts.baseId();
-    const bases = displayColumns(s).filter((col) => col.source).map((col) => {
+    const current = currentChoice();
+    const radio = (id, checked, inner, extra = '') => `<button type="button" role="radio" aria-checked="${checked}" tabindex="${checked ? 0 : -1}"`
+      + ` data-action="cmp-set-base" data-col="${id}"${extra}>${inner}</button>`;
+    const each = fixPair(s) || s.view.diff.base === EACH
+      ? radio(EACH, current === EACH, '<span class="dm__name">Each against its source</span>'
+        + `<span class="dm__hint">A fix against the column it fixes, the rest against ${escHtml(base ? nameOf(s, base).ref : 'the first report')}</span>`)
+      : '';
+    const bases = each + displayColumns(s).filter((col) => col.source).map((col) => {
       const name = nameOf(s, col);
       const words = name.blind ? name.label : `${col.label}`;
-      return `<button type="button" role="radio" aria-checked="${col.id === base}" tabindex="${col.id === base ? 0 : -1}" data-action="cmp-set-base" data-col="${col.id}" data-role="${roleAttr(s, col)}">`
-        + `<span class="rb rb--sm" aria-hidden="true">${escHtml(name.mark)}</span><span class="dm__name">${escHtml(words)}</span>`
-        + `${name.blind ? '' : `<span class="visually-hidden">, column ${escHtml(name.ref)}</span>`}</button>`;
+      return radio(col.id, current === col.id, `<span class="rb rb--sm" aria-hidden="true">${escHtml(name.mark)}</span><span class="dm__name">${escHtml(words)}</span>`
+        + `${name.blind ? '' : `<span class="visually-hidden">, column ${escHtml(name.ref)}</span>`}`, ` data-role="${roleAttr(s, col)}"`);
     }).join('');
     const toggles = OPTIONS.map(([key, label]) => `<button type="button" class="btn btn--quiet toggle dm__opt" data-action="cmp-diff-opt" data-opt="${key}"`
       + ` aria-pressed="${Boolean(s.view.diff[key])}"><span class="box">${icon('check')}</span>${label}</button>`).join('');
@@ -65,6 +100,13 @@ export function bindDiffControls(api, parts) {
     if (!base) {
       return `<button type="button" class="picker against" id="cmpAgainst" disabled aria-label="Differences: no report to compare against yet">`
         + `<span class="lbl">against</span><span class="picker__name">no report yet</span>${icon('down', 'caret')}</button>`;
+    }
+    if (parts.isEach()) {
+      const ref = nameOf(s, base).ref;
+      return `<button type="button" class="picker against" id="cmpAgainst" data-action="cmp-against"`
+        + ` aria-haspopup="dialog" aria-expanded="${!menu.hidden}" aria-controls="cmpDiffMenu"`
+        + ` aria-label="Differences against each column's source: a fix against the column it fixes, the rest against ${escHtml(ref)}. Options for differences.">`
+        + `<span class="lbl">against</span><span class="picker__name">its source</span>${icon('down', 'caret')}</button>`;
     }
     const col = s.columns.find((c) => c.id === base);
     const name = nameOf(s, col);
@@ -117,6 +159,29 @@ export function bindDiffControls(api, parts) {
     for (const el of root.querySelectorAll('[data-action="cmp-toggle-blind"]')) {
       el.title = 'Hides names, roles and authors and orders the columns by report number. A report that corrects another still reads as an edit of it.';
     }
+    // Differences need two reports. The stored choice comes back with the
+    // second one: only the control is off, never the preference.
+    const ready = s.columns.filter((c) => c.source).length >= 2;
+    for (const el of root.querySelectorAll('[data-action="cmp-toggle-diff"]')) {
+      el.disabled = !ready;
+      el.title = ready ? '' : 'Differences need reports in two columns.';
+    }
+  }
+
+  /** The numbers that changed in a column, each with a way to its change. */
+  function numbersHtml(s, col) {
+    const plan = parts.planFor(col);
+    const list = plan?.result ? numberChanges(plan.result) : [];
+    const ref = escHtml(nameOf(s, col).ref);
+    const baseRef = escHtml(parts.refOf(plan?.ref || parts.baseId()));
+    const items = list.map((c) => `<li><span class="k-del">${escHtml(c.wasText)}</span><span aria-hidden="true"> \u2192 </span>`
+      + `<span class="visually-hidden"> became </span><span class="k-ins">${escHtml(c.nowText)}</span>`
+      + `${plan.counted ? '' : `<button type="button" class="btn btn--quiet btn--xs" data-action="cmp-number-go" data-col="${col.id}" data-n="${c.n}" aria-label="Show change ${c.n} in ${ref}">Show</button>`}`
+      + `<span class="nums__where">${KIND_NAMES[c.kind] || 'Paragraph'}: ${escHtml(c.context)}</span></li>`).join('');
+    return `<h2 id="cmpNumbersHeading">Numbers changed from ${baseRef}</h2>`
+      + `<p class="nums__note">Numbers that differ where a passage of ${ref} lines up with one in ${baseRef}. Numbers in passages that were added or removed are not listed.</p>`
+      + `${plan?.counted ? '<p class="nums__note">This column holds a Dossier document, so its changes are counted, not marked.</p>' : ''}`
+      + `<ol class="nums__list">${items}</ol>`;
   }
 
   registerActions({
@@ -151,9 +216,30 @@ export function bindDiffControls(api, parts) {
     },
     'cmp-set-base': (el) => {
       const s = set();
-      if (parts.baseId() === el.dataset.col) return;
-      api.commit(setView(s, { diff: { base: el.dataset.col, on: true } }));
-      say(`Differences are now marked against ${nameOf(set(), el.dataset.col).ref}.`);
+      const chosen = el.dataset.col;
+      // A choice already made by hand changes nothing. One that only matched
+      // the default is made by hand now, so it stays when a fix arrives.
+      if (s.view.diff.base === chosen) return;
+      const moved = currentChoice() !== chosen;
+      api.commit(setView(s, { diff: { base: chosen, on: true } }));
+      if (chosen === EACH) say('Differences are now marked against each column\'s source.');
+      else if (moved) say(`Differences are now marked against ${nameOf(set(), chosen).ref}.`);
+      else say(`Differences stay marked against ${nameOf(set(), chosen).ref}, also when a Fixes column gets its report.`);
+    },
+    'cmp-numbers': (el) => {
+      const s = set();
+      const col = columnById(s, el.dataset.col);
+      if (!col) return;
+      numbersPop.innerHTML = numbersHtml(s, col);
+      openPopover(numbersPop, el, { focus: 'first' });
+    },
+    'cmp-number-go': (el) => {
+      const colId = el.dataset.col;
+      const n = Number(el.dataset.n);
+      closePopover();
+      if (!parts.goToChange(colId, n)) return;
+      const total = parts.planFor(columnById(set(), colId))?.result?.changes.length || 0;
+      api.announce(`Change ${n} of ${total} in ${nameOf(set(), colId).ref}.`);
     },
     'cmp-diff-opt': (el) => {
       const s = set();

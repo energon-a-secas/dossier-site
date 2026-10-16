@@ -1,27 +1,66 @@
 /**
- * Shared by the Compare view's browser checks (scripts/check-compare.mjs and
- * scripts/check-compare-hostile.mjs): where the app is, the project's files,
- * and the steps both of them take.
+ * What the browser checks share: where the app is, the project's files, a
+ * folder of this run's own for screenshots and exported files, an error
+ * watch, and the steps and measures more than one check takes.
+ *
+ * Imported by scripts/check-compare.mjs, check-compare-hostile.mjs,
+ * check-compare-analysis.mjs, check-compare-export.mjs,
+ * check-compare-columns.mjs, check-compare-brief.mjs,
+ * check-compare-bridge.mjs, check-compare-focus.mjs, check-workspace.mjs,
+ * check-narrow.mjs, check-html-import.mjs and check-html-import-fit.mjs.
+ * (check-standalone.mjs runs its own server and keeps to itself.)
+ *
+ * Paths resolve from this file, never from the current directory, so a check
+ * run from anywhere reads the project's fixtures and writes inside the
+ * project. Output goes to `.verify/<port>/`, the port of the server the run
+ * is against: two runs against two servers at once (as concurrent agents
+ * do) never read each other's exports.
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const base = process.env.DOSSIER_URL || 'http://127.0.0.1:8899';
+export const base = (process.env.DOSSIER_URL || 'http://127.0.0.1:8899').replace(/\/+$/, '');
 export const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+/** A project file, by its path from the project root. */
 export const file = (rel) => path.join(root, rel);
+/** This run's name: the port of the server it runs against. */
+export const run = new URL(base).port || 'default';
+export const verify = path.join(root, '.verify', run);
+await fs.mkdir(verify, { recursive: true });
+/** Where this run writes `name`. */
+export const out = (name) => path.join(verify, name);
+/** The address the server gives a file this run wrote. */
+export const verifyUrl = (name) => `${base}/.verify/${run}/${name}`;
 
-/** Collect a page's errors and console errors into `errors`. */
-export function watch(page, errors) {
-  page.on('pageerror', (error) => errors.push(`${page.url()}: ${error.message}`));
+/**
+ * Collect a page's errors and console errors into `errors`, each prefixed
+ * with `label`. One object, so a call cannot swap the page and the list.
+ */
+export function watch({ page, errors, label = '' }) {
+  page.on('pageerror', (error) => errors.push(`${label}${page.url()}: ${error.message}`));
   page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(`${page.url()}: console: ${msg.text()}`);
+    if (msg.type() === 'error') errors.push(`${label}${page.url()}: console: ${msg.text()}`);
   });
 }
 
 export async function noOverflow(page, label) {
   const over = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   assert.ok(over <= 1, `${label}: the page scrolls sideways by ${over}px`);
+}
+
+/** Wait until focus is on an element matching `selector`; fail with `why`. */
+export async function focusOn(page, selector, why) {
+  try {
+    await page.waitForFunction((sel) => Boolean(document.activeElement?.matches?.(sel)), selector, { timeout: 2000 });
+  } catch {
+    const at = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el ? `${el.localName}${el.id ? `#${el.id}` : ''}${el.className ? `.${String(el.className).trim().split(/\s+/).join('.')}` : ''}` : 'nothing';
+    });
+    assert.fail(`${why}: focus is on ${at}, not ${selector}`);
+  }
 }
 
 /**
@@ -50,9 +89,9 @@ export async function fillsWindow(page, label) {
   const reached = await page.evaluate(() => {
     window.scrollTo(0, document.documentElement.scrollHeight);
     const footer = document.querySelector('.neo-footer').getBoundingClientRect();
-    const out = { bottom: footer.bottom, height: footer.height, window: innerHeight, y: scrollY };
+    const result = { bottom: footer.bottom, height: footer.height, window: innerHeight, y: scrollY };
     window.scrollTo(0, 0);
-    return out;
+    return result;
   });
   assert.ok(Math.abs(reached.bottom - reached.window) <= 1 && reached.height > 0, `${label}: the footer cannot be reached (its bottom at ${reached.bottom}px after scrolling ${reached.y}px)`);
   // Scrolled to the footer, the toolbar is under the sticky header; focus
@@ -62,10 +101,10 @@ export async function fillsWindow(page, label) {
     const control = [...document.querySelectorAll('#cmpToolbar button, #cmpToolbar select, #cmpToolbar input')]
       .find((el) => el.getClientRects().length && !el.disabled);
     control.focus();
-    const out = { toolbar: document.querySelector('#cmpToolbar').getBoundingClientRect().top, header: document.querySelector('.header-bar').getBoundingClientRect().bottom };
+    const result = { toolbar: document.querySelector('#cmpToolbar').getBoundingClientRect().top, header: document.querySelector('.header-bar').getBoundingClientRect().bottom };
     control.blur();
     window.scrollTo(0, 0);
-    return out;
+    return result;
   });
   assert.ok(Math.abs(refocused.toolbar - refocused.header) <= 1, `${label}: focus in the toolbar left it at ${refocused.toolbar}px, under the header that ends at ${refocused.header}px`);
   // A column read to its end keeps the wheel to itself.
@@ -80,20 +119,7 @@ export async function fillsWindow(page, label) {
   }
 }
 
-/** Wait until focus is on an element matching `selector`; fail with `why`. */
-export async function focusOn(page, selector, why) {
-  try {
-    await page.waitForFunction((sel) => Boolean(document.activeElement?.matches?.(sel)), selector, { timeout: 2000 });
-  } catch {
-    const at = await page.evaluate(() => {
-      const el = document.activeElement;
-      return el ? `${el.localName}${el.id ? `#${el.id}` : ''}${el.className ? `.${String(el.className).trim().split(/\s+/).join('.')}` : ''}` : 'nothing';
-    });
-    assert.fail(`${why}: focus is on ${at}, not ${selector}`);
-  }
-}
-
-/** Put a file into a column through its "Choose a file" button. */
+/** Put a project file into a column through its "Choose a file" button. */
 export async function chooseFile(page, colId, rel) {
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser'),
@@ -117,4 +143,20 @@ export function headingTop(page, colId, text) {
     const heading = [...scroller.querySelectorAll('.r-h')].find((h) => plain(h) === wanted);
     return heading ? heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
   }, [colId, text]);
+}
+
+/** Open the bundled example from the Open dialog and wait for its marks. */
+export async function openExample(page) {
+  await page.locator('#openReport').click();
+  await page.locator('#openExamples [data-action="cmp-example"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('#compareView .col .reader').length === 3);
+  await page.locator('#cmp-col-k3 .ruler').waitFor();
+}
+
+/**
+ * The column shown first while blind: Report 1, first on the page and the
+ * leftmost, clear of a panel over the right.
+ */
+export function firstReport(page) {
+  return page.evaluate(() => document.querySelector('#compareView .col')?.dataset.col);
 }

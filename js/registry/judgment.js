@@ -254,7 +254,7 @@ export const JUDGMENT = [
       src: url({
         note: 'A remote URL is not framed: this page\'s policy refuses third-party frames, so the block renders a link and says why. Use "html" for content you want shown inline.',
       }),
-      height: int({ note: 'Frame height in pixels. Defaults to 780; single-artifact reports fit the viewport.' }),
+      height: int({ note: 'Starting height in pixels while the report loads (780 when absent). The Original view then sizes the frame to its document (a document with no height of its own is held at most of the window and scrolls inside), and the scripts view takes its height from the window.' }),
       scripts: bool({ note: 'Let the reader run the report\'s own scripts, in a sealed frame with no network, no storage and no access to this page. The report still opens as a static copy, with its scripts off, until the reader runs them. Off by default.' }),
     },
     sample: {

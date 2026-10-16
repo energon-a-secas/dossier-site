@@ -11,45 +11,119 @@ import { reportOf } from './render/index.js';
 import { setPreference } from './state.js';
 import { updateReportBar } from './pipeline.js';
 import { listReports, readReport, writeReport, deleteReport, estimateUsage } from './store.js';
+import { reportMeta, clearReportJournal } from './report-journal.js';
 
 // ── Storage ──────────────────────────────────────────────────────────────────
+
+/** Saves run one after another, never two at once (see `persistCurrent`). */
+let queue = Promise.resolve();
+let inFlight = 0;
+/** Saves queued or running, by report id. */
+const queuedFor = new Map();
+/**
+ * The revision the next save of each report is made on: the one this tab
+ * holds when a save is asked for with none under way, then whatever each
+ * save of it leaves. A save refused because another tab saved first leaves
+ * it as it was, so the saves queued behind it are refused too, rather than
+ * one of them landing with no check at all.
+ */
+const baseRev = new Map();
+let conflictHandler = null;
+
+/**
+ * Who handles a save refused because another tab saved the report first
+ * (js/report-sync.js shows the choice). Without one, a toast says so.
+ *
+ * @param {(state: object, els: object, current: object) => void} fn
+ */
+export function onSaveConflict(fn) {
+  conflictHandler = typeof fn === 'function' ? fn : null;
+}
 
 /**
  * Save the open report. What is stored is `state.document`, the authored
  * document, so reopening it raises no "derived and supplied" warnings.
  * js/store.js keeps the record's `created` time and sets `updated`.
+ *
+ * Every save says which revision of the record it was made on, and the
+ * store refuses one made on an older revision than it holds: a second tab
+ * that still showed an old version saved it over the newer one, silently,
+ * on its next edit. Saves are queued, so this tab's own saves never race
+ * each other's revision. What is saved, and under which id, is decided when
+ * this is called; the revision when the save runs.
+ *
+ * @returns {Promise<'saved'|'conflict'|'failed'|'skipped'>} how it went
  */
-export async function persistCurrent(state, els) {
-  if (state.fatal) return;
+export function persistCurrent(state, els) {
+  if (state.fatal) return Promise.resolve('skipped');
   const report = reportOf(state.model);
-  if (!report || !state.document) return;
+  if (!report || !state.document) return Promise.resolve('skipped');
   const isNew = !state.reportId;
   const id = state.reportId || uid('r-');
   // Reserve the identity before storage yields. A new document can open while
   // this write is pending, and completion must not take over its identity.
   state.reportId = id;
-  const meta = {
+  // Behind another save of the same report, the revision is the one that
+  // save leaves; otherwise the one this tab holds now.
+  if (!isNew && !(queuedFor.get(id) > 0)) baseRev.set(id, state.reportRev);
+  const job = {
     id,
-    title: report.title || 'Untitled report',
-    kind: report.kind || null,
-    status: report.status || null,
-    pages: (report.pages || []).length,
+    isNew,
+    document: state.document,
+    meta: reportMeta(state.model, id),
   };
-  const ok = await writeReport(id, state.document, meta);
-  if (!ok) {
+  queuedFor.set(id, (queuedFor.get(id) || 0) + 1);
+  inFlight += 1;
+  state.savePending = true;
+  const run = queue.then(() => writeOnce(state, els, job)).catch(() => 'failed').finally(() => {
+    queuedFor.set(id, queuedFor.get(id) - 1);
+    if (!queuedFor.get(id)) queuedFor.delete(id);
+    inFlight -= 1;
+    if (!inFlight) state.savePending = false;
+  });
+  queue = run;
+  return run;
+}
+
+async function writeOnce(state, els, job) {
+  const { id, isNew } = job;
+  const rev = baseRev.get(id);
+  const result = await writeReport(id, job.document, job.meta, {
+    expect: isNew || rev === null || rev === undefined ? undefined : rev,
+  });
+  if (!result) {
     if (isNew && state.reportId === id) state.reportId = null;
     const usage = await estimateUsage();
     showToast(usage && usage.pct
       ? `Could not save: storage is about ${Math.round(usage.pct)}% full. This session still works.`
       : 'Could not save this report. This session still works.');
-    return;
+    // The open report may no longer exist (site data cleared): the list
+    // says what is really saved.
+    await refreshLibrary(state, els);
+    return 'failed';
   }
+  if (result.conflict) {
+    if (state.reportId === id) {
+      state.reportConflict = result.current.updated;
+      if (conflictHandler) conflictHandler(state, els, result.current);
+      else showToast('This report was changed in another tab, so this edit was not saved.');
+    } else {
+      // Saved after another report opened: there is no notice to show it
+      // in, so the toast says which report kept the other tab's version.
+      showToast(`"${job.meta.title}" was changed in another tab, so the last edit to it was not saved.`);
+    }
+    return 'conflict';
+  }
+  baseRev.set(id, result.updated);
+  clearReportJournal(id);
   if (state.reportId === id) {
+    state.reportRev = result.updated;
     state.isExample = false;
     updateReportBar(state);
     setPreference(state, 'lastReportId', id);
   }
   await refreshLibrary(state, els);
+  return 'saved';
 }
 
 export async function refreshLibrary(state, els) {
@@ -123,12 +197,20 @@ export async function readStored(id) {
 
 // ── Deleting ─────────────────────────────────────────────────────────────────
 
-const CONFIRM_MS = 4000;
+/** How long an armed button waits when focus is not on it (a pointer press). */
+const UNFOCUSED_CONFIRM_MS = 20000;
 const armed = new WeakMap();
 
 /**
  * Ask before deleting, in place. The first press turns the button into
- * "Delete?" for four seconds; a second press inside that time confirms.
+ * "Delete?" and says so in the toast, which is a polite live region; a second
+ * press confirms. It stays armed while it has focus, for as long as that
+ * takes: a fixed four seconds could not be met by a switch or a screen reader
+ * user, and the prompt was only a change of the focused button's name, which
+ * some screen readers do not read. It disarms when focus leaves it, on
+ * Escape, on a press anywhere else, or (when it was armed by a pointer that
+ * did not focus it, as in Safari) after twenty seconds. Leaving and coming
+ * back therefore starts again: the next press arms it, it does not delete.
  *
  * @param {HTMLButtonElement} button
  * @returns {boolean} true when this press confirms the delete
@@ -136,20 +218,43 @@ const armed = new WeakMap();
 export function confirmDelete(button) {
   if (!button) return false;
   if (armed.has(button)) {
-    clearTimeout(armed.get(button));
-    armed.delete(button);
+    armed.get(button)();
     return true;
   }
   const title = button.dataset.reportTitle || 'this report';
   button.textContent = 'Delete?';
   button.dataset.confirm = 'armed';
-  button.setAttribute('aria-label', `Press again to delete ${title}`);
-  armed.set(button, setTimeout(() => {
+  // The name still starts with the word on screen (WCAG 2.5.3).
+  button.setAttribute('aria-label', `Delete ${title}: press again to confirm`);
+  showToast(`Press Delete again to remove "${title}".`, { duration: 6000 });
+  let timer = 0;
+  const cleanup = () => {
+    clearTimeout(timer);
     armed.delete(button);
+    button.removeEventListener('focusout', disarm);
+    button.removeEventListener('keydown', onKey);
+    document.removeEventListener('pointerdown', onPointer, true);
+  };
+  function disarm() {
+    cleanup();
     delete button.dataset.confirm;
     button.textContent = 'Delete';
     button.setAttribute('aria-label', `Delete ${title}`);
-  }, CONFIRM_MS));
+  }
+  function onKey(event) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    disarm();
+  }
+  function onPointer(event) {
+    if (!(event.target instanceof Node) || !button.contains(event.target)) disarm();
+  }
+  button.addEventListener('focusout', disarm);
+  button.addEventListener('keydown', onKey);
+  document.addEventListener('pointerdown', onPointer, true);
+  if (document.activeElement !== button) timer = setTimeout(disarm, UNFOCUSED_CONFIRM_MS);
+  armed.set(button, cleanup);
   return false;
 }
 
@@ -213,6 +318,31 @@ export function focusOpened(els, id) {
   const active = document.activeElement;
   if (active && active !== document.body && active.isConnected) return;
   visibleOpenButtons(els).find((b) => b.dataset.reportId === id)?.focus();
+}
+
+/**
+ * Put focus on a report that just opened from an example card. The card
+ * hides with the welcome screen, and a focused element that stops being
+ * rendered loses focus: the body had it, and the next Tab went to the
+ * footer, past the whole report (WCAG 2.4.3). The report's title takes it,
+ * or <main>. Focus the visitor already moved somewhere visible is left alone.
+ *
+ * @param {object} els
+ */
+export function focusReport(els) {
+  const active = document.activeElement;
+  // getClientRects forces layout, so a card that just went display:none
+  // counts as lost even before the browser blurs it.
+  if (active && active !== document.body && active.isConnected && active.getClientRects().length) return;
+  const title = els.stage?.querySelector('.report-title');
+  if (title) {
+    // Set on the live heading, not in the renderer, which the one-file
+    // export shares; every render rebuilds the heading anyway.
+    if (!title.hasAttribute('tabindex')) title.tabIndex = -1;
+    title.focus();
+    if (document.activeElement === title) return;
+  }
+  document.getElementById('main')?.focus();
 }
 
 function visibleOpenButtons(els) {

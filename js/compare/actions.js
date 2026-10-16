@@ -24,7 +24,12 @@ export function registerCompareActions(api) {
   const { compare } = api;
   const refs = compare.refs;
   const root = refs.root;
-  const { focusColumn } = registerColumnActions(api);
+  const { focusColumn, setSource, openBundle } = registerColumnActions(api);
+  // For js/compare/bridge.js: a report from the Reports view goes into a
+  // column the way a chosen file does.
+  api.focusColumn = focusColumn;
+  api.setColumnSource = setSource;
+  api.openBundle = openBundle;
 
   const set = () => compare.set;
   const toast = (message, undo) => undoToast(refs.toast, message, undo);
@@ -155,6 +160,20 @@ export function registerCompareActions(api) {
     'cmp-set-mode': (el) => api.commit(setView(set(), { mode: el.dataset.value })),
     'cmp-set-sync': (el) => api.commit(setView(set(), { sync: el.dataset.value })),
     'cmp-step': (el) => api.step(Number(el.dataset.dir) < 0 ? -1 : 1),
+    // In a short window the column heads keep only their badge row and
+    // difference line (css/compare.css); the column menu offers the rest back
+    // (js/compare/column-actions.js). The class lives on the view, which is
+    // never rebuilt, so the choice lasts the session.
+    'cmp-head-details': () => {
+      closePopover({ restore: true });
+      const on = root.classList.toggle('show-head-details');
+      requestAnimationFrame(() => {
+        compare.sync.remeasure();
+        api.scheduleCounter();
+      });
+      const what = set()?.view.blind ? 'counts' : 'role, author and counts';
+      say(on ? `Column heads show ${what}.` : 'Column heads show the badge, label and differences only.');
+    },
     'cmp-rename-set': (el) => {
       closePopover({ restore: false });
       // Renaming shows the title, which Blind hides: it can name the authors.
@@ -202,8 +221,11 @@ export function registerCompareActions(api) {
             api.commit(setTitle(set(), next));
             await api.persistNow();
           } else {
+            // A failed write (a full quota, a blocked database) keeps the old
+            // title on the row, and says why.
             const found = await readSet(id);
-            if (found) await writeSet(setTitle(found, next));
+            const written = found ? await writeSet(setTitle(found, next)) : null;
+            if (!written) say(found ? 'The new title could not be saved in this browser.' : 'That comparison is no longer saved in this browser.');
           }
           await refreshSwitcher();
           switcherRow(id)?.focus();
@@ -232,8 +254,17 @@ export function registerCompareActions(api) {
       await reopen();
       refs.switcher.querySelector('#cmpSwitcherFilter')?.focus();
       toast(shownTitle === null ? 'Deleted the comparison that was under Blind review.' : sentence(`Deleted "${shownTitle}"`), async () => {
-        await writeSet(record);
-        if (wasOpen) api.openSet(record, { saved: true });
+        // The write can fail. The set then opens as not saved, so the
+        // switcher shows its "not saved" row and the address names no id that
+        // a reload would not find; its next change tries the save again. No
+        // title in these messages: the set may be under Blind.
+        const written = await writeSet(record);
+        if (wasOpen) api.openSet(written || record, { saved: Boolean(written) });
+        if (!written) {
+          say(wasOpen
+            ? 'The comparison is open again, but it could not be saved in this browser, so it stays only until the tab closes.'
+            : 'The comparison could not be restored in this browser.');
+        }
         await reopen();
         // Focus lands on the comparison that came back (opening the switcher
         // again put it on the filter).

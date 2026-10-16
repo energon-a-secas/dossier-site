@@ -21,6 +21,7 @@ import { createEditor, formatJson } from './editor.js';
 import { createFindingsPanel, updateFindingsPanel, findingPlace } from './findings-panel.js';
 import { reportForm } from './authoring.js';
 import { routeFor } from './router.js';
+import { reducedMotion } from './motion.js';
 
 let editor = null;
 let findingsPanel = null;
@@ -49,6 +50,19 @@ export function syncEditor(state) {
 }
 
 /**
+ * Parse and save an edit still waiting for the editor's pause, now. The page
+ * is hiding (js/boot.js) and a timer will not get another turn.
+ */
+export function flushEditor() {
+  editor?.flush?.();
+}
+
+/** True while the editor holds typing it has not parsed yet. */
+export function editorPending() {
+  return Boolean(editor?.pending?.());
+}
+
+/**
  * The editor toolbar's Format button lands here. It formats the authored
  * document: formatting the derived model wrote derived ids into the source,
  * and the next parse warned about each one.
@@ -71,6 +85,12 @@ export function showSourceTab(state, els, pane) {
   if (els.formPane) els.formPane.hidden = which !== 'form';
   document.getElementById('tabJson')?.setAttribute('aria-selected', String(which === 'json'));
   document.getElementById('tabForm')?.setAttribute('aria-selected', String(which === 'form'));
+  // Roving tabindex: the tab list is one Tab stop, and the arrow keys move
+  // between the tabs (js/events.js binds js/seg.js `bindGroupKeys` on it).
+  const tabJson = document.getElementById('tabJson');
+  const tabForm = document.getElementById('tabForm');
+  if (tabJson) tabJson.tabIndex = which === 'json' ? 0 : -1;
+  if (tabForm) tabForm.tabIndex = which === 'form' ? 0 : -1;
   if (state.preferences.sourceTab !== which) setPreference(state, 'sourceTab', which);
 
   if (which !== 'form' || !els.formPane) return;
@@ -148,12 +168,58 @@ export function refreshFindings(state, els) {
   findingsPanel = next;
 }
 
-export function showFindings(state, els, show) {
+/**
+ * Open or close Check report. While reading it is a popover over the sheet
+ * (css/shell.css), so opening it from its button moves focus into it, like
+ * the Compare view's popovers; beside the editor it is a docked panel and
+ * focus stays put. Closing it with focus inside puts focus back on the
+ * button, in both modes: the Close button went with the panel, and focus
+ * fell to the body.
+ *
+ * @param {{focus?: boolean}} [opts] focus: the reader pressed the button
+ */
+export function showFindings(state, els, show, { focus = false } = {}) {
   if (!els.findingsPanel) return;
+  const hadFocus = !show && els.findingsPanel.contains(document.activeElement);
   els.findingsPanel.hidden = !show;
   els.toggleFindings?.setAttribute('aria-expanded', String(Boolean(show)));
   setPreference(state, 'showFindings', Boolean(show));
   if (show) refreshFindings(state, els);
+  if (hadFocus && els.toggleFindings?.getClientRects().length) els.toggleFindings.focus({ preventScroll: true });
+  if (show && focus && mode() === 'read') els.findingsPanel.querySelector('button')?.focus({ preventScroll: true });
+}
+
+/** Where Check report floats over the sheet; matches css/shell.css. */
+const FINDINGS_OVER = '(min-width: 960px)';
+
+/**
+ * Check report as a popover while reading: a press anywhere outside it (and
+ * outside its button) closes it, and so does Escape, which puts focus back on
+ * the button when focus was in the panel or on it. Bound once. Focus leaving
+ * the panel does not close it: a finding moves focus to its block, and the
+ * panel stays so the reader can walk through the findings. Escape listens in
+ * the capture phase, so it is handled before the rail drawer's (js/chrome.js).
+ */
+export function bindFindingsPopover(state, els) {
+  const panel = els.findingsPanel;
+  const toggle = els.toggleFindings;
+  if (!panel || !toggle) return;
+  const floating = () => mode() === 'read' && !panel.hidden;
+  document.addEventListener('pointerdown', (event) => {
+    if (!floating() || !window.matchMedia(FINDINGS_OVER).matches) return;
+    const target = event.target;
+    if (target instanceof Node && (panel.contains(target) || toggle.contains(target))) return;
+    showFindings(state, els, false);
+  }, true);
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || !floating()) return;
+    if (document.querySelector('dialog[open]')) return;
+    event.preventDefault();
+    const active = document.activeElement;
+    const refocus = panel.contains(active) || active === toggle;
+    showFindings(state, els, false);
+    if (refocus && toggle.getClientRects().length) toggle.focus({ preventScroll: true });
+  }, true);
 }
 
 /** Hide the panel without recording a preference, for a report that closed. */
@@ -208,7 +274,7 @@ const MARK_MS = 1600;
  * the CSSOM, so it shows even before a stylesheet styles the attribute.
  */
 export function revealBlock(el, block = 'center') {
-  const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const still = reducedMotion();
   el.scrollIntoView({ block, behavior: still ? 'auto' : 'smooth' });
   if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
   el.focus({ preventScroll: true });

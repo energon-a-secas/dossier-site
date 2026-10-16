@@ -8,21 +8,19 @@
  * human draft is usually put in column A). The view lays the columns out in
  * report order, and every list keyed by column follows it.
  *
+ * Once a review is started under Blind (a mark, the preferred report, a note
+ * or the summary), the deal is stored with it (`review.blindOrder`, set by
+ * js/compare/review-model.js). A bundle or a link opens under a new set id,
+ * which would shuffle again, so the stored deal wins while it still covers
+ * exactly the set's columns: "Report 1" in a note is the same report for
+ * whoever opens the comparison. Adding or removing a column deals again.
+ *
  * Every place that names a column asks `nameOf` instead of reading the
  * letter and label itself, so turning Blind on renames all of them at once.
  */
 
 import { LETTERS, ROLE_WORDS, indexOfColumn } from './model.js';
-
-/** A 32-bit FNV-1a hash of a string, the shuffle's seed. */
-function seedOf(text) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i += 1) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
+import { fnv1a } from '../hash.js';
 
 /** mulberry32: a small seeded generator, enough for a shuffle of four. */
 function random(seed) {
@@ -39,7 +37,25 @@ function random(seed) {
 const cache = new WeakMap();
 
 /**
- * Each column's report number, 1 to 4, from a shuffle seeded by the set id
+ * The stored deal, when it numbers exactly these columns 1 to n.
+ *
+ * @param {object|null} order column id to report number
+ * @param {string[]} ids
+ * @returns {Map<string, number>|null}
+ */
+function storedDeal(order, ids) {
+  if (!order || typeof order !== 'object') return null;
+  const keys = Object.keys(order);
+  if (keys.length !== ids.length || !ids.every((id) => keys.includes(id))) return null;
+  const numbers = ids.map((id) => order[id]);
+  const want = ids.map((_, i) => i + 1);
+  if ([...numbers].sort((a, b) => a - b).join(',') !== want.join(',')) return null;
+  return new Map(ids.map((id) => [id, order[id]]));
+}
+
+/**
+ * Each column's report number, 1 to 4: the deal the review was entered
+ * under when it covers these columns, else a shuffle seeded by the set id
  * and the column ids, so adding a column deals again.
  *
  * @param {object} set
@@ -47,11 +63,21 @@ const cache = new WeakMap();
  */
 export function reportNumbers(set) {
   const cols = set?.columns || [];
-  const key = `${set?.id || ''}|${cols.map((c) => c.id).join(',')}`;
+  const order = set?.review?.blindOrder || null;
+  // The shuffle is seeded by the set and its columns only; the stored deal
+  // is part of the cache key, so a change to it is seen.
+  const seed = `${set?.id || ''}|${cols.map((c) => c.id).join(',')}`;
+  const key = `${seed}|${order ? JSON.stringify(order) : ''}`;
   const hit = cache.get(cols);
   if (hit && hit.key === key) return hit.numbers;
   const ids = cols.map((col) => col.id);
-  const next = random(seedOf(key));
+  const stored = storedDeal(order, ids);
+  if (stored) {
+    cache.set(cols, { key, numbers: stored });
+    return stored;
+  }
+  // The shuffle's seed: a 32-bit FNV-1a hash of the set and its columns.
+  const next = random(fnv1a(seed));
   for (let i = ids.length - 1; i > 0; i -= 1) {
     const j = Math.floor(next() * (i + 1));
     [ids[i], ids[j]] = [ids[j], ids[i]];

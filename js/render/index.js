@@ -15,6 +15,8 @@ import { inlineMarkdown as markdownToHtml, safeLink } from './markdown.js';
 import { safeHref } from './url.js';
 import { safeDomId } from './ids.js';
 import { pick, TONES, WIDTHS, CHECKED_BY } from './enums.js';
+import { reducedMotion } from '../motion.js';
+import { enumWord, formatDate, formatDateRange, isoDay } from './format.js';
 
 // One implementation of each thing. outline lives in outline.js and is
 // re-exported here so callers have one import site, not two answers.
@@ -105,8 +107,7 @@ function revealActiveTab(row, from) {
   if (rect.left >= start - 1 && rect.right <= end + 1) return;
   const room = row.scrollWidth - row.clientWidth;
   const centre = row.scrollLeft + (rect.left - box.left) - (row.clientWidth - rect.width) / 2;
-  const still = typeof from !== 'number'
-    || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const still = typeof from !== 'number' || reducedMotion();
   row.scrollTo({ left: Math.max(0, Math.min(room, centre)), behavior: still ? 'instant' : 'smooth' });
 }
 
@@ -141,17 +142,19 @@ function renderHeader(model, titleLevel = 1) {
   return header;
 }
 
-const sentenceCase = (text) => text.charAt(0).toUpperCase() + text.slice(1);
-
 /**
  * One date in the file label, kept whole on a line (`.file-label__date`): a
  * window wrapped as "2026-10-01 to 2026-10-" over "09" in the 146 px column.
+ * A calendar day is a time element carrying the raw value, so the label reads
+ * "8 Oct 2026" and the machine-readable date travels with it (and with the
+ * one-file export, which serialises the rendered label).
  */
-function labelDate(text) {
-  const span = document.createElement('span');
-  span.className = 'file-label__date';
-  span.textContent = String(text);
-  return span;
+function labelDate({ text, iso }) {
+  const el = document.createElement(iso ? 'time' : 'span');
+  el.className = 'file-label__date';
+  if (iso) el.dateTime = iso;
+  el.textContent = String(text);
+  return el;
 }
 
 /**
@@ -170,7 +173,7 @@ function renderFileLabel(model) {
   if (statusValue) {
     const status = document.createElement('span');
     status.className = `meta-status meta-status--${statusValue}`;
-    status.textContent = sentenceCase(statusValue.replaceAll('-', ' '));
+    status.textContent = enumWord(statusValue);
     rows.push(['Status', status]);
   }
   if (model.owner) rows.push(['Owner', String(model.owner)]);
@@ -179,10 +182,11 @@ function renderFileLabel(model) {
   if (from || to) {
     const one = !from || !to || from === to;
     if (one) {
-      rows.push(['Date', labelDate(from || to)]);
+      const raw = from || to;
+      rows.push(['Date', labelDate({ text: formatDate(raw) || String(raw), iso: isoDay(raw) ? String(raw).trim() : null })]);
     } else {
       const period = document.createDocumentFragment();
-      period.append(labelDate(from), ' to ', labelDate(to));
+      period.append(...formatDateRange(from, to).map((part) => (typeof part === 'string' ? part : labelDate(part))));
       rows.push(['Window', period]);
     }
   }
@@ -209,7 +213,7 @@ function renderFileLabel(model) {
   band.className = 'file-label__band';
   const kind = document.createElement('span');
   kind.className = 'file-label__kind';
-  kind.textContent = model.kind ? sentenceCase(String(model.kind)) : 'Report';
+  kind.textContent = model.kind ? enumWord(model.kind) : 'Report';
   band.appendChild(kind);
   if (source.commit) {
     const ref = document.createElement('span');

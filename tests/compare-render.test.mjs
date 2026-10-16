@@ -197,3 +197,24 @@ test('idPrefix keeps block, chart and gauge ids apart, and changes nothing witho
     }
   }
 });
+
+test('a table region is named by its caption, its header cells, the heading above it, or its place', () => {
+  const label = (blocks, opts = {}) => [...renderIr(blocks, { colId: 'k1', ...opts }).matchAll(/<div class="r-table"[^>]*aria-label="([^"]*)"/g)].map((m) => m[1]);
+  const cell = (text) => ({ inl: [{ text }] });
+  const table = (head, extra = {}) => ({ t: 'table', head: head ? [head.map(cell)] : [], rows: [[cell('1')]], ...extra });
+  assert.deepEqual(label([table(['x'], { caption: [{ text: 'Q3' }] })]), ['Table: Q3']);
+  assert.deepEqual(label([table(['UTC', 'Event'])]), ['Table: UTC, Event']);
+  assert.deepEqual(label([table(['A', 'B', 'C', 'D', 'E'])]), ['Table: A, B, C and 2 more columns']);
+  assert.deepEqual(label([table(['A', 'B', 'C', 'D'])]), ['Table: A, B, C and 1 more column']);
+  assert.deepEqual(label([{ t: 'h', level: 2, inl: [{ text: 'Timeline' }] }, table(null)]), ['Table under Timeline']);
+  assert.deepEqual(label([table(null), table(null)]), ['Table 1', 'Table 2']);
+  const hostile = label([table(['<b>"x', 'y'])]);
+  assert.deepEqual(hostile, ['Table: &lt;b&gt;&quot;x, y']);
+  // A mark's hidden words never get into the name.
+  const marked = label(markdownToIr('| UTC | Event |\n|---|---|\n| 1 | 2 |').blocks, {
+    marks: (unit) => (unit.kind === 'tr' ? { prefix: '<span class="sr">Added table row: </span>' } : null),
+  });
+  assert.deepEqual(marked, ['Table: UTC, Event']);
+  const html = renderIr([table(['UTC', 'Event'])], { colId: 'k1' });
+  assert.match(html, /<div class="r-table" tabindex="0" role="region" aria-label="Table: UTC, Event">/, 'without a script the wrapper keeps the region pattern');
+});

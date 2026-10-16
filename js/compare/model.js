@@ -8,12 +8,23 @@
  * IndexedDB, a bundle from a file and a link payload all pass through it, and
  * anything it does not recognise is dropped rather than trusted.
  *
+ * A column's 'interactive' mode (run the report's scripts) is the reader's
+ * own choice in this browser. It survives a record read back from this
+ * browser's IndexedDB, and is demoted to 'original' at the bundle and link
+ * boundary (js/compare/records.js `fromBundle`, `toBundle`), so nothing that
+ * arrives from outside runs scripts the reader did not ask for.
+ *
+ * A source's `note` is Dossier's own voice ("Converted from JUnit test
+ * results"), so only the sentences in `SOURCE_NOTES` are kept: a bundle
+ * cannot put a verdict in a column under the tool's name.
+ *
  * A column whose `source` is null is an empty slot: the view shows the drop
  * zone there. Reading a set from outside (a stored record, a bundle) is
  * js/compare/records.js.
  */
 
 import { HTML_MAX_CHARS } from '../embed-policy.js';
+import { ADAPTERS } from '../adapters/index.js';
 
 export const ROLES = Object.freeze(['human', 'agent', 'fix', 'other']);
 export const ROLE_WORDS = Object.freeze({ human: 'Human', agent: 'Agent', fix: 'Fixes', other: 'Other' });
@@ -21,6 +32,12 @@ export const KINDS = Object.freeze(['html', 'markdown', 'text', 'dossier']);
 export const KIND_WORDS = Object.freeze({ html: 'HTML', markdown: 'Markdown', text: 'Text', dossier: 'Dossier' });
 export const MODES = Object.freeze(['format', 'original', 'interactive']);
 export const MODE_WORDS = Object.freeze({ format: 'Dossier format', original: 'Original', interactive: 'Interactive' });
+/**
+ * The order every segmented render mode row uses: the Reports view's HTML
+ * bar, the Compare toolbar and Options (js/seg.js). Interactive is never in
+ * a row: it is a toggle on the Original view, or a column menu choice.
+ */
+export const MODE_ROW = Object.freeze(['format', 'original']);
 export const SYNC_MODES = Object.freeze(['sections', 'scroll', 'off']);
 export const LAYOUTS = Object.freeze(['columns', 'focus']);
 export const PANELS = Object.freeze(['sections', 'review']);
@@ -34,6 +51,27 @@ export const LIMITS = Object.freeze({
   note: 4000, summary: 8000, criterion: 60, criteria: 12,
 });
 export const BUNDLE_VERSION = 1;
+/** The title of a comparison nobody has named, and no report has named yet. */
+export const DEFAULT_TITLE = 'Untitled comparison';
+
+/**
+ * Adapters whose input a column keeps as it was written (js/compare/sources.js):
+ * every other adapter with a converter turns its input into a Dossier document.
+ */
+export const PASSED_THROUGH_IDS = Object.freeze(['html', 'markdown']);
+
+/** The notice a column carries when its source was converted by `adapter`. */
+export function convertedNote(adapter) {
+  return `Converted from ${adapter.label}`;
+}
+
+/**
+ * Every notice a source may carry: the sentences js/compare/sources.js writes
+ * for the formats it converts, and nothing else.
+ */
+export const SOURCE_NOTES = new Set(ADAPTERS
+  .filter((a) => a.toDossier && !PASSED_THROUGH_IDS.includes(a.id))
+  .map((a) => convertedNote(a)));
 
 const DEFAULT_CRITERIA = Object.freeze([
   ['accuracy', 'Accuracy'],
@@ -97,6 +135,13 @@ export function defaultReview() {
     preferred: null,
     summary: '',
     blindAtVerdict: false,
+    /**
+     * The report numbers Blind dealt, column id to number, kept from the
+     * first verdict, note or summary entered while blind, or null. A note
+     * that says "Report 1" can then be read after Blind is off, and the deal
+     * stays the same wherever the comparison is opened.
+     */
+    blindOrder: null,
   };
 }
 
@@ -108,7 +153,7 @@ export function defaultReview() {
 export function newSet({ id, now = Date.now(), title } = {}) {
   return {
     id: id && SET_ID.test(id) ? id : newSetId(),
-    title: clampLine(title, LIMITS.title) || 'Untitled comparison',
+    title: clampLine(title, LIMITS.title) || DEFAULT_TITLE,
     created: now,
     updated: now,
     prompt: '',
@@ -158,16 +203,58 @@ export function defaultLabel(set, role) {
   return word;
 }
 
+/** The choice "Each against its source" in `view.diff.base`. */
+export const EACH = 'each';
+
+/** True when a Fixes column with a report corrects a column with a report. */
+export function fixPair(set) {
+  return (set?.columns || []).some((col) => col.role === 'fix' && col.source && col.fixes && col.fixes !== col.id
+    && columnById(set, col.fixes)?.source);
+}
+
+const against = new WeakMap();
+
 /**
- * The column differences are measured against when the reader has not chosen
- * one: what a Fixes column corrects, so the view shows the fix; otherwise the
- * first column with a report in it.
+ * What each column's differences are marked against.
+ *
+ * With one column chosen as the base (`view.diff.base`), every other column
+ * is marked against it. With "Each against its source" (EACH), which is also
+ * the default whenever a Fixes column and the column it fixes both hold
+ * reports, a fix is marked against the column it fixes and every other
+ * column against one root: the first Human report, else the first report
+ * that is not a fix. So the Agent column reads against the Human one and
+ * the Fixes column against the Agent one, in one view. With no choice and no
+ * fix pair, the root is the first column with a report.
+ *
+ * `base` is the root: the column with the Base tag, the one the Sections
+ * rows follow. Blind does not change any of it.
+ *
+ * @param {object} set
+ * @returns {{each: boolean, base: string|null, against: Map<string, string|null>}}
+ *   `against` maps each column with a report to the column it is marked
+ *   against, or null for the base itself
  */
-export function defaultBase(set) {
-  const cols = set?.columns || [];
-  const fix = cols.find((col) => col.role === 'fix' && col.source && col.fixes && columnById(set, col.fixes)?.source);
-  if (fix) return fix.fixes;
-  return (cols.find((col) => col.source) || cols[0] || {}).id || null;
+export function diffAgainst(set) {
+  if (!set) return { each: false, base: null, against: new Map() };
+  if (against.has(set)) return against.get(set);
+  const filled = (set.columns || []).filter((col) => col.source);
+  const chosen = set.view?.diff?.base;
+  const valid = chosen && chosen !== EACH && columnById(set, chosen)?.source;
+  const each = chosen === EACH || (!valid && fixPair(set));
+  let base;
+  if (!each) base = valid ? chosen : filled[0]?.id || null;
+  else {
+    base = (filled.find((col) => col.role === 'human') || filled.find((col) => col.role !== 'fix') || filled[0])?.id || null;
+  }
+  const map = new Map();
+  for (const col of filled) {
+    if (col.id === base) map.set(col.id, null);
+    else if (each && col.role === 'fix' && col.fixes && col.fixes !== col.id && columnById(set, col.fixes)?.source) map.set(col.id, col.fixes);
+    else map.set(col.id, base);
+  }
+  const out = { each, base, against: map };
+  against.set(set, out);
+  return out;
 }
 
 /** The column a new Fixes column corrects: the last column that is not a fix. */
@@ -209,10 +296,23 @@ export function addColumn(set, { role = 'other', label, author, source = null, f
   return { set: withColumns(set, columns, { seq }), id };
 }
 
-/** Change a column's fields. Unknown fields are ignored; values are cleaned. */
+/** True when a source would be kept: a known kind, text that is not blank and fits the cap. */
+export function sourceFits(source) {
+  return sanitizeSource(source) !== null;
+}
+
+/**
+ * Change a column's fields. Unknown fields are ignored; values are cleaned.
+ *
+ * A source that cannot be kept (over the cap, blank, an unknown kind) is a
+ * refusal, not an empty column: the set comes back unchanged, the same
+ * object, so the caller can tell (`next === set`) and say why. Only an
+ * explicit `source: null` empties a column.
+ */
 export function updateColumn(set, id, patch = {}) {
   const at = indexOfColumn(set, id);
   if (at < 0) return set;
+  if (own(patch, 'source') && patch.source !== null && !sourceFits(patch.source)) return set;
   const col = { ...set.columns[at] };
   if (own(patch, 'role')) {
     col.role = pickOne(patch.role, ROLES, col.role);
@@ -265,7 +365,12 @@ export function duplicateColumn(set, id) {
 }
 
 export function setTitle(set, title) {
-  return { ...set, title: clampLine(title, LIMITS.title) || 'Untitled comparison' };
+  return { ...set, title: clampLine(title, LIMITS.title) || DEFAULT_TITLE };
+}
+
+/** The brief: what every report in the comparison was asked to write. */
+export function setPrompt(set, text) {
+  return { ...set, prompt: clampText(text, LIMITS.prompt).trim() };
 }
 
 /** Merge view fields. Each is checked again by `repair`. */
@@ -315,7 +420,7 @@ export function repair(set) {
   const ids = new Set(set.columns.map((col) => col.id));
   const view = { ...set.view, diff: { ...set.view.diff } };
   if (!ids.has(view.focus)) view.focus = set.columns[0]?.id || null;
-  if (!ids.has(view.diff.base)) view.diff.base = null;
+  if (view.diff.base !== EACH && !ids.has(view.diff.base)) view.diff.base = null;
   const columns = set.columns.map((col) => {
     if (col.role !== 'fix') return col.fixes === null ? col : { ...col, fixes: null };
     if (col.fixes && (!ids.has(col.fixes) || col.fixes === col.id)) return { ...col, fixes: null };
@@ -338,7 +443,8 @@ export function sanitizeSource(source) {
   if (!KINDS.includes(source.kind) || typeof source.text !== 'string') return null;
   if (!source.text.trim() || source.text.length > MAX_SOURCE_CHARS) return null;
   const out = { kind: source.kind, name: clampLine(source.name, LIMITS.name) || 'Pasted text', text: source.text };
-  const note = clampLine(source.note, LIMITS.name);
-  if (note) out.note = note;
+  // Only Dossier's own sentence, and only on the converted document it
+  // describes. Anything else from a bundle, a link or a record is dropped.
+  if (out.kind === 'dossier' && typeof source.note === 'string' && SOURCE_NOTES.has(source.note)) out.note = source.note;
   return out;
 }

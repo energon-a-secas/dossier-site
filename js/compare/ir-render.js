@@ -16,17 +16,27 @@
  * Units (headings, paragraphs, list items, table rows, code blocks, and the
  * paragraphs inside quotes and disclosures) carry `data-u`, numbered in the
  * order of `flattenUnits` (js/compare/ir.js). `opts.marks(unit, index)` may
- * return `{cls, attrs, prefix, inner, before, after}` for a unit:
+ * return `{cls, attrs, prefix, label, inner, before, after}` for a unit:
  *   cls     classes added to the unit element
  *   attrs   extra attributes, already escaped, starting with a space
  *   prefix  markup put first inside the unit (a tag, a visually hidden label)
+ *   label   for a table's header row, the label that would be its prefix
  *   inner   markup that replaces the unit's own content (word marks)
  *   before, after  markup placed around the unit (a removed unit's ghost row)
  *   cells   for a table row, one entry per cell: markup that replaces that
- *           cell's content, or null to keep it (a row's `prefix` goes into
- *           its first cell, since a row holds only cells)
+ *           cell's content, or null to keep it
+ * A row's prefix goes into its first cell, since a row holds only cells, but
+ * only in the table's body: in its header row it would become the name of
+ * every column header, so a header row's `before` and `label` stand just
+ * before the table and its `after` just after it, and the first row of the
+ * table head is always the header row.
  * The marks function owns escaping whatever it returns; `renderInline` is
  * the escaping path for inline runs it builds (the word marks).
+ *
+ * A table's scrolling wrapper is named from the IR, never from the page,
+ * which holds the marks' words: by its caption, its header cells, the
+ * heading above it, or its place. js/scroll-regions.js then drops the region
+ * role and the Tab stop while the table fits.
  */
 
 import { escHtml } from '../neorgon-dom.js';
@@ -39,7 +49,9 @@ import { inlineText } from './ir.js';
  * @returns {string}
  */
 export function renderIr(blocks, { colId = 'c', marks = null } = {}) {
-  const ctx = { colId: safeId(colId), marks: typeof marks === 'function' ? marks : null, unit: 0, heading: 0 };
+  const ctx = {
+    colId: safeId(colId), marks: typeof marks === 'function' ? marks : null, unit: 0, heading: 0, lastHeading: '', tables: 0,
+  };
   return blockList(blocks, ctx);
 }
 
@@ -84,6 +96,7 @@ function renderBlock(block, ctx) {
     case 'h': {
       const level = clampLevel(block.level);
       ctx.heading += 1;
+      ctx.lastHeading = inlineText(block.inl);
       const tag = `h${Math.min(6, level + 2)}`;
       return unit(tag, { id: `${ctx.colId}-h${ctx.heading}`, cls: `r-h r-h${level}` },
         inline(block.inl, ctx), 'h', block, inlineText(block.inl), ctx);
@@ -135,26 +148,55 @@ function list(block, ctx) {
   return `${html}</${tag}>`;
 }
 
+const squash = (text) => String(text || '').replace(/\s+/g, ' ').trim();
+
+/**
+ * A table's name, plain text: its caption, its header cells ("Table: UTC,
+ * Event"), the heading above it, or its place ("Table 2"). Read from the IR,
+ * so no mark's words ("Added table row:") get into it.
+ */
+export function tableLabel(block, ctx) {
+  if (block.caption) return `Table: ${squash(inlineText(block.caption)).slice(0, 80)}`;
+  const cells = (block.head?.[0] || []).map((cell) => squash(inlineText(cell?.inl)).slice(0, 30)).filter(Boolean);
+  if (cells.length) {
+    if (cells.length <= 3) return `Table: ${cells.join(', ')}`;
+    const more = cells.length - 3;
+    return `Table: ${cells.slice(0, 3).join(', ')} and ${more} more column${more === 1 ? '' : 's'}`;
+  }
+  const heading = squash(ctx.lastHeading);
+  if (heading) return `Table under ${heading.slice(0, 80)}`;
+  return `Table ${ctx.tables}`;
+}
+
 function table(block, ctx) {
+  ctx.tables += 1;
+  const label = tableLabel(block, ctx);
   const caption = block.caption ? `<caption>${inline(block.caption, ctx)}</caption>` : '';
+  let lead = '';
+  let trail = '';
   const row = (cells, cellTag) => {
     const index = ctx.unit;
     ctx.unit += 1;
+    const head = cellTag === 'th';
     const text = (cells || []).map((cell) => inlineText(cell.inl)).join(' | ');
-    const mark = ctx.marks ? ctx.marks({ kind: 'tr', node: cells, text, head: cellTag === 'th' }, index) : null;
+    const mark = ctx.marks ? ctx.marks({ kind: 'tr', node: cells, text, head }, index) : null;
     const content = (cells || []).map((cell, i) => {
       const span = (cell.colspan > 1 ? ` colspan="${Math.min(50, cell.colspan | 0)}"` : '')
         + (cell.rowspan > 1 ? ` rowspan="${Math.min(500, cell.rowspan | 0)}"` : '');
-      const scope = cellTag === 'th' ? ' scope="col"' : '';
+      const scope = head ? ' scope="col"' : '';
       const own = mark?.cells && typeof mark.cells[i] === 'string' ? mark.cells[i] : inline(cell.inl, ctx);
-      return `<${cellTag}${scope}${span}>${i === 0 ? mark?.prefix || '' : ''}${own}</${cellTag}>`;
+      return `<${cellTag}${scope}${span}>${i === 0 && !head ? mark?.prefix || '' : ''}${own}</${cellTag}>`;
     }).join('');
     const cls = mark?.cls ? ` class="${escHtml(mark.cls)}"` : '';
-    return `${mark?.before || ''}<tr${cls} data-u="${index}"${mark?.attrs || ''}>${content}</tr>${mark?.after || ''}`;
+    const tr = `<tr${cls} data-u="${index}"${mark?.attrs || ''}>${content}</tr>`;
+    if (!head) return `${mark?.before || ''}${tr}${mark?.after || ''}`;
+    lead += `${mark?.before || ''}${mark?.label || ''}`;
+    trail += mark?.after || '';
+    return tr;
   };
   const head = (block.head || []).length ? `<thead>${block.head.map((r) => row(r, 'th')).join('')}</thead>` : '';
   const body = `<tbody>${(block.rows || []).map((r) => row(r, 'td')).join('')}</tbody>`;
-  return `<div class="r-table" tabindex="0" role="region" aria-label="Table${block.caption ? `: ${escHtml(inlineText(block.caption).slice(0, 80))}` : ''}"><table>${caption}${head}${body}</table></div>`;
+  return `${lead}<div class="r-table" tabindex="0" role="region" aria-label="${escHtml(label)}"><table>${caption}${head}${body}</table></div>${trail}`;
 }
 
 /** Only a data: image is drawn. Anything else is described, never fetched. */

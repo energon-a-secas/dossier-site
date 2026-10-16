@@ -16,6 +16,13 @@ import assert from 'node:assert/strict';
  * painted, and whether an empty report shell (the old build skeleton) or a
  * second toolbar is on screen. Installed before any page script runs.
  *
+ * Sampling follows the boot, not the clock: it runs until boot has ended
+ * (html loses data-dossier-booting) and then for at least 20 frames and
+ * 500 ms more, so a slow machine neither ends the sample before boot (a
+ * false "too few frames") nor stops watching just before a fault painted at
+ * the moment boot reveals the page (a false pass). A boot that never ends
+ * stops at 60 s of page time, with no end recorded.
+ *
  * It also records every stylesheet or script element that fails to load. A
  * shell on screen during boot is either a boot bug or a page whose
  * css/shell.css never arrived (a request the dev server dropped), and the
@@ -34,32 +41,53 @@ export function recordFrames() {
   }, true);
   const shown = (el) => Boolean(el) && el.getClientRects().length > 0
     && getComputedStyle(el).visibility !== 'hidden';
+  let after = 0;
   const tick = () => {
+    const root = document.documentElement;
+    const booting = Boolean(root) && 'dossierBooting' in root.dataset;
     const shell = document.getElementById('shell');
     const stage = document.getElementById('stage');
+    const now = performance.now();
     frames.push({
-      t: Math.round(performance.now()),
+      t: Math.round(now),
+      booting,
       bars: [...document.querySelectorAll('.header-bar, .ds-workbar')].filter(shown).length,
       skeleton: shown(shell) && Boolean(stage) && stage.childElementCount === 0,
-      editor: document.documentElement.dataset.dossierMode === 'read' && shown(document.getElementById('sourcePane')),
+      editor: Boolean(root) && root.dataset.dossierMode === 'read' && shown(document.getElementById('sourcePane')),
     });
-    if (performance.now() < 3000) requestAnimationFrame(tick);
+    if (booting) window.__dossierBootSeen = true;
+    else if (window.__dossierBootEnd === undefined
+      && (window.__dossierBootSeen || (root && document.readyState !== 'loading'))) {
+      window.__dossierBootEnd = now;
+    }
+    if (window.__dossierBootEnd !== undefined) after += 1;
+    const done = window.__dossierBootEnd !== undefined && after >= 20 && now - window.__dossierBootEnd >= 500;
+    if (done || now > 60000) {
+      window.__dossierFramesDone = true;
+      return;
+    }
+    requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
 }
 
 export async function checkFirstPaint(target, label) {
-  await target.waitForFunction(() => (window.__dossierFrames || []).some((f) => f.t > 1500));
+  await target.waitForFunction(() => window.__dossierFramesDone === true, null, { timeout: 65000 });
   const frames = await target.evaluate(() => window.__dossierFrames);
+  const bootEnd = await target.evaluate(() => window.__dossierBootEnd);
   const why = loadReport(await target.evaluate(loadFailures));
-  assert.ok(frames.length > 5, `${label}: too few frames sampled`);
+  assert.equal(typeof bootEnd, 'number', `${label}: boot never finished${why}`);
+  const after = frames.filter((f) => !f.booting);
+  assert.ok(after.length >= 10, `${label}: too few frames sampled after boot`);
   const two = frames.find((f) => f.bars > 1);
   assert.equal(two, undefined, `${label}: a frame at ${two?.t} ms painted two header bars${why}`);
   const skeleton = frames.find((f) => f.skeleton);
   assert.equal(skeleton, undefined, `${label}: a frame at ${skeleton?.t} ms showed an empty report shell${why}`);
   const editor = frames.find((f) => f.editor);
   assert.equal(editor, undefined, `${label}: a frame at ${editor?.t} ms showed the editor in read mode${why}`);
-  assert.equal(frames.at(-1).bars, 1, `${label}: the header is not on screen after boot${why}`);
+  assert.equal(after.at(-1).bars, 1, `${label}: the header is not on screen after boot${why}`);
+  const missing = after.find((f) => f.bars !== 1);
+  assert.equal(missing, undefined, `${label}: a frame at ${missing?.t} ms after boot painted ${missing?.bars} header bars${why}`);
 }
 
 /**
@@ -111,7 +139,7 @@ export async function checkBoot({ browser, base, errors }) {
     await route.continue();
   });
   await slow.goto(`${base}/?check=slow`, { waitUntil: 'commit' });
-  await slow.locator('#bootStatus').filter({ hasText: 'Loading' }).waitFor({ timeout: 3000 });
+  await slow.locator('#bootStatus').filter({ hasText: 'Loading' }).waitFor({ timeout: 15000 });
   assert.equal(await slow.locator('#shell').isVisible(), false, 'A slow boot showed the shell');
   assert.equal(await slow.locator('#welcome').isVisible(), false, 'A slow boot showed the welcome screen before boot');
   await slow.locator('#welcome').waitFor({ state: 'visible' });
@@ -120,7 +148,7 @@ export async function checkBoot({ browser, base, errors }) {
   const broken = await slowContext.newPage();
   await broken.route('**/js/open.js', (route) => route.abort());
   await broken.goto(`${base}/?check=broken`, { waitUntil: 'commit' });
-  await broken.locator('#bootStatus').filter({ hasText: 'did not finish loading' }).waitFor({ timeout: 4000 });
+  await broken.locator('#bootStatus').filter({ hasText: 'did not finish loading' }).waitFor({ timeout: 15000 });
   assert.equal(await broken.locator('html').getAttribute('data-dossier-loading'), 'failed');
   assert.equal(await broken.locator('#shell').isVisible(), false, 'A failed boot revealed a dead shell');
   assert.equal(await broken.locator('#welcome').isVisible(), false, 'A failed boot revealed a dead welcome screen');

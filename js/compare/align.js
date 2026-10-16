@@ -11,6 +11,12 @@
  * and "Customer impact" match, while "Remediation" and "What we did" do not.
  * A pair needs 0.5 to count. Different heading levels cost a little.
  *
+ * Each heading is prepared once (`prepareHeadings`: its normalised text and
+ * its bigrams as sorted integer ids), so scoring a pair is a merge of two
+ * short integer arrays, and a pair that cannot reach 0.5 is skipped on its
+ * bigram totals alone. Aligning 400 headings against 400 used to take
+ * seconds and froze the first synced scroll; it now takes milliseconds.
+ *
  * Sync uses the pairs as anchors, and the Sections panel uses them to say
  * which sections a column has, has under another name, or left out.
  */
@@ -52,55 +58,127 @@ function bigrams(text) {
 }
 
 /**
+ * Small integer ids for bigrams, shared by every prepared heading, so two
+ * headings compare by merging two sorted integer arrays. Bounded by the
+ * number of distinct bigrams ever seen.
+ */
+const gramIds = new Map();
+function gramId(gram) {
+  let id = gramIds.get(gram);
+  if (id === undefined) {
+    id = gramIds.size;
+    gramIds.set(gram, id);
+  }
+  return id;
+}
+
+/**
+ * One heading, ready to be compared many times: its normalised text, its
+ * bigram ids sorted ascending with their counts, and their total. Its text
+ * is read once, here.
+ *
+ * @param {{text: string, level?: number}} heading
+ */
+export function prepareHeading(heading) {
+  const text = heading ? heading.text : '';
+  const norm = normHeading(text);
+  const entries = norm ? [...bigrams(norm)].map(([gram, n]) => [gramId(gram), n]).sort((x, y) => x[0] - y[0]) : [];
+  const gram = new Int32Array(entries.length);
+  const count = new Int32Array(entries.length);
+  let total = 0;
+  entries.forEach(([id, n], i) => {
+    gram[i] = id;
+    count[i] = n;
+    total += n;
+  });
+  return { text: String(text ?? ''), norm, gram, count, total, level: heading ? heading.level : undefined };
+}
+
+/**
+ * Prepare a heading list once, for many alignments (sync keeps one per
+ * registered column).
+ *
+ * @param {Array<{text: string, level?: number}>} list
+ */
+export function prepareHeadings(list) {
+  return (list || []).map(prepareHeading);
+}
+
+/**
+ * Dice similarity of two prepared headings. With `floor`, a pair whose best
+ * possible score (the Dice bound of their bigram totals) is under it scores
+ * 0 at once: it could not count as a match anyway.
+ */
+export function simPrepared(x, y, floor = 0) {
+  if (!x.norm || !y.norm) return 0;
+  if (x.norm === y.norm) return 1;
+  const sum = x.total + y.total;
+  if (!sum) return 0;
+  if (floor && (2 * Math.min(x.total, y.total)) / sum < floor) return 0;
+  let both = 0;
+  let i = 0;
+  let j = 0;
+  const a = x.gram;
+  const b = y.gram;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      both += Math.min(x.count[i], y.count[j]);
+      i += 1;
+      j += 1;
+    } else if (a[i] < b[j]) i += 1;
+    else j += 1;
+  }
+  return (2 * both) / sum;
+}
+
+/**
  * Dice similarity of two headings, 0 to 1.
  *
  * @param {string} a
  * @param {string} b
  */
 export function similarity(a, b) {
-  const x = normHeading(a);
-  const y = normHeading(b);
-  if (!x || !y) return 0;
-  if (x === y) return 1;
-  const gx = bigrams(x);
-  const gy = bigrams(y);
-  let both = 0;
-  let total = 0;
-  for (const count of gx.values()) total += count;
-  for (const count of gy.values()) total += count;
-  for (const [gram, count] of gx) both += Math.min(count, gy.get(gram) || 0);
-  return total ? (2 * both) / total : 0;
+  return simPrepared(prepareHeading({ text: a }), prepareHeading({ text: b }), 0);
 }
 
+const isPrepared = (list) => list.length > 0 && list[0] instanceof Object && list[0].gram instanceof Int32Array;
+
 /**
- * Align two heading lists.
+ * Align two heading lists, raw or already prepared (`prepareHeadings`).
+ * Each heading's text is read once: the scores of a pair come from the
+ * prepared forms, and the score of each cell is kept for the way back.
  *
  * @param {Array<{text: string, level?: number}>} a
  * @param {Array<{text: string, level?: number}>} b
  * @returns {Array<{a: number, b: number, sim: number}>} index pairs, in order
  */
 export function alignHeadings(a, b) {
-  const left = (a || []).slice(0, MAX_HEADINGS);
-  const right = (b || []).slice(0, MAX_HEADINGS);
-  const n = left.length;
-  const m = right.length;
+  const rawLeft = (a || []).slice(0, MAX_HEADINGS);
+  const rawRight = (b || []).slice(0, MAX_HEADINGS);
+  const n = rawLeft.length;
+  const m = rawRight.length;
   if (!n || !m) return [];
-
-  const score = (i, j) => {
-    const sim = similarity(left[i].text, right[j].text);
-    if (sim < MATCH) return 0;
-    const cost = left[i].level && right[j].level && left[i].level !== right[j].level ? LEVEL_COST : 0;
-    return Math.max(0.01, sim - cost);
-  };
+  const left = isPrepared(rawLeft) ? rawLeft : prepareHeadings(rawLeft);
+  const right = isPrepared(rawRight) ? rawRight : prepareHeadings(rawRight);
 
   // dp[i][j]: the best total for left[0..i) against right[0..j).
   const width = m + 1;
   const dp = new Float64Array((n + 1) * width);
   const sims = new Float64Array(n * m);
+  const raw = new Float64Array(n * m);
   for (let i = 1; i <= n; i += 1) {
+    const x = left[i - 1];
     for (let j = 1; j <= m; j += 1) {
-      const s = score(i - 1, j - 1);
-      sims[(i - 1) * m + (j - 1)] = s;
+      const y = right[j - 1];
+      const sim = simPrepared(x, y, MATCH);
+      let s = 0;
+      if (sim >= MATCH) {
+        const cost = x.level && y.level && x.level !== y.level ? LEVEL_COST : 0;
+        s = Math.max(0.01, sim - cost);
+      }
+      const cell = (i - 1) * m + (j - 1);
+      sims[cell] = s;
+      raw[cell] = sim;
       const diag = s > 0 ? dp[(i - 1) * width + (j - 1)] + s : -1;
       dp[i * width + j] = Math.max(diag, dp[(i - 1) * width + j], dp[i * width + (j - 1)]);
     }
@@ -110,10 +188,11 @@ export function alignHeadings(a, b) {
   let i = n;
   let j = m;
   while (i > 0 && j > 0) {
-    const s = sims[(i - 1) * m + (j - 1)];
+    const cell = (i - 1) * m + (j - 1);
+    const s = sims[cell];
     const here = dp[i * width + j];
     if (s > 0 && Math.abs(here - (dp[(i - 1) * width + (j - 1)] + s)) < 1e-9) {
-      pairs.push({ a: i - 1, b: j - 1, sim: similarity(left[i - 1].text, right[j - 1].text) });
+      pairs.push({ a: i - 1, b: j - 1, sim: raw[cell] });
       i -= 1;
       j -= 1;
     } else if (dp[(i - 1) * width + j] >= dp[i * width + (j - 1)]) {
@@ -168,10 +247,11 @@ export function mapPosition(y, anchors, leaderEnd, followerEnd) {
  *   `extra` lists, per column, its headings that match nothing in the base.
  */
 export function sectionMatrix(base, others) {
-  const rows = (base || []).map((h, index) => ({ index, text: h.text, level: h.level, cells: {} }));
+  const prepared = prepareHeadings(base);
+  const rows = prepared.map((h, index) => ({ index, text: h.text, level: h.level, cells: {} }));
   const extra = {};
   for (const [colId, headings] of Object.entries(others || {})) {
-    const pairs = alignHeadings(base, headings);
+    const pairs = alignHeadings(prepared, headings);
     const byBase = new Map(pairs.map((p) => [p.a, p]));
     const used = new Set(pairs.map((p) => p.b));
     for (const row of rows) {

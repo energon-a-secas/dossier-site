@@ -57,6 +57,12 @@ function paired(block, kind, mode, ctx) {
   const marked = textual
     ? lineDiff(String(block.left.value ?? ''), String(block.right.value ?? ''))
     : null;
+  // Prose does not render its blank lines (they become paragraph spacing),
+  // so a blank line added or removed is not a change anyone could see.
+  if (marked && !marked.gaveUp && !LINED.has(kind)) {
+    marked.removed = countVisible(marked.left, block.left.value, 'removed');
+    marked.added = countVisible(marked.right, block.right.value, 'added');
+  }
   const interactive = ctx.interactive !== false && !ctx.print;
   const labels = sideLabels(block);
   const highlight = block.highlightChanges !== false;
@@ -183,15 +189,41 @@ function markedPre(value, marks, language) {
   return `<pre class="compare__code"${lang}><code>${rows}</code></pre>`;
 }
 
+/**
+ * One paragraph per non-blank line. A blank line is spacing, not a paragraph:
+ * the next line carries `compare__line--para` and sits a paragraph's space
+ * below, where an empty `&nbsp;` paragraph left a 44 px hole and an empty
+ * paragraph for a screen reader to step through. Marks stay indexed by the
+ * source line, so the diff lines up. Code and logs keep their blank rows.
+ */
 function markedProse(value, marks) {
   const lines = splitLines(value);
-  if (!lines.length || (lines.length === 1 && !lines[0])) {
+  if (!lines.some((line) => line.trim())) {
     return emptyFrame('Comparison: this side has no content.');
   }
-  return `<div class="compare__prose">${lines.map((line, i) => {
+  let gapBefore = false;
+  let emitted = false;
+  const out = [];
+  lines.forEach((line, i) => {
+    if (!line.trim()) {
+      if (emitted) gapBefore = true;
+      return;
+    }
     const state = marks ? marks[i] || 'same' : 'same';
-    return `<p class="compare__line compare__line--${state}">${changeLabel(state)}${escHtml(line) || '&nbsp;'}</p>`;
-  }).join('')}</div>`;
+    const para = gapBefore ? ' compare__line--para' : '';
+    out.push(`<p class="compare__line compare__line--${state}${para}">${changeLabel(state)}${escHtml(line)}</p>`);
+    gapBefore = false;
+    emitted = true;
+  });
+  return `<div class="compare__prose">${out.join('')}</div>`;
+}
+
+/** How many lines marked `state` have words in them. */
+function countVisible(marks, value, state) {
+  const lines = splitLines(value);
+  let count = 0;
+  (marks || []).forEach((mark, i) => { if (mark === state && String(lines[i] ?? '').trim()) count += 1; });
+  return count;
 }
 
 /** Raw measurements on each side; headline deltas use the metrics block. */

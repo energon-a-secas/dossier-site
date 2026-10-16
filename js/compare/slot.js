@@ -1,7 +1,9 @@
 /**
  * The forms that live inside a column: the empty slot (drop a file, choose
- * one, paste text, or start a Fixes column from a copy of the column it
- * fixes), the paste box, Edit source, and the label, role and author form.
+ * one, paste text, use a report saved in the Reports view, or start a Fixes
+ * column from a copy of the column it fixes), the paste box, Edit source
+ * (both wrap long lines, with a Wrap lines toggle for code), and the label,
+ * role and author form.
  *
  * Markup only, with every value escaped or set as a property. Submits and
  * clicks are handled by js/compare/actions.js through `data-form` and
@@ -54,6 +56,7 @@ export function slotHtml(set, col, { replacing = false } = {}) {
     <div class="actions">
       <button type="button" class="btn" data-action="cmp-choose-file" data-col="${col.id}">Choose a file</button>
       <button type="button" class="btn" data-action="cmp-paste" data-col="${col.id}">Paste text</button>
+      <button type="button" class="btn" data-action="cmp-use-saved" data-col="${col.id}" aria-haspopup="menu">Use a saved report</button>
       ${copy}${cancel}
     </div>
   </div>`;
@@ -74,22 +77,25 @@ export function textFormLabel(set, col, kind) {
 }
 
 /**
- * A text form in a column: pasting a report, or editing the source.
+ * A text form in a column: pasting a report, or editing the source. Long
+ * lines wrap unless `wrap` is false (the reader's Wrap lines choice).
  *
  * @param {'paste'|'edit'} kind
+ * @param {{wrap?: boolean}} [opts]
  */
-export function textFormHtml(set, col, kind) {
+export function textFormHtml(set, col, kind, { wrap = true } = {}) {
   const id = `cmp-${kind}-${col.id}`;
   const label = textFormLabel(set, col, kind);
   const submit = kind === 'paste' ? 'Use this text' : 'Save';
   return `<form class="col-form" data-form="${kind}" data-col="${col.id}">
     <label class="col-form__label" for="${id}">${escHtml(label)}</label>
-    <textarea class="col-form__text" id="${id}" spellcheck="false" data-text-surface
+    <textarea class="col-form__text${wrap ? '' : ' is-nowrap'}" id="${id}" spellcheck="false" data-text-surface
       aria-describedby="${id}-error"${kind === 'paste' ? ' placeholder="Paste here"' : ''}></textarea>
     <p class="col-form__error" id="${id}-error" role="alert" hidden></p>
     <div class="col-form__actions">
       <button type="submit" class="btn btn--primary">${submit}</button>
       <button type="button" class="btn" data-action="cmp-cancel-form" data-col="${col.id}">Cancel</button>
+      <button type="button" class="btn toggle col-form__wrap" data-action="cmp-wrap-source" data-col="${col.id}" aria-controls="${id}" aria-pressed="${wrap}"><span class="box">${icon('check')}</span>Wrap lines</button>
     </div>
   </form>`;
 }

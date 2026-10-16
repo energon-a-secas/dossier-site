@@ -2,14 +2,14 @@
  *
  * The desk: an optional rail (saved reports and the outline) on the left,
  * the reading area in the middle (the report bar, then the sheet), and a side
- * column on the right only while editing or while Check report is open.
- * Which columns exist depends on attributes on <html> (js/chrome.js) and on
- * the width:
+ * column on the right only while editing. Which columns exist depends on
+ * attributes on <html> (js/chrome.js) and on the width:
  *
  *   data-dossier-mode   read | build    build adds the side column (editor)
  *   data-dossier-rail   open | closed   open docks the rail at 1280 px and up;
  *                                       narrower, it is a drawer over the report
- *   Check report open                   adds the side column in read mode too
+ *   Check report open                   read mode: a popover over the sheet,
+ *                                       which adds no column (from 960 px)
  *
  * Breakpoints: 1280 (the rail docks; js/chrome.js DOCKED says the same),
  * 960 (side column beside the report), 900 (the file label drops under the
@@ -56,6 +56,13 @@
 
 .header-bar.header-hidden ~ #main .ds-shell,
 html[data-chrome="off"] .ds-shell { --bar-h: 0px; }
+
+/* The kit's app-mode header comes back on any upward scroll, so focus reached
+ * by Shift+Tab, and an anchor jump, must stop below it rather than under it
+ * (WCAG 2.4.11). One rule for both views. A block's own scroll-margin-top
+ * (css/blocks.css) adds to this. */
+html { scroll-padding-top: var(--header-h-app, 56px); }
+html[data-chrome="off"] { scroll-padding-top: 0; }
 
 .ds-rail { grid-area: rail; }
 .ds-reportbar { grid-area: bar; }
@@ -112,13 +119,11 @@ html[data-dossier-mode="read"] .ds-source { display: none; }
 html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) { display: none; }
 
 @media (min-width: 960px) {
-  html[data-dossier-mode="build"] .ds-shell,
-  .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) {
+  html[data-dossier-mode="build"] .ds-shell {
     grid-template-columns: minmax(0, 1fr) var(--side-col);
     grid-template-rows: auto 1fr;
     grid-template-areas: "bar side" "stage side";
   }
-  html[data-dossier-mode="read"] .ds-shell { --side-col: 360px; }
 
   .ds-side {
     --ds-pane-cut: var(--ds-footer-h, 72px);
@@ -142,7 +147,44 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
    * Check report open in read mode the desk is, so the pane never sets the
    * page's height (see the note at the top). */
   html[data-dossier-mode="build"] .ds-stage { min-height: var(--pane-max); }
-  .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) { min-height: var(--pane-max); }
+
+  /* While reading, Check report is a popover over the sheet's top right
+   * corner, under the report bar, and the grid does not change: opening it
+   * used to add a column, narrow the sheet from 920 to 728 px at 1440 and
+   * rewrap every line (design 7.2.2; a panel docks only where it costs no
+   * width, 7.3.13). An absolutely positioned grid child's containing block
+   * is its grid area, so the side column is laid over the stage area and
+   * lined up with the sheet's right edge. It lets the pointer through, so
+   * the report under it stays usable, and the paper inside it sticks under
+   * the header as the page scrolls. z 198 keeps it under the header (200)
+   * and the rail drawer (199). */
+  html[data-dossier-mode="read"] .ds-shell { position: relative; }
+  html[data-dossier-mode="read"] .ds-side {
+    position: absolute;
+    grid-area: stage;
+    top: -6px;
+    bottom: 0;
+    left: auto;
+    right: max(var(--read-pad), calc((100% - var(--sheet-width)) / 2));
+    width: min(var(--panel-width, 380px), calc(100% - 2 * var(--read-pad)));
+    z-index: calc(var(--z-sticky-header, 200) - 2);
+    max-height: none;
+    padding: 0;
+    overflow: visible;
+    pointer-events: none;
+    animation: none;
+  }
+  html[data-dossier-mode="read"] .ds-findings {
+    position: sticky;
+    top: calc(var(--bar-h) + 8px);
+    pointer-events: auto;
+  }
+  html[data-dossier-mode="read"] .ds-findings .findings-panel {
+    max-height: min(400px, calc(100dvh - var(--bar-h) - 180px));
+  }
+}
+@media (min-width: 960px) and (prefers-reduced-motion: no-preference) {
+  html[data-dossier-mode="read"] .ds-findings:not([hidden]) { animation: ds-pop-in var(--dur) var(--ease-out); }
 }
 
 /* The footer's room is taken only while the footer is on screen. Registered,
@@ -191,8 +233,7 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
     min-height: var(--pane-max);
   }
 
-  html[data-dossier-rail="open"][data-dossier-mode="build"] .ds-shell,
-  html[data-dossier-rail="open"] .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) {
+  html[data-dossier-rail="open"][data-dossier-mode="build"] .ds-shell {
     grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--side-col);
     grid-template-areas: "rail bar side" "rail stage side";
   }
@@ -366,6 +407,9 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
 .ds-outline a:focus-visible { outline-offset: -2px; }
 .ds-outline a[aria-current="page"] { color: var(--text-primary); font-weight: 600; }
 .ds-outline ul a { padding: 4px 8px; font-size: var(--text-xs); }
+/* A level-3 heading is indented under its h2. Padding, not margin, so the
+ * current-location rule and the hover fill still start at the rail's rule. */
+.ds-outline ul a[data-level="3"] { padding-left: 20px; }
 .ds-outline a[aria-current="location"] { color: var(--text-primary); border-radius: 0; box-shadow: inset 2px 0 0 var(--accent); }
 
 /* ── The report bar ───────────────────────────────────────────────────── */
@@ -391,7 +435,7 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
   color: var(--text-secondary);
 }
 
-.ds-reportbar__rail { flex: none; }
+.ds-reportbar__rail { flex: none; scroll-margin-top: var(--bar-h); }
 .ds-reportbar__rail svg { flex: none; }
 /* The rail toggle names what it opens; its state is aria-expanded. */
 .ds-reportbar__rail[aria-expanded="true"] { color: var(--text-primary); }
@@ -424,12 +468,18 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
 
 /* Check report is a secondary button; the count says what it found in words,
  * warn ink for warnings and danger ink for errors. */
-.ds-reportbar__check.btn--quiet {
+/* Compare (js/compare/bridge.js) is drawn the same way: a secondary action
+ * beside the report. */
+.ds-reportbar__check.btn--quiet,
+.ds-reportbar__compare.btn--quiet {
   border-color: var(--border-strong);
   background: var(--surface-1);
   color: var(--text-primary);
 }
-.ds-reportbar__check.btn--quiet:hover { background: var(--surface-2); }
+.ds-reportbar__check.btn--quiet:hover,
+.ds-reportbar__compare.btn--quiet:hover { background: var(--surface-2); }
+/* Beside the editor the bar is about 520 px: Compare waits for Done. */
+html[data-dossier-mode="build"] .ds-reportbar__compare { display: none; }
 .ds-reportbar__check[aria-expanded="true"] { background: var(--manila); border-color: var(--manila-strong); }
 /* Beside the editor the bar is about 520 px at a 1280 px window, and "Check
  * report  8 errors, 12 warnings" pushed Done onto a second row. There the
@@ -443,28 +493,30 @@ html[data-dossier-mode="read"] .ds-side:not(:has(> .ds-findings:not([hidden]))) 
   }
 }
 
-/* Beside the side column the report is narrow, so the rail toggle keeps its
- * icon and its name is for assistive technology only, and the bar stays on
- * one line down to a 960 px window. From 1280 px the label is hidden only
- * while the docked rail is open, which already shows "Saved reports" as its
- * own heading. */
+/* Beside the editor the report is narrow, so the rail toggle keeps its icon
+ * and its name is for assistive technology only, and the bar stays on one
+ * line down to a 960 px window. (Check report no longer narrows the bar in
+ * read mode: it floats over the sheet.) From 1280 px a docked, open rail
+ * carries its own Hide button, so the bar's toggle steps aside, and comes
+ * back with its full label once the rail is closed: design 7.2.2, the bar
+ * toggle is for when the rail is not docked open. Two toggles with the same
+ * glyph and state, 100 px apart, was one too many. */
 @media (min-width: 960px) and (max-width: 1279px) {
-  html[data-dossier-mode="build"] .ds-reportbar__rail span,
-  .ds-shell:has(> .ds-side > .ds-findings:not([hidden])) .ds-reportbar__rail span {
+  html[data-dossier-mode="build"] .ds-reportbar__rail span {
     position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   }
 }
 @media (min-width: 1280px) {
-  html[data-dossier-rail="open"] .ds-reportbar__rail span {
-    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
-  }
+  html[data-dossier-rail="open"] .ds-reportbar__rail { display: none; }
 }
 
 /* ── The side column (Check report, editor) ───────────────────────────── */
 
 .ds-side > * + * { margin-top: var(--space-4); }
 
-/* Check report: a sheet of paper laid on top, like a popover. */
+/* Check report: a sheet of paper laid on top. A popover over the report
+ * while reading (from 960 px), a docked panel beside the editor, and inline
+ * above the sheet on a narrow window. */
 .ds-findings {
   padding: var(--space-3) var(--space-4) var(--space-4);
   border: 1px solid var(--border);
@@ -543,6 +595,25 @@ html[data-dossier-mode="build"] .ds-findings { box-shadow: none; }
   pointer-events: none;
 }
 
+/* Another tab saved this report first (js/report-sync.js): the choice sits
+ * above the sheet, as wide as it, until it is made. */
+.ds-conflict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  max-width: var(--sheet-width);
+  margin: 0 auto var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--manila-strong, var(--border-strong));
+  border-radius: var(--radius-lg);
+  background: var(--manila, var(--surface-2));
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+.ds-conflict p { flex: 1 1 20em; margin: 0; }
+.ds-conflict__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
 /* ── The welcome screen ───────────────────────────────────────────────── */
 
 /* The welcome screen is the app's front page, so it is UI: its titles keep
@@ -600,6 +671,17 @@ html[data-dossier-mode="build"] .ds-findings { box-shadow: none; }
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* The welcome list holds four cards (the compare example and three reports).
+ * auto-fill gave three and one between 632 and 847 px of list width, leaving
+ * one card alone on its row. Below the width of four 200 px cards and three
+ * gaps, the list goes two by two instead. The Open dialog's list is outside
+ * this container, so it is unaffected; the 480 px rule further down comes
+ * later and still makes a phone one column. */
+.ds-welcome__examples { container: welcome-examples / inline-size; }
+@container welcome-examples (max-width: 847px) {
+  .ds-examples { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* A welcome card is a sheet of paper on the desk. */
@@ -664,22 +746,16 @@ html[data-dossier-mode="build"] .ds-findings { box-shadow: none; }
 .ds-dialog__lead { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-sm); }
 .ds-dialog label { display: block; margin: var(--space-4) 0 6px; font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); }
 .ds-dialog textarea { width: 100%; font-family: var(--font-mono); font-size: var(--text-xs); }
-/* The native file input has a wide intrinsic size; on a phone it ran past the dialog edge. */
-.ds-dialog input[type="file"] { display: block; width: 100%; max-width: 100%; min-width: 0; font-size: var(--text-sm); color: var(--text-secondary); }
-.ds-dialog input[type="file"]::file-selector-button {
-  height: 32px;
-  margin-right: 12px;
-  padding: 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface-1);
-  color: var(--text-primary);
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-}
-.ds-dialog input[type="file"]::file-selector-button:hover { background: var(--surface-2); }
+/* "Choose a file" is a product .btn driving the hidden input (js/open-dialog.js);
+   the chosen file's name sits beside it, and wraps under it on a phone. */
+.ds-dialog__file { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-4); min-width: 0; }
+.ds-dialog__file-name { min-width: 0; overflow-wrap: anywhere; font-size: var(--text-sm); color: var(--text-secondary); }
+.ds-dialog__file-name:empty { display: none; }
 .ds-dialog__detected { min-height: 1.4em; margin: var(--space-2) 0 0; font-size: var(--text-xs); font-weight: 500; color: var(--accent); }
+/* Why the text will not open: danger ink with a rule and a soft fill, in both
+   schemes, and the paste box it is about marked the same way. */
+.ds-dialog__detected[data-state="error"] { color: var(--danger); padding: var(--space-1) var(--space-2); border-left: 3px solid var(--danger); background: var(--danger-soft); border-radius: 0 var(--radius) var(--radius) 0; }
+.ds-dialog textarea[aria-invalid="true"] { border-color: var(--danger); }
 
 .ds-dialog__actions {
   display: flex;
@@ -835,6 +911,7 @@ body.is-dropping::after {
   .ds-shell { --read-pad: 0px; }
   .ds-stage { padding-bottom: 40px; }
   .ds-side { margin-inline: 16px; }
+  .ds-conflict { margin-inline: 16px; }
   .ds-welcome { padding: var(--space-10) var(--space-4) var(--space-10); }
   .ds-welcome__inner h2 { font-size: var(--text-2xl); }
 
@@ -846,6 +923,7 @@ body.is-dropping::after {
   .ds-reportbar__origin { order: 1; flex: 1 1 0; }
   #toggleMode { order: 2; }
   .ds-reportbar__check { order: 4; }
+  .ds-reportbar__compare { order: 4; }
   .ds-reportbar__pages { order: 5; }
   .ds-reportbar__rail span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
@@ -871,6 +949,7 @@ body.is-dropping::after {
   .ds-side,
   .ds-welcome,
   .ds-boot,
+  .ds-conflict,
   .toast,
   .nk-toast,
   .neo-beacon,

@@ -11,7 +11,14 @@
  * Tab kept inside and Escape or the scrim closing it (js/compare/popover.js).
  *
  * Escape closes a panel that lies over the columns and puts focus back on
- * the toggle that opened it. Design spec 7.3.13 and 7.3.14.
+ * the toggle that opened it. Design spec 7.3.13 and 7.3.14. An overlay panel
+ * takes focus when opened, and closes without moving focus when keyboard
+ * focus reaches a column control under it, so a control that has focus is
+ * never hidden under the panel (WCAG 2.4.11).
+ *
+ * The panel's sticky head and foot are measured into `--panel-head-h` and
+ * `--panel-foot-h`, which css/compare.css turns into scroll padding: a
+ * control that takes focus scrolls clear of both instead of under them.
  *
  * An open panel follows the window across 700 px in both directions: beside
  * or over the columns it becomes the phone sheet, and the sheet becomes the
@@ -61,7 +68,10 @@ export function createPanel(api, content) {
     const panelWidth = cssPx('--panel-width', 360);
     const min = cssPx('--panel-dock-min', 400);
     const gap = cssPx('--col-gap', 10);
-    return (width - panelWidth - 20 - (n - 1) * gap) / n >= min;
+    // The Add column tile after the last column takes its own track.
+    const add = refs.columns.querySelector(':scope > .cmp-addcol');
+    const extra = add && add.getClientRects().length ? add.offsetWidth + gap : 0;
+    return (width - panelWidth - 20 - extra - (n - 1) * gap) / n >= min;
   }
 
   const docked = () => !isPhone() && (state.pinned || fits());
@@ -88,6 +98,27 @@ export function createPanel(api, content) {
     }
     for (const pin of panel.querySelectorAll('[data-action="cmp-pin"]')) pin.setAttribute('aria-pressed', String(state.pinned));
     content.render(name, frame.querySelector('.panel__body'));
+    measureBars();
+  }
+
+  // The sticky head and foot, measured: the Review foot grows with a wrapped
+  // record sentence or the copy fallback, so a fixed scroll padding was short.
+  const bars = typeof ResizeObserver === 'function' ? new ResizeObserver(writeBars) : null;
+  function writeBars() {
+    const px = (el) => `${el && el.getClientRects().length ? Math.round(el.getBoundingClientRect().height) : 0}px`;
+    panel.style.setProperty('--panel-head-h', px(panel.querySelector('.panel__head')));
+    panel.style.setProperty('--panel-foot-h', px(panel.querySelector('.panel__foot')));
+  }
+  function measureBars() {
+    if (!bars) return;
+    bars.disconnect();
+    for (const el of panel.querySelectorAll('.panel__head, .panel__foot')) bars.observe(el);
+    writeBars();
+  }
+  function forgetBars() {
+    bars?.disconnect();
+    panel.style.removeProperty('--panel-head-h');
+    panel.style.removeProperty('--panel-foot-h');
   }
 
   /** The view is on screen (not the Reports view, not booting). */
@@ -97,6 +128,7 @@ export function createPanel(api, content) {
   function hide() {
     panel.hidden = true;
     panel.replaceChildren();
+    forgetBars();
     state.shown = null;
   }
 
@@ -176,7 +208,10 @@ export function createPanel(api, content) {
     root.classList.toggle('is-review', name === 'review');
     panel.hidden = !open;
     if (open) draw(name);
-    else panel.replaceChildren();
+    else {
+      panel.replaceChildren();
+      forgetBars();
+    }
     state.shown = name;
     if (refocus?.isConnected) refocus.focus({ preventScroll: true });
     if (was !== `${open}|${dock}` || crossed) {
@@ -212,8 +247,14 @@ export function createPanel(api, content) {
     state.opener = opener && !opener.closest('#cmpOptions') ? opener : root.querySelector(`.cmp-toolbar [data-action="cmp-panel"][data-panel="${name}"]`);
     api.commit(setView(set, { panel: next }));
     if (next) {
-      const first = panel.querySelector('.panel__body button, .panel__body summary, .panel__body textarea');
-      if (opener?.closest('#cmpOptions')) (first || panel.querySelector('.panel__head button'))?.focus({ preventScroll: true });
+      // Focus goes into a panel opened from Options (its toggle has closed
+      // with Options) and into one lying over the columns: left on the
+      // toggle, the next 17 Tabs went through columns hidden under it.
+      // The first control that shows: a hidden one (a closed criterion's
+      // marks, a part of the panel with nothing to say) refuses focus.
+      const first = [...panel.querySelectorAll('.panel__body :is(button, summary, textarea, input)')]
+        .find((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length && !el.closest('details:not([open]) > :not(summary)'));
+      if (opener?.closest('#cmpOptions') || overlay()) (first || panel.querySelector('.panel__head button'))?.focus({ preventScroll: true });
     }
   }
 
@@ -247,6 +288,21 @@ export function createPanel(api, content) {
     if (!onScreen()) return;
     event.preventDefault();
     close();
+  });
+
+  // Keyboard focus that reaches a column control under the overlay (Shift+Tab
+  // out of the panel, or Tab through the columns) closes the panel and stays
+  // where it landed, now in view. Only across: the overlay spans the columns'
+  // full height, and the toolbar above it never sits under it. A click on the
+  // part of a column that shows leaves the panel open.
+  document.addEventListener('focusin', (event) => {
+    if (!overlay() || !onScreen()) return;
+    const target = event.target;
+    if (!(target instanceof Element) || !refs.columns.contains(target)) return;
+    if (!target.matches(':focus-visible')) return;
+    const p = panel.getBoundingClientRect();
+    const r = target.getBoundingClientRect();
+    if (r.right > p.left && r.left < p.right) close({ restore: false });
   });
 
   // Crossing 700 px either way, whatever caused it (a resize, a zoom, a

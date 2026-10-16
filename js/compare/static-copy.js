@@ -144,6 +144,39 @@ function dropLoads(doc) {
 }
 
 /**
+ * True for a name that would cover a member of the report's `document`, or a
+ * marker this app might set on it. The `in` test walks the prototype chain,
+ * so Node, EventTarget and Object members count too.
+ */
+function shadows(key) {
+  if (!key) return false;
+  return key in Document.prototype
+    || (typeof HTMLDocument !== 'undefined' && key in HTMLDocument.prototype)
+    || key.startsWith('__dossier');
+}
+
+/**
+ * Take the `name` off an `<img>` or `<form>` that would shadow a member of
+ * the frame's document. Document named properties cover both the DOM members
+ * this page calls on the report's document (`<img name="addEventListener">`,
+ * `<form name="baseURI">`) and any expando set on it, so a report could turn
+ * off its own frame's link handling, or break its column's outline and sync,
+ * with one named element. An `<img>` with a name also exposes its id, which
+ * removing the name stops. Every other name stays, so a report's own
+ * `form[name=x]` CSS still applies; a static frame runs no scripts, and these
+ * names play no part in fragment scrolling, so nothing on screen changes.
+ * `<iframe>`, `<embed>` and `<object>`, the other named elements, are already
+ * gone (REFUSED).
+ */
+function dropShadowingNames(doc) {
+  for (const el of doc.querySelectorAll('img[name], form[name]')) {
+    const name = el.getAttribute('name');
+    const id = el.getAttribute('id') || '';
+    if (shadows(name) || (el.localName === 'img' && id && shadows(id))) el.removeAttribute('name');
+  }
+}
+
+/**
  * Take out of an inert tree everything the static frame would refuse, and
  * the SVG animations that would give a link an address no click sees.
  *
@@ -163,6 +196,7 @@ function cleanTree(doc, { viewportHeight = 0 } = {}) {
     if (String(template.getAttribute('shadowrootmode') || '').toLowerCase() === 'closed') template.setAttribute('shadowrootmode', 'open');
   }
   for (const el of doc.querySelectorAll(`script, ${REFUSED}`)) el.remove();
+  dropShadowingNames(doc);
   dropLoads(doc);
   dropHrefAnimations(doc);
   for (const style of doc.querySelectorAll('style')) {

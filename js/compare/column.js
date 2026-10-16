@@ -29,9 +29,11 @@ import { renderIr } from './ir-render.js';
 import { extract, statsItems, statsSentence } from './extract.js';
 import { staticFrame, interactiveFrame, frameHeadings, remoteResources, blockedSentence } from './frame.js';
 import {
-  ROLE_WORDS, KIND_WORDS, MODE_WORDS, columnById,
+  ROLE_WORDS, KIND_WORDS, MODE_WORDS, SOURCE_NOTES, columnById,
 } from './model.js';
 import { nameOf } from './blind.js';
+import { fnv1a } from '../hash.js';
+import { fitScrollRegions } from '../scroll-regions.js';
 
 /** The mode a column renders in: its own, else the set's; Original is HTML only. */
 export function effectiveMode(set, col) {
@@ -46,13 +48,8 @@ const hashes = new WeakMap();
 function fingerprint(source) {
   if (!source) return 'empty';
   if (hashes.has(source)) return hashes.get(source);
-  let h = 0x811c9dc5;
   const text = source.text;
-  for (let i = 0; i < text.length; i += 1) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  const value = `${source.kind}:${text.length}:${(h >>> 0).toString(36)}`;
+  const value = `${source.kind}:${text.length}:${fnv1a(text).toString(36)}`;
   hashes.set(source, value);
   return value;
 }
@@ -65,25 +62,29 @@ export function bodyKey(set, col) {
 // ── Head ─────────────────────────────────────────────────────────────────────
 
 /**
- * "Fixes to B, edited by D. Whitfield". While blind, "Author hidden": the
- * role, the relation and the author all say who wrote it. An empty column
- * says "Human, no report yet" in plain secondary text: the role word takes
- * its ink only once there is a report to be the human's.
+ * "Fixes to B, edited by D. Whitfield, from fixes.html". While blind,
+ * "Author hidden": the role, the relation, the author and the file name all
+ * say who wrote it. An empty column says "Human, no report yet" in plain
+ * secondary text: the role word takes its ink only once there is a report to
+ * be the human's. The file name is left out for pasted text, and cut with an
+ * ellipsis by the line, with the whole name on hover.
  */
 function whoLine(set, col) {
   if (set.view.blind) return col.source ? 'Author hidden' : 'No report yet';
   if (!col.source) return `${escHtml(ROLE_WORDS[col.role])}, no report yet`;
   const role = `<span class="role-name">${escHtml(ROLE_WORDS[col.role])}</span>`;
   const author = col.author ? escHtml(col.author) : '';
+  const fileName = col.source.name && col.source.name !== 'Pasted text' ? escHtml(col.source.name) : '';
+  const file = fileName ? `, from <span class="col__file" title="${fileName}">${fileName}</span>` : '';
   switch (col.role) {
     case 'human':
-      return author ? `${role}, written by ${author}` : role;
+      return `${author ? `${role}, written by ${author}` : role}${file}`;
     case 'fix': {
       const target = col.fixes && columnById(set, col.fixes) ? ` to ${escHtml(nameOf(set, col.fixes).ref)}` : '';
-      return `${role}${target}${author ? `, edited by ${author}` : ''}`;
+      return `${role}${target}${author ? `, edited by ${author}` : ''}${file}`;
     }
     default:
-      return author ? `${role}, ${author}` : role;
+      return `${author ? `${role}, ${author}` : role}${file}`;
   }
 }
 
@@ -112,11 +113,18 @@ export function headHtml(set, col, info = {}) {
 
   const mode = effectiveMode(set, col);
   const setMode = set.view.mode;
-  // Only Original and Interactive earn a tag, and only when the set reads in
-  // another mode: a Markdown column is always in Dossier format.
+  // A column earns a tag when it reads in another mode than the set: an HTML
+  // column in Original or running its scripts in a Dossier format set, and a
+  // column in Dossier format in an Original set. A Markdown or text column
+  // cannot follow the set into Original, so its tag says why, on hover and
+  // to a screen reader (the head is redrawn on every render; a note in the
+  // body would wait for the body to be drawn again).
   // While blind the kind and mode stay out of the markup, not only out of
   // sight: "Markdown" next to "Report 2" would say which one the agent wrote.
-  const modeTag = !name.blind && mode !== 'format' && mode !== setMode ? `<span class="tag col__mode">${MODE_WORDS[mode]}</span>` : '';
+  const reason = col.source.kind !== 'html' && setMode !== 'format' ? `${KIND_WORDS[col.source.kind]} has no original layout` : '';
+  const modeTag = !name.blind && mode !== setMode
+    ? `<span class="tag col__mode"${reason ? ` title="${escHtml(reason)}"` : ''}>${MODE_WORDS[mode]}${reason ? `<span class="visually-hidden">, ${escHtml(reason)}</span>` : ''}</span>`
+    : '';
   const baseTag = info.isBase ? '<span class="tag tag--base">Base</span>' : '';
   const kind = name.blind ? '<span class="col__kind"></span>' : `<span class="col__kind">${KIND_WORDS[col.source.kind]}</span>`;
   const stats = info.stats ? statsHtml(info.stats, info.baseStats, info.baseLetter) : '<p class="col__stats">&#160;</p>';
@@ -191,7 +199,9 @@ export function renderBody(body, set, col, hooks = {}) {
   const mode = effectiveMode(set, col);
   const source = col.source;
   const notes = [];
-  if (source.note) notes.push(note(`${source.note}.`));
+  // Dossier's own notice ("Converted from JUnit test results"), never text a
+  // bundle carried in: js/compare/model.js drops any other note on the way in.
+  if (source.note && SOURCE_NOTES.has(source.note)) notes.push(note(`${source.note}.`));
   // A notice from the analysis features ("Too different from B to mark word
   // by word"), already escaped by them.
   if (hooks.notes) notes.push(hooks.notes);
@@ -258,6 +268,8 @@ export function renderBody(body, set, col, hooks = {}) {
   }
   if (!blocks.length) notes.push(note('No readable text was found in this report.'));
   scroll.innerHTML = `${notes.join('')}<div class="reader__doc">${renderIr(blocks, { colId: col.id, marks: hooks.marks || null })}</div>`;
+  // A table is a focusable region only while it scrolls sideways.
+  fitScrollRegions(scroll);
   const headingEls = [...scroll.querySelectorAll('.r-h')];
   return {
     kind: 'reader',
@@ -331,6 +343,7 @@ function renderDossier(scroll, col, notes) {
   scroll.append(doc);
   renderReport(read.model, doc, { allPages: true, interactive: false, titleLevel: 2, idPrefix: `cmp-${col.id}` });
   nestHeadings(doc);
+  fitScrollRegions(scroll);
   const parsed = elementToIr(doc, { svg: false });
   const headingEls = [...doc.querySelectorAll('h1, h2, h3, h4, h5, h6')]
     .filter((el) => el.textContent.trim() && !el.closest('[aria-hidden="true"], svg, .viz-panel'));

@@ -9,16 +9,28 @@
  *
  * A verdict (a mark or the preferred report) records whether Blind was on
  * when it was entered (`blindAtVerdict`), so a review written with names
- * hidden says so after Reveal, and one changed afterwards with names showing
- * says that instead.
+ * hidden says so after Blind is turned off, and one changed afterwards with
+ * names showing says that instead.
+ *
+ * Anything entered while blind (a verdict, a note or the summary, which is
+ * where "Report 1" gets written) also stores the deal it was entered under
+ * (`blindOrder`). Once Blind is off, `blindOrderSentence` decodes it: "While
+ * blind: Report 1 was C (Fixes), ...", in the panel, the copy and the file.
  */
 
-import { LIMITS, MARKS, clampLine, clampText } from './model.js';
+import { LIMITS, MARKS, LETTERS, clampLine, clampText, indexOfColumn } from './model.js';
+import { reportNumbers } from './blind.js';
 
 export const MARK_WORDS = Object.freeze({ strong: 'Strong', adequate: 'Adequate', weak: 'Weak', na: 'N/A' });
 
 function withReview(set, patch) {
   return { ...set, review: { ...set.review, ...patch } };
+}
+
+/** The patch, plus the deal Blind is showing when it is on. */
+function withBlindOrder(set, patch) {
+  if (!set.view?.blind) return patch;
+  return { ...patch, blindOrder: Object.fromEntries(reportNumbers(set)) };
 }
 
 /** A mark, or null to clear it. */
@@ -28,17 +40,17 @@ export function setMark(set, critId, colId, mark) {
   const row = { ...(set.review.marks[critId] || {}) };
   if (MARKS.includes(mark)) row[colId] = mark;
   else delete row[colId];
-  return withReview(set, {
+  return withReview(set, withBlindOrder(set, {
     marks: { ...set.review.marks, [critId]: row },
     blindAtVerdict: Boolean(set.view.blind),
-  });
+  }));
 }
 
 /** The preferred report: a column id, 'none' (none is adequate) or null. */
 export function setPreferred(set, value) {
   const ok = value === 'none' || value === null || set.columns.some((c) => c.id === value);
   if (!ok) return set;
-  return withReview(set, { preferred: value, blindAtVerdict: Boolean(set.view.blind) });
+  return withReview(set, withBlindOrder(set, { preferred: value, blindAtVerdict: Boolean(set.view.blind) }));
 }
 
 export function setNote(set, colId, text) {
@@ -47,11 +59,11 @@ export function setNote(set, colId, text) {
   const clean = clampText(text, LIMITS.note);
   if (clean) notes[colId] = clean;
   else delete notes[colId];
-  return withReview(set, { notes });
+  return withReview(set, withBlindOrder(set, { notes }));
 }
 
 export function setSummary(set, text) {
-  return withReview(set, { summary: clampText(text, LIMITS.summary) });
+  return withReview(set, withBlindOrder(set, { summary: clampText(text, LIMITS.summary) }));
 }
 
 /** A criterion id from its label, unique in the set. */
@@ -131,12 +143,46 @@ export function hasVerdict(set) {
   return Object.values(set.review.marks || {}).some((row) => row && Object.keys(row).length);
 }
 
-/** The sentence under the review: how it was recorded. */
-export function recordSentence(set) {
+/**
+ * The sentence under the review: how it was recorded. The panel names the
+ * control that exists there, the Blind toggle; a copy or a file has no
+ * controls, so it says what happened and nothing else.
+ *
+ * @param {{copy?: boolean}} [opts] copy: for the Markdown copy and the HTML file
+ */
+export function recordSentence(set, { copy = false } = {}) {
   if (!hasVerdict(set)) return 'Nothing recorded yet.';
-  return set.review.blindAtVerdict
-    ? 'Recorded while blind. Reveal shows names again; the review keeps this note.'
-    : 'Recorded with labels visible.';
+  if (set.review.blindAtVerdict) {
+    return copy
+      ? 'Marks were entered while the names were hidden (blind review).'
+      : 'Marks were entered with Blind on, so names were hidden. Turning Blind off shows them again; this note stays with the review.';
+  }
+  return copy ? 'Marks were entered with the names showing.' : 'Recorded with labels visible.';
+}
+
+/**
+ * Which column each report number was, once Blind is off: "While blind:
+ * Report 1 was C (Fixes), Report 2 was A (Human draft)." Empty while Blind
+ * is on, so nothing that shows it can give the order away, and empty when
+ * nothing was entered blind.
+ */
+export function blindOrderSentence(set) {
+  const order = set?.review?.blindOrder;
+  if (set?.view?.blind || !order) return '';
+  const parts = Object.entries(order)
+    .sort((a, b) => a[1] - b[1])
+    .map(([colId, n]) => {
+      const at = indexOfColumn(set, colId);
+      const col = at >= 0 ? set.columns[at] : null;
+      return `Report ${n} was ${col ? `${LETTERS[at]} (${col.label})` : 'a removed column'}`;
+    });
+  return parts.length ? `While blind: ${parts.join(', ')}.` : '';
+}
+
+/** How a report line names its file: ", from fixes.html", or nothing for pasted text. */
+function fromFile(col) {
+  const name = col.source?.name;
+  return name && name !== 'Pasted text' ? `, from ${name}` : '';
 }
 
 const cell = (text) => String(text || '').replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
@@ -153,16 +199,29 @@ export function reviewMarkdown(set, columns, nameOf) {
   const blind = Boolean(set.view.blind);
   const lines = [];
   lines.push(`# Review: ${blind ? 'Blind review' : set.title}`, '');
-  lines.push(recordSentence(set), '');
+  lines.push(recordSentence(set, { copy: true }), '');
+  const order = blindOrderSentence(set);
+  if (order) lines.push(order, '');
   lines.push('Marks are the reviewer\'s own. Dossier counts them and does not score the reports.', '');
+  // The brief is shared by every report, so it tells no report apart: it
+  // stays in a blind copy too.
+  const brief = String(set.prompt || '').trim();
+  if (brief) lines.push('## Brief', '', ...brief.split('\n').map((line) => (line.trim() ? `> ${line}` : '>')), '');
   lines.push('## Reports', '');
   for (const col of columns) {
     const name = nameOf(col);
-    if (blind) lines.push(`- ${name.label}`);
-    else lines.push(`- ${name.ref}: ${col.label} (${name.role}${col.author ? `, ${col.author}` : ''})`);
+    if (blind) {
+      lines.push(`- ${name.label}`);
+      continue;
+    }
+    // The role only when the label does not already say it ("Human (Human)").
+    const role = name.role && name.role.toLowerCase() !== String(col.label).trim().toLowerCase() ? name.role : '';
+    const extra = [role, col.author].filter(Boolean).join(', ');
+    lines.push(`- ${name.ref}: ${col.label}${extra ? ` (${extra})` : ''}${fromFile(col)}`);
   }
   lines.push('');
-  if (set.review.criteria.length) {
+  if (!columns.length) lines.push('No column holds a report yet.', '');
+  if (set.review.criteria.length && columns.length) {
     lines.push('## Marks', '');
     lines.push(`| Criterion | ${columns.map((col) => cell(nameOf(col).ref)).join(' | ')} |`);
     lines.push(`|---|${columns.map(() => '---').join('|')}|`);

@@ -8,7 +8,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { followerTarget, READING_LINE } from '../js/compare/sync.js';
+import { followerTarget, createSync, READING_LINE } from '../js/compare/sync.js';
+import { alignHeadings } from '../js/compare/align.js';
 
 // A leader 4000 px long and a follower 5000 px long, both 700 px tall, whose
 // matched headings sit further down in the follower (its intro is longer).
@@ -59,4 +60,56 @@ test('a leader shorter than a view still runs from top to end without a jump', (
 test('scroll mode and columns without headings keep the same fraction of each range', () => {
   assert.equal(target(1650, { sections: false }), 0.5 * (columns.followHeight - columns.followView));
   assert.equal(target(10, { leadHeight: 700 }), 0, 'a leader that cannot scroll leads nowhere');
+});
+
+test('two columns are aligned once, from headings each read once, whichever leads', () => {
+  // A scroller as sync needs one, with nothing on a page.
+  const stub = () => ({
+    y: () => 0, set: () => {}, height: () => 1000, view: () => 500, anchors: () => [], listen: () => () => {},
+  });
+  let reads = 0;
+  const counted = (texts) => texts.map((text) => ({
+    level: 2,
+    get text() {
+      reads += 1;
+      return text;
+    },
+  }));
+  const a = ['Summary', 'Customer impact', 'Timeline of events', 'Root causes', 'What we did'];
+  const b = ['Summary', 'Root cause', 'Contributing factors', 'Impact', 'Timeline', 'Remediation'];
+  const sync = createSync();
+  sync.setMode('off');
+  sync.register('k1', stub(), counted(a));
+  sync.register('k2', stub(), counted(b));
+  const forward = sync.pairs('k1', 'k2');
+  const backward = sync.pairs('k2', 'k1');
+  assert.equal(reads, a.length + b.length, 'each heading text is read once');
+  assert.deepEqual(backward, forward.map((p) => ({ a: p.b, b: p.a, sim: p.sim })), 'the other direction is the mirror');
+  assert.equal(sync.pairs('k2', 'k1'), backward, 'and is kept');
+  const plain = (list) => list.map((text) => ({ text, level: 2 }));
+  assert.deepEqual(forward, alignHeadings(plain(a), plain(b)));
+  sync.clear();
+});
+
+test('a registered column is aligned with the others in idle time, before any scroll', async () => {
+  const stub = () => ({
+    y: () => 0, set: () => {}, height: () => 1000, view: () => 500, anchors: () => [], listen: () => () => {},
+  });
+  let reads = 0;
+  const counted = (texts) => texts.map((text) => ({
+    level: 2,
+    get text() {
+      reads += 1;
+      return text;
+    },
+  }));
+  const sync = createSync();
+  sync.register('k1', stub(), counted(['Summary', 'Impact']));
+  sync.register('k2', stub(), counted(['Summary', 'Customer impact']));
+  assert.equal(reads, 0, 'nothing is read while registering');
+  await new Promise((resolve) => { setTimeout(resolve, 120); });
+  assert.equal(reads, 4, 'the pair was aligned in idle time');
+  sync.pairs('k1', 'k2');
+  assert.equal(reads, 4, 'and a scroll finds it ready');
+  sync.clear();
 });

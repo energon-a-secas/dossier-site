@@ -9,6 +9,10 @@
  * sheet, Escape, focus, and back), the Review sheet keeping Tab on a phone,
  * and a Dossier column that cannot be read, as the base and as another
  * column: left out of the differences with a notice, never redrawn for good.
+ * And what travels in a link: the deal a blind review was entered under
+ * (the same Report 1 for whoever opens it), one saved copy however often the
+ * link is opened, and never a column running its scripts. And Original
+ * columns in the one-file export: their links stay in them, and sync holds.
  *
  * Run against the dev server: `node scripts/check-compare-export.mjs`
  * (DOSSIER_URL overrides http://127.0.0.1:8899).
@@ -20,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import {
   base, verify, watch, noOverflow, focusOn, openExample,
-} from './analysis-check-helpers.mjs';
+} from './check-helpers.mjs';
 
 const browser = await chromium.launch();
 const errors = [];
@@ -29,7 +33,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
   const page = await context.newPage();
-  watch(errors, page);
+  watch({ page, errors });
   await page.goto(`${base}/?check=export`, { waitUntil: 'networkidle' });
   await openExample(page);
   // The review part one enters by hand, entered here at once: marks, the
@@ -42,7 +46,9 @@ try {
     for (const [col, mark] of [['k1', 'strong'], ['k2', 'weak'], ['k3', 'strong']]) s = r.setMark(s, 'accuracy', col, mark);
     s = r.setSummary(r.setNote(r.setPreferred(s, 'k3'), 'k2', 'Wrong trigger and an inflated latency figure.'), 'Ship C.');
     s = r.setMark(setView(s, { blind: true }), 'completeness', 'k1', 'weak');
-    api.commit(setView(s, { blind: false }));
+    // B as the base for every column, not each against its source: the file
+    // checks below are of A marked against B.
+    api.commit(setView(s, { blind: false, diff: { base: 'k2' } }));
   });
   await page.waitForFunction(() => /^#\/~compare\/c-/.test(location.hash));
 
@@ -60,10 +66,26 @@ try {
 
   await page.locator('#shareReport').click();
   const [htmlDownload] = await Promise.all([page.waitForEvent('download'), page.locator('[data-action="cmp-export-html"]').click()]);
+  // Named after the comparison, and told apart from the report it is named after.
+  assert.match(htmlDownload.suggestedFilename(), /^illustrative-example-checkout-latency-incident-comparison\.html$/);
   const exported = path.join(verify, 'compare-export.html');
   await htmlDownload.saveAs(exported);
   const file = await fs.readFile(exported, 'utf8');
+  // A mark was entered blind: once Blind is off the file decodes the numbers.
+  const dealt = await page.evaluate(async () => {
+    const { compare } = await import('/js/compare/index.js');
+    const { reportNumbers } = await import('/js/compare/blind.js');
+    const { setView } = await import('/js/compare/model.js');
+    return Object.fromEntries(reportNumbers(setView(compare.set, { blind: true })));
+  });
+  const firstCol = Object.keys(dealt).find((id) => dealt[id] === 1);
+  assert.match(file, new RegExp(`While blind: Report 1 was ${{ k1: 'A', k2: 'B', k3: 'C' }[firstCol]} \\(`), 'The file does not say which column Report 1 was');
   assert.match(file, /Too different from B to mark word by word/);
+  // A table's region pattern is the static one in a file, whatever it was on screen.
+  const tables = file.match(/<div class="r-table"[^>]*>/g) || [];
+  assert.ok(tables.length && tables.every((tag) => /role="region"/.test(tag) && /tabindex="0"/.test(tag)), 'A table in the file lost its region pattern');
+  assert.ok(file.includes('aria-label="Table: UTC, Event"'), 'A\'s table is named by its header cells');
+  assert.ok(!file.includes('data-region-label'));
   assert.match(file, /<b>Removed from B:<\/b>/);
   assert.ok(!file.includes('data-base-ref'), 'The file keeps the hook that renames the base on screen');
   assert.ok(!file.includes('Turn on Word marks'), 'The file points at a Word marks button it does not have');
@@ -81,7 +103,7 @@ try {
   // The file opens with the network cut, still syncs and still steps.
   const offline = await browser.newContext({ viewport: { width: 1440, height: 900 }, offline: true });
   const op = await offline.newPage();
-  watch(errors, op, 'export: ');
+  watch({ page: op, errors, label: 'export: ' });
   const requests = [];
   op.on('request', (req) => { if (!req.url().startsWith('file:') && !req.url().startsWith('data:') && req.url() !== 'about:srcdoc') requests.push(req.url()); });
   await op.goto(pathToFileURL(exported).href);
@@ -114,7 +136,9 @@ try {
   const followed = await op.locator('[data-col="k3"] .col__scroll').evaluate((el) => el.scrollTop);
   assert.ok(followed > 200, `C did not follow B in the file (${followed})`);
   await op.locator('#xReview').click();
-  assert.match(await op.locator('#xPanel').innerText(), /Recorded while blind[\s\S]*Wrong trigger/);
+  const xPanel = await op.locator('#xPanel').innerText();
+  assert.match(xPanel, /names were hidden \(blind review\)[\s\S]*While blind: Report 1 was[\s\S]*Wrong trigger/);
+  assert.ok(!/Reveal|Blind on/.test(xPanel), 'The file points at a Blind control it does not have');
   assert.deepEqual(requests, [], 'The exported file asked the network for something');
   await offline.close();
 
@@ -123,7 +147,7 @@ try {
   // on the desktop it was made on, whichever tab was shown.
   const small = await browser.newContext({ viewport: { width: 390, height: 844 }, offline: true });
   const sp = await small.newPage();
-  watch(errors, sp, 'export at 390: ');
+  watch({ page: sp, errors, label: 'export at 390: ' });
   await sp.goto(pathToFileURL(exported).href);
   await sp.waitForTimeout(300);
   assert.equal(await sp.locator('.counter__sub').innerText(), `in ${await sp.locator('#compareView .col.is-focus').getAttribute('data-name')}`, 'The counter names the column shown');
@@ -155,12 +179,45 @@ try {
   const same = (b) => ({ ...b.dossierCompare, created: 0, updated: 0, view: { ...b.dossierCompare.view, panel: null } });
   assert.deepEqual(same(reopened.bundle), same(before), 'A bundle round trip reopens identically');
   const lp = await context.newPage();
-  watch(errors, lp, 'link: ');
+  watch({ page: lp, errors, label: 'link: ' });
   await lp.goto(link);
   await lp.locator('#cmp-col-k3 .ruler').waitFor();
   assert.equal(await lp.locator('.cmp-toolbar .set-title__text').innerText(), 'Illustrative example: checkout latency incident');
-  assert.match(await lp.evaluate(() => location.hash), /^#\/~compare\/c-/, 'The link becomes a saved comparison');
+  await lp.waitForFunction(() => /^#\/~compare\/c-/.test(location.hash));
+  const firstId = await lp.evaluate(() => location.hash);
+  const savedCount = () => lp.evaluate(async () => (await (await import('/js/compare/store.js')).listSets()).length);
+  const countBefore = await savedCount();
   await lp.close();
+  // The same link again reopens the copy it saved: no second one.
+  const lp2 = await context.newPage();
+  watch({ page: lp2, errors, label: 'link again: ' });
+  await lp2.goto(link);
+  await lp2.locator('#cmp-col-k3 .ruler').waitFor();
+  await lp2.waitForFunction(() => /^#\/~compare\/c-/.test(location.hash));
+  assert.equal(await lp2.evaluate(() => location.hash), firstId, 'The link opened as another copy');
+  assert.equal(await lp2.evaluate(async () => (await (await import('/js/compare/store.js')).listSets()).length), countBefore, 'Opening the link again saved another copy');
+  assert.match(await lp2.locator('#app-toast').innerText(), /already saved in this browser/);
+  await lp2.close();
+
+  // A link made under Blind deals the same Report 1 for whoever opens it.
+  const blindLink = await page.evaluate(async () => {
+    const { compare } = await import('/js/compare/index.js');
+    const { setView } = await import('/js/compare/model.js');
+    const { toBundle } = await import('/js/compare/records.js');
+    const { encodeComparison } = await import('/js/share.js');
+    return `${location.origin}/${(await encodeComparison(toBundle(setView(compare.set, { blind: true })))).fragment}`;
+  });
+  const elsewhere = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const ep = await elsewhere.newPage();
+  watch({ page: ep, errors, label: 'blind link: ' });
+  await ep.goto(blindLink);
+  await ep.waitForFunction(() => document.querySelector('#compareView')?.classList.contains('blind') && /^#\/~compare\/c-/.test(location.hash));
+  const theirFirst = await ep.evaluate(() => [...document.querySelectorAll('#compareView .col')].find((el) => el.querySelector('.col__label')?.textContent === 'Report 1')?.dataset.col);
+  assert.equal(theirFirst, firstCol, 'The recipient\'s Report 1 is not the sender\'s');
+  await elsewhere.close();
+
+  await checkScriptsStayOff(page);
+  await checkOriginalLinks();
 
   // ── A panel open across 700 px: the sheet below it, the panel again above ─
   await page.locator('.cmp-toolbar [data-action="cmp-panel"][data-panel="sections"]').click();
@@ -260,7 +317,133 @@ try {
   assert.ok(unreadable.k1.marked > 0);
 
   assert.deepEqual(errors, [], 'The page raised errors');
-  console.log('Passed: Share and export in Compare (the choices, a #dc= link), the one-file export offline (marks, steps to the last change, sync, the review, no request) and at 390 (the counter and the buttons follow the column shown, and say when it has no changes), the bundle round trip, the #dc= link opening as a saved comparison, a panel crossing 700 px both ways (the sheet with its scrim, Escape and focus to Options, the panel again with focus kept, Close back to its toggle), the Review sheet keeping Tab on a phone, the reason a link is too long said outside the dimmed choice, and an unreadable Dossier column, as the base and as another, left out of the differences with a notice and drawn at most three times.');
+  console.log('Passed: Share and export in Compare (the choices, a #dc= link), the one-file export offline (marks, steps to the last change, sync, the review recorded blind in words with no control named, and which column each report number was, no request), named after the comparison, and at 390 (the counter and the buttons follow the column shown, and say when it has no changes), the bundle round trip, the #dc= link opening as a saved comparison and opened twice without a second copy, a blind link dealing the sender\'s Report 1, a link asking for a report\'s scripts opening that column in Original with the reader\'s own choice still one click away, a panel crossing 700 px both ways (the sheet with its scrim, Escape and focus to Options, the panel again with focus kept, Close back to its toggle), the Review sheet keeping Tab on a phone, the reason a link is too long said outside the dimmed choice, an unreadable Dossier column, as the base and as another, left out of the differences with a notice and drawn at most three times, and Original columns in the one-file export keeping their links in the column (an in-page link scrolls it, a file beside it stays put, a web link opens a tab) with sync intact and no request.');
 } finally {
   await browser.close();
+}
+
+/**
+ * A `#dc=` link whose column asks to run its scripts (mode "interactive")
+ * opens that column in Original: no frame runs anything, the saved copy does
+ * not ask either, and the column menu's choice is the reader's, one click
+ * away.
+ */
+async function checkScriptsStayOff(from) {
+  const scripted = await from.evaluate(async () => {
+    const { encodeComparison } = await import('/js/share.js');
+    const bundle = {
+      dossierCompare: {
+        version: 1,
+        title: 'Scripts asked for',
+        columns: [
+          { id: 'k1', role: 'human', label: 'Draft', source: { kind: 'markdown', name: 'a.md', text: '# A\n\nOne.' } },
+          {
+            id: 'k2', role: 'agent', label: 'Agent', mode: 'interactive',
+            source: { kind: 'html', name: 'b.html', text: '<h1>B</h1><p>Static.</p><script>document.body.dataset.ran = "yes";</script>' },
+          },
+        ],
+      },
+    };
+    return `${location.origin}/${(await encodeComparison(bundle)).fragment}`;
+  });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const sp = await ctx.newPage();
+  watch({ page: sp, errors, label: 'scripts link: ' });
+  await sp.goto(scripted);
+  await sp.locator('#cmp-col-k2 .col__frame').waitFor();
+  await sp.waitForFunction(() => /^#\/~compare\/c-/.test(location.hash));
+  assert.equal(await sp.locator('.col iframe[sandbox~="allow-scripts"]').count(), 0, 'A link ran a report\'s scripts');
+  assert.equal(await sp.locator('#cmp-col-k2 .col__frame').getAttribute('sandbox'), 'allow-same-origin', 'The column is not in Original');
+  assert.match(await sp.locator('#app-toast').innerText(), /Column B asked to run its scripts\. It opens in Original layout/);
+  const stored = await sp.evaluate(async () => {
+    const { readSet } = await import('/js/compare/store.js');
+    const set = await readSet(decodeURIComponent(location.hash.split('/').pop()));
+    return set?.columns.find((col) => col.id === 'k2')?.mode;
+  });
+  assert.ok(stored && stored !== 'interactive', `The saved copy asks for scripts (${stored})`);
+  await sp.locator('#cmp-col-k2 .col__menu').click();
+  const run = sp.locator('#cmpColumnMenu [data-action="cmp-col-mode"][data-value="interactive"]');
+  assert.equal(await run.getAttribute('aria-checked'), 'false');
+  // The reader's own choice still works.
+  await run.click();
+  const live = sp.locator('#cmp-col-k2 iframe[sandbox="allow-scripts"]');
+  await live.waitFor();
+  assert.equal(await sp.locator('.col iframe[sandbox~="allow-same-origin"][sandbox~="allow-scripts"]').count(), 0);
+  await ctx.close();
+}
+
+/**
+ * Original columns in the one-file export. The file shipped no link handling
+ * for them, so a srcdoc column resolved its links against the file's own
+ * address: `#sec2` loaded the whole comparison into the column, a file
+ * beside the report loaded an error page, and the column's sync was gone
+ * until the file was opened again. The app's link guard (js/frame-links.js)
+ * now travels in the file's one script.
+ */
+async function checkOriginalLinks() {
+  const report = (name) => `<!doctype html><html><head><title>${name}</title></head><body><h1>${name}</h1>`
+    + '<p><a id="toSec" href="#sec2">Down to the second section</a></p><p><a id="toFile" href="appendix.html">Appendix</a></p>'
+    + '<p><a id="toWeb" href="https://example.com/">A web link</a></p><div style="height: 2400px"></div>'
+    + '<h2 id="sec2">Second section</h2><p>The end.</p><div style="height: 1200px"></div></body></html>';
+  const maker = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+  const mp = await maker.newPage();
+  watch({ page: mp, errors, label: 'original links: ' });
+  await mp.goto(`${base}/?check=original-links#/~compare`, { waitUntil: 'networkidle' });
+  await mp.evaluate(async ([a, b]) => {
+    const { api } = await import('/js/compare/index.js');
+    const { newSet, addColumn, setView } = await import('/js/compare/model.js');
+    let set = newSet({ id: 'c-original-links', title: 'Original links' });
+    set = addColumn(set, { role: 'human', source: { kind: 'html', name: 'a.html', text: a } }).set;
+    set = addColumn(set, { role: 'agent', source: { kind: 'html', name: 'b.html', text: b } }).set;
+    api.openSet(setView(set, { mode: 'original' }), { saved: false });
+  }, [report('Report A'), report('Report B')]);
+  await mp.locator('#cmp-col-k2 .col__frame').waitFor();
+  await mp.waitForTimeout(500);
+  await mp.locator('#shareReport').click();
+  const [download] = await Promise.all([mp.waitForEvent('download'), mp.locator('[data-action="cmp-export-html"]').click()]);
+  const exported = path.join(verify, 'compare-original-links.html');
+  await download.saveAs(exported);
+  await mp.evaluate(() => { indexedDB.deleteDatabase('dossier-compare'); }).catch(() => {});
+  await maker.close();
+
+  const reader = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await reader.route('https://example.com/**', (route) => route.fulfill({ contentType: 'text/html', body: '<p>A web page.</p>' }));
+  const op = await reader.newPage();
+  watch({ page: op, errors, label: 'original links export: ' });
+  const requests = [];
+  op.on('request', (req) => { if (!/^(file|data|about):/.test(req.url())) requests.push(req.url()); });
+  try {
+    await op.goto(pathToFileURL(exported).href);
+    await op.bringToFront();
+    await op.waitForTimeout(500);
+    const frames = () => op.mainFrame().childFrames();
+    assert.equal(frames().length, 2, 'The file does not show both Original columns');
+    const a = op.frameLocator('[data-col="k1"] iframe');
+    await a.locator('#toSec').click();
+    await op.waitForTimeout(300);
+    assert.equal(frames()[0].url(), 'about:srcdoc', 'An in-page link took column A away from its report');
+    assert.ok(await frames()[0].evaluate(() => scrollY) > 0, 'An in-page link did not scroll column A');
+    assert.equal(frames().length, 2, 'An in-page link loaded the comparison inside a column');
+    await a.locator('#toFile').click();
+    await op.waitForTimeout(300);
+    assert.equal(frames()[0].url(), 'about:srcdoc', 'A link to a file beside the report navigated column A');
+    const [popup] = await Promise.all([
+      reader.waitForEvent('page', { timeout: 3000 }).catch(() => null),
+      a.locator('#toWeb').click(),
+    ]);
+    assert.ok(popup && popup.url().startsWith('https://example.com/'), 'A web link in an Original column did not open in a new tab');
+    await popup.close();
+    assert.equal(frames()[0].url(), 'about:srcdoc', 'A web link navigated column A');
+    // Sync still holds: scrolling B moves A.
+    await op.locator('[data-col="k1"] iframe').evaluate((f) => f.contentWindow.scrollTo(0, 0));
+    await op.waitForTimeout(300);
+    await op.locator('[data-col="k2"] iframe').hover();
+    await op.locator('[data-col="k2"] iframe').evaluate((f) => f.contentWindow.scrollTo(0, 500));
+    await op.waitForTimeout(500);
+    const followed = await op.locator('[data-col="k1"] iframe').evaluate((f) => f.contentWindow.scrollY);
+    assert.ok(followed > 200, `After its links were clicked, column A no longer follows B (${followed})`);
+    assert.deepEqual(requests, [], 'The exported file asked the network for something');
+  } finally {
+    await reader.close();
+  }
 }

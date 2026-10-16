@@ -7,6 +7,18 @@
  * Nothing here ever throws. A failure resolves to null or false. Private
  * browsing, a denied database, a quota error, and a blocked upgrade are all
  * expected and all return a value rather than throwing.
+ *
+ * Two more facts shape it. A connection the browser closes on its own (site
+ * data cleared while the tab is open) is forgotten, and the next call opens
+ * a new one, so saving recovers without a reload (`transaction`). And every
+ * record carries a revision, its `updated` time, which only goes up: a save
+ * can say which revision it was made on (`writeReport`'s `expect`), and one
+ * made on an older revision than the stored one is refused rather than
+ * written over another tab's newer edit.
+ *
+ * A write started while the page unloads never commits (a read-then-write
+ * transaction least of all), so the last edit before a reload is kept by a
+ * synchronous journal instead (js/report-journal.js).
  */
 
 const DB_NAME = 'dossier';
@@ -65,11 +77,10 @@ function initDb(attempt = 0) {
       // would block that tab's upgrade; closing lets the next call reopen.
       database.onversionchange = () => {
         database.close();
-        if (db === database) {
-          db = null;
-          initPromise = null;
-        }
+        forget(database);
       };
+      // The browser closed it (site data cleared): the next call reopens.
+      database.onclose = () => forget(database);
       if (settled) {
         // Given up on, and then the other tab let go: use it from now on.
         db = database;
@@ -118,6 +129,37 @@ async function ensureDb() {
   return db;
 }
 
+/** Let go of a connection that is closed, so the next call opens a new one. */
+function forget(database) {
+  if (db !== database) return;
+  db = null;
+  initPromise = null;
+}
+
+/** What a transaction on a connection the browser has closed throws. */
+const DEAD_CONNECTION = ['InvalidStateError', 'UnknownError'];
+
+/**
+ * A transaction, or null. A connection that died under us (the browser
+ * closed it, and the close event has not arrived yet) is closed, forgotten
+ * and opened again, once: before this, every save after the site's data was
+ * cleared failed until the page was reloaded.
+ */
+async function transaction(stores, mode) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const database = await ensureDb();
+    if (!database) return null;
+    try {
+      return database.transaction(stores, mode);
+    } catch (err) {
+      if (attempt || !DEAD_CONNECTION.includes(err && err.name)) return null;
+      try { database.close(); } catch { /* already closed */ }
+      forget(database);
+    }
+  }
+  return null;
+}
+
 // ── Change notices for other tabs ────────────────────────────────────────────
 
 const CHANNEL_NAME = 'dossier-reports';
@@ -152,11 +194,10 @@ function announce(ids, kind) {
  */
 export async function listReports() {
   try {
-    const database = await ensureDb();
-    if (!database) return [];
+    const tx = await transaction(STORE_META, 'readonly');
+    if (!tx) return [];
     return new Promise((resolve) => {
       try {
-        const tx = database.transaction(STORE_META, 'readonly');
         const store = tx.objectStore(STORE_META);
         const req = store.getAll();
         req.onerror = () => resolve([]);
@@ -179,11 +220,11 @@ export async function listReports() {
  */
 export async function readReport(id) {
   try {
-    const database = await ensureDb();
-    if (!database || !id) return null;
+    if (!id) return null;
+    const tx = await transaction([STORE_REPORTS, STORE_META], 'readonly');
+    if (!tx) return null;
     return new Promise((resolve) => {
       try {
-        const tx = database.transaction([STORE_REPORTS, STORE_META], 'readonly');
         const metaStore = tx.objectStore(STORE_META);
         const reportStore = tx.objectStore(STORE_REPORTS);
         const metaReq = metaStore.get(id);
@@ -212,32 +253,43 @@ export async function readReport(id) {
  * @param {object} document - the authored dossier document
  * @param {object} meta - title, kind, status and page count; `created` is kept
  *   from the existing record and `updated` is set here
- * @returns {Promise<object|null>} the meta that was written
+ * @param {{expect?: number}} [opts] expect: the revision (`updated`) this save
+ *   was made on. When the stored record has moved on since, nothing is
+ *   written and the result says so, with the stored meta.
+ * @returns {Promise<object|{conflict: true, current: object}|null>} the meta
+ *   that was written (its `updated` is the new revision), a conflict, or null
  */
-export async function writeReport(id, document, meta) {
+export async function writeReport(id, document, meta, { expect } = {}) {
   try {
-    const database = await ensureDb();
-    if (!database || !id || !document || !meta) return null;
+    if (!id || !document || !meta) return null;
+    const tx = await transaction([STORE_REPORTS, STORE_META], 'readwrite');
+    if (!tx) return null;
     return new Promise((resolve) => {
       try {
-        const tx = database.transaction([STORE_REPORTS, STORE_META], 'readwrite');
         const reportStore = tx.objectStore(STORE_REPORTS);
         const metaStore = tx.objectStore(STORE_META);
         const docStr = JSON.stringify(document);
         const bytes = new Blob([docStr]).size;
-        const nowTime = Date.now();
         let metaOut = null;
+        let conflict = null;
         // Read the existing record in the same transaction, so `created`
-        // survives every save. It used to be reset on each one, because the
-        // caller never passed it and this filled in the current time.
+        // survives every save (it used to be reset on each one), and so the
+        // revision check and the write cannot be split by another tab's save.
         const prior = metaStore.get(id);
         prior.onsuccess = () => {
           const before = prior.result;
+          if (expect !== undefined && before && before.updated !== expect) {
+            conflict = { conflict: true, current: before };
+            return;
+          }
+          const nowTime = Date.now();
           metaOut = {
             ...meta,
             id,
             bytes,
-            updated: nowTime,
+            // Strictly later than the revision it replaces, even when two
+            // saves land in the same millisecond.
+            updated: Math.max(nowTime, ((before && before.updated) || 0) + 1),
             created: (before && before.created) || meta.created || nowTime,
           };
           reportStore.put(document, id);
@@ -246,6 +298,10 @@ export async function writeReport(id, document, meta) {
         tx.onerror = () => resolve(null);
         tx.onabort = () => resolve(null);
         tx.oncomplete = () => {
+          if (conflict) {
+            resolve(conflict);
+            return;
+          }
           announce([id], 'write');
           resolve(metaOut);
         };
@@ -264,11 +320,11 @@ export async function writeReport(id, document, meta) {
  */
 export async function deleteReport(id) {
   try {
-    const database = await ensureDb();
-    if (!database || !id) return false;
+    if (!id) return false;
+    const tx = await transaction([STORE_REPORTS, STORE_META], 'readwrite');
+    if (!tx) return false;
     return new Promise((resolve) => {
       try {
-        const tx = database.transaction([STORE_REPORTS, STORE_META], 'readwrite');
         const reportStore = tx.objectStore(STORE_REPORTS);
         const metaStore = tx.objectStore(STORE_META);
         reportStore.delete(id);

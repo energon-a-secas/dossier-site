@@ -28,7 +28,7 @@
             "right": {
               "label": "Response B",
               "caption": "Revised prompt \u00b7 explicit structure",
-              "value": "What changed\nTeams can save a filtered view, export its results to CSV, and search the same workspace more quickly.\n\nWho benefits\nOperations teams can reuse their weekly review view. Analysts can take a result set into a spreadsheet without copying rows by hand.\n\nNext step\nAsk one operations team to use a saved view for its next weekly review. Record setup time and any missing filters before expanding the rollout."
+              "value": "What changed: Teams can save a filtered view, export its results to CSV, and search the same workspace more quickly.\n\nWho benefits: Operations teams can reuse their weekly review view. Analysts can take a result set into a spreadsheet without copying rows by hand.\n\nNext step: Ask one operations team to use a saved view for its next weekly review. Record setup time and any missing filters before expanding the rollout."
             },
             "note": "B gives the reviewer a concrete audience and a testable next step. Highlighting shows wording changes; it does not determine which answer is better."
           }

@@ -1,7 +1,8 @@
 /**
  * Browser checks for the Compare view's analysis, part one: difference
- * marks on the bundled example, Word marks and Show removed words, the base
- * picker and its menu (rebuilt under Blind while closed), previous and next
+ * marks on the bundled example (each column against its source when it
+ * opens, then B as the base), a moved section, Word marks and Show removed
+ * words, the base picker and its menu (rebuilt under Blind while closed), previous and next
  * change with the counter, the tag (kept inside the column while a change's
  * top is above it) and the ruler, `]` reaching the last change, the Sections
  * panel (a row on the reading line of every column), the Review panel
@@ -23,7 +24,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import {
   base, verify, watch, noOverflow, focusOn, openExample, firstReport,
-} from './analysis-check-helpers.mjs';
+} from './check-helpers.mjs';
 
 const browser = await chromium.launch();
 const errors = [];
@@ -53,7 +54,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
   const page = await context.newPage();
-  watch(errors, page);
+  watch({ page, errors });
   await page.goto(`${base}/?check=analysis`, { waitUntil: 'networkidle' });
   await openExample(page);
 
@@ -61,6 +62,20 @@ try {
   // on the change at the top of C (its title), and `]` goes on from there.
   await page.waitForFunction(() => /^1 of \d+$/.test(document.querySelector('.counter__main')?.textContent || ''));
   assert.equal(await page.locator('#cmp-col-k3 .u-current').getAttribute('data-chg'), '1', 'Change 1 is outlined on open');
+
+  // ── Each against its source, the default with a fix: A the base, B against
+  // A, C against B, the column it fixes ─────────────────────────────────────
+  assert.equal(await page.locator('#cmp-col-k1 .tag--base').count(), 1, 'A, the human draft, is the base');
+  assert.match(await page.locator('#cmp-col-k1 .col__diff').innerText(), /fix is marked against the column it fixes/);
+  assert.match(await page.locator('#cmp-col-k2 .col__diff').innerText(), /\d+ differences from A/);
+  assert.match(await page.locator('#cmp-col-k3 .col__diff').innerText(), /\d+ differences from B/);
+  assert.match(await page.locator('#cmpAgainst').getAttribute('aria-label'), /each column's source/);
+  await page.locator('#cmpAgainst').click();
+  await page.locator('#cmpDiffMenu [data-col="each"][aria-checked="true"]').waitFor();
+  // B as the base for every column, for the checks below: A against B.
+  await page.locator('#cmpDiffMenu [data-action="cmp-set-base"][data-col="k2"]').click();
+  await page.waitForFunction(() => document.querySelector('#cmp-col-k2 .tag--base'));
+  await page.keyboard.press('Escape');
 
   // ── Marks: C against B, the base; A too different for word marks ────────
   assert.equal(await page.locator('#cmp-col-k2 .tag--base').count(), 1, 'B is the base: what C fixes');
@@ -116,6 +131,10 @@ try {
   });
   assert.ok(rowTag?.shown, 'The tag of a current table row is in its last cell, on screen');
   assert.match(rowTag.text, new RegExp(`^${rowChange} of \\d+$`));
+  // A's "Root causes" sits where B has "Contributing factors": one move.
+  assert.equal(await page.locator('#cmp-col-k1 [data-d="mov"]').count(), 1, 'A has one moved section against B');
+  assert.equal(await page.locator('#cmp-col-k1 .u-label--moved').innerText(), 'Moved from after \u201cSummary\u201d in B');
+  assert.equal(await page.locator('#cmp-col-k1 .ruler .t').count(), await page.locator('#cmp-col-k1 .col__scroll [data-chg]').count(), 'One ruler tick per change, the move included');
   await page.locator('#cmp-col-k1 [data-action="cmp-word-marks"]').click();
   await page.waitForFunction(() => document.querySelectorAll('#cmp-col-k1 .unit ins').length === 0);
 
@@ -140,6 +159,11 @@ try {
   await page.locator('#cmpDiffMenu [data-action="cmp-set-base"][data-col="k3"]').click();
   await page.waitForFunction(() => document.querySelector('#cmp-col-k3 .tag--base') && document.querySelectorAll('#cmp-col-k2 .unit ins').length > 0);
   assert.match(await page.locator('#cmpAgainst').getAttribute('aria-label'), /against C, Fixes/);
+  await page.locator('#cmpDiffMenu [data-action="cmp-set-base"][data-col="k2"]').click();
+  await page.waitForFunction(() => document.querySelector('#cmp-col-k2 .tag--base'));
+  await page.locator('#cmpDiffMenu [data-action="cmp-set-base"][data-col="each"]').click();
+  await page.waitForFunction(() => document.querySelector('#cmp-col-k1 .tag--base'));
+  assert.equal(await page.locator('#cmpAgainst .picker__name').innerText(), 'its source');
   await page.locator('#cmpDiffMenu [data-action="cmp-set-base"][data-col="k2"]').click();
   await page.waitForFunction(() => document.querySelector('#cmp-col-k2 .tag--base'));
   await page.keyboard.press('Escape');
@@ -232,7 +256,7 @@ try {
   assert.match(await contributing.locator('td[data-col="k1"]').innerText(), /Missing/);
   assert.match(await contributing.locator('td[data-col="k3"]').innerText(), /Missing/);
   assert.equal(await contributing.locator('.miss').first().evaluate((el) => getComputedStyle(el).color === getComputedStyle(document.querySelector('.col__who')).color), true, 'Missing is secondary ink, not red');
-  assert.match(await page.locator('#cmpPanel .coverage').innerText(), /covers \d+ of \d+ base sections[\s\S]*Matched by heading text, not by meaning\./);
+  assert.match(await page.locator('#cmpPanel .coverage').innerText(), /covers \d+ of \d+ base sections[\s\S]*Matched by heading text, or by shared wording when the headings differ, never by meaning\./);
   assert.match(await page.locator('#cmpPanel .secmap').innerText(), /Only in other columns[\s\S]*What went well/);
   assert.match(await page.locator('#cmpPanel .panel__intro').first().innerText(), /bring that section to the reading line in every column\.$/);
   await page.locator('#cmpPanel .secmap button', { hasText: /^Impact/ }).click();
@@ -398,6 +422,7 @@ try {
   const baseNames = await page.locator('#compareView [data-base-ref]').allTextContents();
   const baseLabel = await page.locator('#cmp-col-k2 .col__label').textContent();
   assert.ok(baseNames.length && baseNames.every((n) => n === baseLabel), `The marks name the base as ${[...new Set(baseNames)].join(', ')}, not ${baseLabel}`);
+  assert.match(await page.locator('#cmp-col-k1 [data-d="mov"] > .visually-hidden:not(.u-sr)').textContent(), /in Report \d\. $/, 'A move names the base by its report number');
   await page.locator('select[data-change="cmp-sync"]').selectOption('sections');
   // Report order is the page's own order, so print, Tab and a screen reader
   // meet the reports in the order the screen shows them, never the order
@@ -421,7 +446,8 @@ try {
   });
   assert.deepEqual([...blind.labels].sort(), ['Report 1', 'Report 2', 'Report 3']);
   assert.match(await page.locator('#cmpDiffMenu').evaluate((el) => (el.hidden ? el.textContent : '')), /Report 1[\s\S]*Report 2[\s\S]*Report 3/, 'The closed against menu lists the reports');
-  for (const word of ['Human', 'Agent', 'Fixes', 'Whitfield', 'agent run', 'Illustrative example']) {
+  // File names too: the who line names a column's file once Blind is off.
+  for (const word of ['Human', 'Agent', 'Fixes', 'Whitfield', 'agent run', 'Illustrative example', 'human-draft', 'agent-output', 'fixes.html']) {
     assert.ok(!blind.visible.includes(word), `Blind still shows "${word}"`);
   }
   const heads = await page.locator('#compareView .col__head').allTextContents();
@@ -472,15 +498,21 @@ try {
     assert.ok(!blindHtml.includes(word), `The blind file says "${word}"`);
   }
   await mark('k1', 'weak', 'completeness').click();
-  assert.match(await page.locator('#cmpPanel .rec').innerText(), /^Recorded while blind/);
+  assert.match(await page.locator('#cmpPanel .rec').innerText(), /^Marks were entered with Blind on/);
+  // Which column each number was stays out of the panel while Blind is on.
+  assert.equal(await page.locator('#cmpPanel .rec__order').isHidden(), true, 'The panel decodes the report numbers under Blind');
+  assert.equal(await page.locator('#cmpPanel .rec__order').textContent(), '');
   await page.locator('.cmp-toolbar [data-action="cmp-toggle-blind"]').click();
   await page.waitForFunction(() => !document.querySelector('#compareView').classList.contains('blind'));
   assert.match(await page.locator('#cmp-col-k1 .col__label').evaluate((el) => el.textContent), /^Column A, Human draft$/, 'Reveal brings the names back');
-  assert.match(await page.locator('#cmpPanel .rec').innerText(), /^Recorded while blind/, 'Reveal keeps the blind note');
+  assert.match(await page.locator('#cmpPanel .rec').innerText(), /^Marks were entered with Blind on/, 'Turning Blind off keeps the blind note');
+  assert.ok(!(await page.locator('#cmpPanel .rec').innerText()).includes('Reveal'), 'The note names a Reveal control there is none of');
+  // Once Blind is off, the panel says which column Report 1 was: the leftmost while blind.
+  assert.match(await page.locator('#cmpPanel .rec__order').innerText(), new RegExp(`^While blind: Report 1 was ${{ k1: 'A', k2: 'B', k3: 'C' }[first]} \\([^)]+\\), Report 2 was [A-C] \\(`));
   assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#compareView .col')].map((el) => el.dataset.col)), ['k1', 'k2', 'k3'], 'Reveal puts the columns back in their own order');
 
   assert.deepEqual(errors, [], 'The page raised errors');
-  console.log('Passed: difference marks on the example (C against B with hidden words, labels, ghost rows and one ruler tick per change; A too different, with Word marks on and off, and the tag of a table row), one Original notice, Show removed words, a new base and back, the counter on change 1 when the example opens, ] and [ with the counter, the tag and the announcement, a ruler tick, sync following, ] to the last change fast and at a normal pace, a tag never cut at the top of its column, the Sections panel over the columns (Missing in secondary ink, coverage, a row on the reading line of every column, Escape, a panel starting at its top), the Review panel (marks by click and arrow key, kept on Space, a focus ring outside the chosen ring, every label in full at 360 px, the criterion menu, Clear marks and its undo, the undo of Remove criterion keeping what was entered since, preferred, notes, summary, counts only, copied as Markdown, kept across a reload, docked at 1680 and by the pin), and Blind (numbers, report order in the page as on screen, every column keeping its place, text and focus with Sync off, the base renamed in its marks, neutral stripes, no names in the heads, the closed against menu, the switcher or the column menu of Report 1, roles, ids and file names kept out of the markup and a blind file, recorded while blind, Reveal and the added order back).');
+  console.log('Passed: the example opening with each column against its source (A the base, B against A, C against B) and the choice in the menu, difference marks on the example (C against B with hidden words, labels, ghost rows and one ruler tick per change; A too different, with Word marks on and off, the tag of a table row, and one moved section with its label and ruler tick), one Original notice, Show removed words, a new base and back, the counter on change 1 when the example opens, ] and [ with the counter, the tag and the announcement, a ruler tick, sync following, ] to the last change fast and at a normal pace, a tag never cut at the top of its column, the Sections panel over the columns (Missing in secondary ink, coverage, a row on the reading line of every column, Escape, a panel starting at its top), the Review panel (marks by click and arrow key, kept on Space, a focus ring outside the chosen ring, every label in full at 360 px, the criterion menu, Clear marks and its undo, the undo of Remove criterion keeping what was entered since, preferred, notes, summary, counts only, copied as Markdown, kept across a reload, docked at 1680 and by the pin), and Blind (numbers, report order in the page as on screen, every column keeping its place, text and focus with Sync off, the base renamed in its marks, neutral stripes, no names in the heads, the closed against menu, the switcher or the column menu of Report 1, roles, ids and file names kept out of the markup and a blind file, recorded while blind in words that name the Blind toggle, Blind off with the added order back and which column each report number was).');
 } finally {
   await browser.close();
 }

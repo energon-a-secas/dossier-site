@@ -10,6 +10,7 @@
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { file, out, verifyUrl } from './check-helpers.mjs';
 
 /** @param {import('playwright').Page} page */
 export async function checkFitAndCopies(page) {
@@ -18,7 +19,7 @@ export async function checkFitAndCopies(page) {
   // frame could grow when the window narrowed and never shrink again.
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.locator('#openReport').click();
-  await page.locator('#importFile').setInputFiles('fixtures/embed/full-height.html');
+  await page.locator('#importFile').setInputFiles(file('fixtures/embed/full-height.html'));
   await page.waitForFunction(() => document.getElementById('importDetected').textContent.startsWith('HTML report.'));
   await page.getByRole('button', { name: 'Open it', exact: true }).click();
   await page.frameLocator('#stage iframe.block-embed--static').locator('#decision').waitFor();
@@ -54,15 +55,15 @@ export async function checkFitAndCopies(page) {
   await snug('disclosure open');
   // The height kept for a rebuilt frame is only where it starts.
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole('button', { name: 'Dossier format', exact: true }).click();
+  await page.getByRole('radio', { name: 'Dossier format', exact: true }).click();
   await page.setViewportSize({ width: 1100, height: 900 });
-  await page.getByRole('button', { name: 'Original', exact: true }).click();
+  await page.getByRole('radio', { name: 'Original', exact: true }).click();
   await snug('rebuilt at 1100px');
   assert.equal(await page.evaluate(() => document.querySelector('#stage iframe.block-embed--static').getAttribute('data-embed-fit')), '');
 
   // ── A saved app shell: no height of its own, so the frame holds and scrolls ──
   await page.locator('#openReport').click();
-  await page.locator('#importFile').setInputFiles('fixtures/embed/app-shell.html');
+  await page.locator('#importFile').setInputFiles(file('fixtures/embed/app-shell.html'));
   await page.waitForFunction(() => document.getElementById('importDetected').textContent.startsWith('HTML report.'));
   await page.getByRole('button', { name: 'Open it', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('#stage iframe.block-embed--static')?.getAttribute('data-embed-fit') === 'held', null, { timeout: 5000 })
@@ -116,7 +117,7 @@ export async function checkFitAndCopies(page) {
  * @param {import('playwright').Page} page
  */
 async function checkLongPane(page) {
-  const shell = await fs.readFile('fixtures/embed/app-shell.html', 'utf8');
+  const shell = await fs.readFile(file('fixtures/embed/app-shell.html'), 'utf8');
   const filler = Array.from({ length: 60 }, (_, i) => `    <p>Review note ${i + 1}: the numbers above were read from the release dashboard on the day.</p>`).join('\n');
   const long = shell.replace('    <h1 id="r11">', `${filler}\n    <h1 id="r11">`);
   assert.notEqual(long, shell, 'The app shell fixture no longer has the heading the long pane goes before');
@@ -171,12 +172,11 @@ async function checkLongPane(page) {
     finally { URL.createObjectURL = original; }
     return captured.text();
   });
-  await fs.mkdir('.verify', { recursive: true });
-  await fs.writeFile('.verify/html-import-held.html', html);
+  await fs.writeFile(out('html-import-held.html'), html);
   const exported = await page.context().newPage();
   try {
     await exported.setViewportSize({ width: 1440, height: 560 });
-    await exported.goto(`${new URL(page.url()).origin}/.verify/html-import-held.html`);
+    await exported.goto(verifyUrl('html-import-held.html'));
     await exported.waitForFunction(() => document.querySelector('iframe[data-embed-fit]')?.getAttribute('data-embed-fit') === 'held', null, { timeout: 5000 })
       .catch(() => assert.fail('The exported long app shell was not held'));
     await exported.frameLocator('iframe').getByRole('link', { name: 'Release 11', exact: true }).click();

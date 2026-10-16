@@ -1,6 +1,9 @@
 /**
  * js/compare/diff.js and js/compare/marks.js: what changed between two
- * reports, unit by unit and word by word, and the marks drawn for it.
+ * reports, unit by unit and word by word, and the marks drawn for it: moved
+ * parts, code and many-line text line by line, a light edit against a
+ * rewrite, marks that do not depend on the clock, and a table header row
+ * that never holds hidden words.
  */
 
 import test from 'node:test';
@@ -86,7 +89,9 @@ test('identical reports have no differences', () => {
 
 test('one word changed marks that word and nothing else', () => {
   const r = diffBlocks(md(REPORT), md(REPORT.replace('exhausted', 'drained')));
-  assert.deepEqual(r.counts, { changed: 1, added: 0, removed: 0, total: 1 });
+  assert.deepEqual(r.counts, {
+    changed: 1, added: 0, removed: 0, moved: 0, total: 1,
+  });
   const unit = r.units.find((u) => u.state === 'changed');
   assert.equal(show(unit.words), 'The release [-exhausted-] {+drained+} the connection pool.');
 });
@@ -114,20 +119,195 @@ test('a section added is marked as added units', () => {
 test('a section removed is one ghost run, named by its heading', () => {
   const removed = REPORT.replace('## Contributing factors\n\nThe cache hit ratio dropped during the same window.\n\n', '');
   const r = diffBlocks(md(REPORT), md(removed));
-  assert.deepEqual(r.counts, { changed: 0, added: 0, removed: 1, total: 1 });
+  assert.deepEqual(r.counts, {
+    changed: 0, added: 0, removed: 1, moved: 0, total: 1,
+  });
   const info = describeRemoved(r.baseUnits, r.removed[0].units);
   assert.equal(info.what, 'Contributing factors');
   assert.equal(info.words, 11);
   assert.match(info.preview, /^The cache hit ratio/);
 });
 
-test('a paragraph moved shows where it left and where it arrived', () => {
+test('a paragraph moved is one move, named by where it came from', () => {
   const moved = REPORT.replace('The release exhausted the connection pool.\n\n', '')
     .replace('- No data was lost.', '- No data was lost.\n\nThe release exhausted the connection pool.');
   const r = diffBlocks(md(REPORT), md(moved));
-  assert.equal(r.counts.removed, 1);
-  assert.equal(r.counts.added, 1);
-  assert.equal(r.counts.changed, 0);
+  assert.deepEqual(r.counts, {
+    changed: 0, added: 0, removed: 0, moved: 1, total: 1,
+  });
+  assert.deepEqual(r.changes.map((c) => c.kind), ['mov']);
+  assert.equal(r.moves[0].after, 'Root cause');
+  assert.equal(r.moves[0].section, false);
+});
+
+const SECTION = '## Contributing factors\n\nThe cache hit ratio dropped during the same window.\n\n';
+
+test('a section moved and reworded is a move, word-marked against where it came from', () => {
+  const moved = `${REPORT.replace(SECTION, '')}\n\n## Contributing factors\n\nThe CDN cache hit ratio dropped during the same window.`;
+  const r = diffBlocks(md(REPORT), md(moved));
+  assert.deepEqual(r.counts, {
+    changed: 1, added: 0, removed: 0, moved: 1, total: 2,
+  });
+  assert.deepEqual(r.changes.map((c) => c.kind), ['mov', 'chg']);
+  assert.equal(r.moves[0].section, true);
+  assert.equal(r.moves[0].after, 'Root cause');
+  assert.equal(r.tooDifferent, false);
+  assert.equal(show(r.units.find((u) => u.state === 'changed').words), 'The {+CDN+} cache hit ratio dropped during the same window.');
+});
+
+test('two sections swapped are one move; a short paragraph or a paragraph turned table row is not', () => {
+  const swapped = REPORT.replace(`## Root cause\n\nThe release exhausted the connection pool.\n\n${SECTION}`, `${SECTION}## Root cause\n\nThe release exhausted the connection pool.\n\n`);
+  const r = diffBlocks(md(REPORT), md(swapped));
+  assert.equal(r.counts.moved, 1);
+  assert.equal(r.counts.added, 0);
+  assert.equal(r.counts.removed, 0);
+  assert.equal(r.tooDifferent, false);
+  const done = diffBlocks(md('Intro words here today.\n\nDone.\n\nMiddle words in this paragraph.\n\nEnd words.'),
+    md('Intro words here today.\n\nMiddle words in this paragraph.\n\nEnd words.\n\nDone.'));
+  assert.deepEqual([done.counts.added, done.counts.removed, done.counts.moved], [1, 1, 0], 'one word is too little to call a move');
+  const rows = diffBlocks(md('Alpha one two three four five six seven eight nine.\n\nBeta one two three four five six seven eight nine.\n\nFiller text.'),
+    md('Filler text.\n\n| Alpha one two three four five six seven eight nine |\n|---|\n| Beta one two three four five six seven eight nine |'));
+  assert.equal(rows.counts.moved, 0, 'paragraphs that became table rows do not line up');
+});
+
+test('a move is marked with where it came from, escaped, and with bars only its hidden words', () => {
+  const base = [{ t: 'h', level: 1, inl: [{ text: 'Report' }] }, { t: 'h', level: 2, inl: [{ text: '<i>Root cause' }] },
+    { t: 'p', inl: [{ text: 'The release exhausted the connection pool.' }] },
+    ...md(`${SECTION}## Impact\n\nNo data was lost at any point.`)];
+  const col = [base[0], base[1], base[2], ...md('## Impact\n\nNo data was lost at any point.\n\n## Contributing factors\n\nThe cache hit ratio dropped during the same window.')];
+  const r = diffBlocks(base, col);
+  assert.equal(r.counts.moved, 1);
+  const html = renderIr(col, { colId: 'k2', marks: columnMarks(r, { colId: 'k2', baseRef: 'B' }) });
+  assert.match(html, /class="r-h r-h2 unit u-moved u-move-start" data-u="\d+" data-chg="1" data-d="mov">/);
+  assert.match(html, /<span class="u-label u-label--moved">Moved from after \u201c&lt;i&gt;Root cause\u201d in <span data-base-ref>B<\/span><\/span>/);
+  assert.ok(!html.includes('<i>Root'), 'the heading is escaped');
+  assert.match(html, /<p class="unit u-moved" data-u="\d+">The cache/, 'the rest of the move is marked as moved, unnumbered');
+  const bars = renderIr(col, { colId: 'k2', marks: columnMarks(r, { colId: 'k2', baseRef: 'B', bars: true }) });
+  assert.match(bars, /unit u-bar-mov u-move-start/);
+  assert.ok(!/u-label/.test(bars), 'margin bars only: no visible label');
+  assert.match(bars, /<span class="visually-hidden u-sr">Moved heading: <\/span><span class="visually-hidden">moved from after/);
+});
+
+// ── A light edit, not a rewrite ──────────────────────────────────────────────
+
+const NOTE = [
+  'The deploy went out on Tuesday and the checkout error rate settled within an hour.',
+  'Cache hit ratio held at 71% through the window, so the cache was not the cause.',
+  'The slow queries all came from shard 7, which had the oldest index build.',
+  'We will rebuild that index this week and watch the dashboard after.',
+];
+
+test('three words fixed in a four-paragraph note are marked word by word, not called too different', () => {
+  const fixed = NOTE.map((p) => p.replace('Tuesday', 'Monday').replace('71%', '61%').replace('shard 7', 'shard 9'));
+  const r = diffBlocks(md(NOTE.join('\n\n')), md(fixed.join('\n\n')));
+  assert.equal(r.tooDifferent, false);
+  assert.equal(r.counts.changed, 3);
+  for (const unit of r.units.filter((u) => u.state === 'changed')) {
+    assert.deepEqual(unit.words.filter((s) => s.type !== 'eq').map((s) => s.type), ['del', 'ins']);
+  }
+});
+
+test('one word fixed in most paragraphs of a long report is a light edit; new words throughout are not', () => {
+  const vocab = 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega cache'.split(' ');
+  const para = (seed) => `${Array.from({ length: 65 }, (_, i) => vocab[(i * 7 + seed) % vocab.length]).join(' ')}.`;
+  const paras = Array.from({ length: 30 }, (_, i) => para(i));
+  const light = diffBlocks(md(paras.join('\n\n')), md(paras.map((p, i) => (i < 24 ? p.replace('cache', 'cash') : p)).join('\n\n')));
+  assert.equal(light.counts.changed, 24);
+  assert.equal(light.tooDifferent, false, `${(light.wordShare * 100).toFixed(1)}% of the words changed`);
+  const rewritten = diffBlocks(md(paras.join('\n\n')), md(paras.map((p, i) => `Entirely new sentence number ${i} about other matters.`).join('\n\n')));
+  assert.equal(rewritten.tooDifferent, true);
+});
+
+// ── Marks that do not depend on the clock ────────────────────────────────────
+
+const LONG = Array.from({ length: 1200 }, (_, i) => `w${i % 300}x${i}`);
+const withLong = (words) => ['# Notes', 'One short paragraph.', 'Two short paragraphs here.', words.join(' '), 'Three.', 'Four more words.', 'Five and six.', 'Seven.'].join('\n\n');
+const LONG_EDITED = LONG.map((w, i) => (i % 5 === 0 ? `z${i}` : w));
+
+test('the marks are the same however fast the clock runs: no step reads it', () => {
+  const real = Object.getOwnPropertyDescriptor(performance, 'now');
+  let reads = 0;
+  const start = performance.now();
+  performance.now = () => {
+    reads += 1;
+    return start + (Date.now() - start) * 20;
+  };
+  let fast;
+  try {
+    fast = diffBlocks(md(withLong(LONG)), md(withLong(LONG_EDITED)), { ignoreCase: true, force: true });
+  } finally {
+    if (real) Object.defineProperty(performance, 'now', real);
+    else delete performance.now;
+  }
+  assert.equal(reads, 0, 'the diff read the clock');
+  // The same reports again, once the memo has forgotten them.
+  for (let i = 0; i < 30; i += 1) diffBlocks(md(`Filler ${i} one.`), md(`Filler ${i} two.`), { ignoreCase: true, force: true });
+  const again = diffBlocks(md(withLong(LONG)), md(withLong(LONG_EDITED)), { ignoreCase: true, force: true });
+  assert.notEqual(again, fast, 'computed again');
+  assert.equal(JSON.stringify(again.units), JSON.stringify(fast.units));
+  assert.deepEqual(again.counts, fast.counts);
+});
+
+test('a paragraph with too many edits says so, and Word marks by hand mark it', () => {
+  const r = diffBlocks(md(withLong(LONG)), md(withLong(LONG_EDITED)));
+  const slot = r.units.find((u) => u.state === 'changed');
+  assert.equal(slot.unmarked, 'cap');
+  assert.equal(slot.words, null);
+  assert.equal(r.unmarked, 1);
+  assert.equal(r.tooDifferent, false);
+  const html = renderIr(md(withLong(LONG_EDITED)), { colId: 'k2', marks: columnMarks(r, { colId: 'k2', baseRef: 'A' }) });
+  assert.match(html, /<span class="u-label u-label--changed">Changed: too many edits to mark word by word<\/span><span class="visually-hidden u-sr">, paragraph: <\/span>/);
+  const forced = diffBlocks(md(withLong(LONG)), md(withLong(LONG_EDITED)), { force: true });
+  const marked = forced.units.find((u) => u.state === 'changed');
+  assert.equal(forced.unmarked, 0);
+  assert.ok(marked.words.some((s) => s.type === 'ins') && marked.words.some((s) => s.type === 'del'));
+});
+
+test('a code block is marked line by line, keeping its indentation', () => {
+  const code = Array.from({ length: 20 }, (_, i) => `  line ${i} = value(${i})`).join('\n');
+  const edited = code.replace('line 7 = value(7)', 'line 7 = value(70)');
+  const r = diffBlocks(md(`# C\n\n\`\`\`\n${code}\n\`\`\``), md(`# C\n\n\`\`\`\n${edited}\n\`\`\``));
+  const slot = r.units.find((u) => u.state === 'changed');
+  assert.equal(slot.unmarked, null);
+  assert.deepEqual(slot.words.map((s) => [s.type, inlineText(s.inl)]).filter(([type]) => type !== 'eq'),
+    [['del', '  line 7 = value(7)\n'], ['ins', '  line 7 = value(70)\n']]);
+  assert.equal(slot.words.map((s) => (s.type === 'del' ? '' : inlineText(s.inl))).join(''), edited, 'the column reads as written');
+  const html = renderIr(md(`# C\n\n\`\`\`\n${edited}\n\`\`\``), { colId: 'k2', marks: columnMarks(r, { colId: 'k2', baseRef: 'A' }) });
+  assert.match(html, /<pre class="unit u-changed"[^>]*><span class="visually-hidden u-sr">Changed code block: <\/span><code>/);
+});
+
+test('a log of 600 lines with every third edited is marked line by line, then word by word', () => {
+  const lines = Array.from({ length: 600 }, (_, i) => `log entry ${i} status ok code ${i % 13}`);
+  const edited = lines.map((l, i) => (i % 3 === 0 ? l.replace('ok', 'fail') : l));
+  const r = diffBlocks(textToIr(lines.join('\n')), textToIr(edited.join('\n')));
+  const slot = r.units[0];
+  assert.equal(slot.state, 'changed');
+  assert.ok(slot.words, 'the paragraph has marks');
+  assert.equal(slot.words.filter((s) => s.type === 'ins').length, 200);
+  assert.ok(slot.words.filter((s) => s.type === 'ins').every((s) => inlineText(s.inl) === 'fail'));
+  assert.equal(r.unmarked, 0);
+});
+
+// ── A table header row never holds hidden words ──────────────────────────────
+
+test('a header row that is new: its label and the ghost before it stand before the table', () => {
+  const base = md('# T\n\nIntro words.\n\n## Old section\n\nSome old words here.\n\n## End\n\nBye now.');
+  const col = md('# T\n\nIntro words.\n\n| UTC | Event |\n|---|---|\n| 14:02 | Deploy starts |\n\n## End\n\nBye now.');
+  const r = diffBlocks(base, col);
+  const html = renderIr(col, { colId: 'k1', marks: columnMarks(r, { colId: 'k1', baseRef: 'B' }) });
+  assert.ok(!/<th[^>]*>[^]*?visually-hidden[^]*?<\/th>/.test(html.match(/<thead>[^]*?<\/thead>/)[0]), 'no hidden words in a header cell');
+  assert.ok(!/<thead><tr class="ghost-row"/.test(html));
+  const table = html.indexOf('<div class="r-table"');
+  assert.ok(html.indexOf('<div class="ghost"') >= 0 && html.indexOf('<div class="ghost"') < table, 'the ghost stands before the table');
+  assert.ok(html.indexOf('Added table header row: ') >= 0 && html.indexOf('Added table header row: ') < table, 'and so does the label');
+  assert.match(html, /<thead><tr class="unit u-added" data-u="\d+" data-chg="\d+" data-d="add"><th scope="col">UTC<\/th>/);
+});
+
+test('a removed section before an unchanged table is a ghost before the table', () => {
+  const r = diffBlocks(md('# T\n\n## Gone\n\nGone words here.\n\n| A | B |\n|---|---|\n| 1 | 2 |'), md('# T\n\n| A | B |\n|---|---|\n| 1 | 2 |'));
+  const html = renderIr(md('# T\n\n| A | B |\n|---|---|\n| 1 | 2 |'), { colId: 'k1', marks: columnMarks(r, { colId: 'k1', baseRef: 'B' }) });
+  assert.match(html, /<div class="ghost" data-chg="1" data-d="del">[^]*<\/div><div class="r-table"/);
+  assert.match(html, /<thead><tr data-u="\d+"><th scope="col">A<\/th>/);
 });
 
 test('CRLF and LF line endings are the same report', () => {
@@ -147,7 +327,7 @@ test('curly and straight quotes differ unless punctuation and quote style are ig
   assert.equal(diffBlocks(md('The agent said done.'), c, { ignoreCase: true }).counts.total, 0);
 });
 
-test('a column that differs in most of its units is too different for word marks', () => {
+test('a column that shares nothing with the base is too different for word marks', () => {
   const other = md('# Something else\n\nNothing alike here at all.\n\n## Notes\n\nDifferent words entirely.\n\n## More\n\nStill nothing shared.');
   const r = diffBlocks(md(REPORT), other);
   assert.equal(r.tooDifferent, true);

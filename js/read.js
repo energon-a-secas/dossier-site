@@ -17,11 +17,18 @@ import { validate } from './validate.js';
 import { detect } from './adapters/index.js';
 import { authored } from './pipeline.js';
 import { derivedFields } from './registry/index.js';
+import { notText, NOT_TEXT_MESSAGE } from './text-check.js';
 
 /**
  * Read any text the Open dialog accepts, with no side effects.
  *
+ * Binary input (a PDF, an image, an archive) is refused before detection,
+ * so it never reaches an adapter, the YAML parser or storage (js/text-check.js).
+ *
  * @param {string} text
+ * @param {{name?: string}} [opts] the file name the text came from, when it
+ *   came from a file; an adapter may name the report after it (Markdown with
+ *   no title of its own)
  * @returns {{ok: boolean, document: object|null, model: object|null,
  *   findings: Array, label: string|null, adapter: string|null,
  *   fatal: object|null, text: string}}
@@ -29,16 +36,17 @@ import { derivedFields } from './registry/index.js';
  *   source to show in the editor, `label` the format name when an adapter
  *   converted it (null for a Dossier document).
  */
-export function readText(text) {
+export function readText(text, { name } = {}) {
   if (typeof text !== 'string' || !text.trim()) {
     return failed(String(text || ''), 'There was nothing to read in that.', null);
   }
+  if (notText(text)) return failed(text, NOT_TEXT_MESSAGE, null);
 
   const adapter = detect(text);
   if (adapter && adapter.toDossier) {
     let converted = null;
     try {
-      converted = adapter.toDossier(text);
+      converted = adapter.toDossier(text, { name });
     } catch (err) {
       return failed(text, `This looks like ${adapter.label}, but it could not be converted: ${err && err.message ? err.message : 'no reason given'}.`, adapter);
     }
@@ -49,6 +57,45 @@ export function readText(text) {
     }
   }
   return parsed(text, null);
+}
+
+/**
+ * A parse failure as one plain sentence, for the Open dialog and its toast.
+ * The engine's own JSON wording differs from browser to browser ("Unexpected
+ * end of JSON input", "unexpected end of data", "Unexpected EOF") and names
+ * a character position; a reader wants to know what to look for. A message
+ * this tool wrote itself is already a sentence and is kept.
+ *
+ * @param {{message?: string, line?: number|null, column?: number|null}|null} fatal
+ * @param {string} [text] the text that failed, to tell JSON from YAML
+ * @returns {string}
+ */
+export function plainFatal(fatal, text) {
+  const message = String(fatal?.message || '');
+  const json = typeof text === 'string' ? /^\s*[[{]/.test(text) : /JSON/.test(message);
+  if (/^Document must have a "dossier" key/.test(message)) {
+    return json
+      ? 'This is JSON, but not a Dossier document: it needs a "dossier" key, or "version" and "pages" at the top.'
+      : 'This is not a Dossier document: it needs a "dossier" key, or "version" and "pages" at the top.';
+  }
+  if (!json) return message;
+  if (/end of (JSON )?(input|data)|EOF/i.test(message) || atEnd(fatal, text)) return 'The JSON ends early: check for a missing }, ] or ".';
+  if (fatal?.line) return `The JSON has a mistake at line ${fatal.line}, column ${fatal.column}.`;
+  return message;
+}
+
+/**
+ * True when a fatal's line and column point past the last character of the
+ * text: V8 reports `{"a": {` as an expected property name at that position,
+ * which to a reader is JSON that stops too soon.
+ */
+function atEnd(fatal, text) {
+  if (!fatal?.line || typeof text !== 'string') return false;
+  const lines = text.split('\n');
+  let offset = 0;
+  for (let i = 0; i < fatal.line - 1 && i < lines.length; i += 1) offset += lines[i].length + 1;
+  offset += (fatal.column || 1) - 1;
+  return offset >= text.trimEnd().length;
 }
 
 function parsed(text, adapter) {

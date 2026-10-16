@@ -213,7 +213,7 @@
 
 /* An imported HTML report on its own: a compact cover, the frame full width. */
 .report-shell--artifact .report-header { padding: 20px 24px; }
-.report-shell--artifact .report-title { font-size: var(--text-lg); max-width: none; }
+.report-shell--artifact .report-title { font-size: var(--text-xl); max-width: none; }
 .report-shell--artifact .report-subtitle { margin-top: 6px; font-size: var(--text-sm); font-family: var(--font-ui); }
 .report-shell--artifact .report-title-row,
 .report-shell--artifact .report-title-row--label { grid-template-columns: minmax(0, 1fr); gap: 12px; }

@@ -7,16 +7,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { recordFrames, checkFirstPaint, checkBoot } from './check-boot.mjs';
-import { checkNarrow, noOverflow, oneHeader, visibleBars } from './check-narrow.mjs';
+import { checkNarrow, oneHeader, visibleBars } from './check-narrow.mjs';
+import { base, out, verifyUrl, noOverflow } from './check-helpers.mjs';
 import { checkReports } from './check-reports.mjs';
+import { checkSaving } from './check-saving.mjs';
+import { checkReportDetails } from './check-report-details.mjs';
+import { checkReading, checkFormWords } from './check-reading.mjs';
 
-const base = process.env.DOSSIER_URL || 'http://127.0.0.1:8899';
 const browser = await chromium.launch();
 const errors = [];
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const page = await context.newPage();
 page.on('pageerror', (error) => errors.push(error.message));
-await fs.mkdir('.verify', { recursive: true });
 
 /** What the retired response composer used to make: a saved report holding a comparison block. */
 const PASTED_COMPARISON = {
@@ -52,13 +54,17 @@ try {
   assert.equal(await page.locator('#viewCompare').getAttribute('aria-current'), null);
   // In the bar, Display options is an icon-only control (the kit draws it square).
   assert.equal(await page.locator('#displayOptions > :not(svg)').count(), 0, 'Display options carries a text label in the bar');
+  // One label style in the bar: only the current view is bolder.
+  const labels = await page.evaluate(() => ['viewCompare', 'openReport', 'shareReport'].map((id) => {
+    const cs = getComputedStyle(document.getElementById(id)); return `${cs.fontSize}/${cs.fontWeight}`; }));
+  assert.deepEqual(labels, Array(3).fill('14px/500'), `Header labels differ: ${labels.join(', ')}`);
   assert.ok(await page.locator('#welcomeExamples .ds-example').count() >= 3, 'The welcome screen lists no examples');
   // The note under the actions has its own space (it used to touch the buttons).
   const noteGap = await page.evaluate(() => document.querySelector('.ds-welcome__note').getBoundingClientRect().top
     - document.querySelector('.ds-welcome__examples').getBoundingClientRect().bottom);
   assert.ok(noteGap >= 16, `The welcome note sits ${noteGap}px under the examples`);
   await noOverflow(page, 'Welcome');
-  await page.screenshot({ path: '.verify/welcome-desktop.png', fullPage: true });
+  await page.screenshot({ path: out('welcome-desktop.png'), fullPage: true });
 
   // ── An example from the welcome screen, read mode, the report bar ──────────
   await page.locator('#welcomeExamples [data-file="responses.json"]').click();
@@ -81,9 +87,12 @@ try {
   // The rail is docked and open at this width, in read mode too.
   assert.equal(await page.locator('#rail').isVisible(), true, 'The rail is hidden in read mode at 1440px');
   assert.equal(await page.locator('#toggleRail').getAttribute('aria-expanded'), 'true');
+  // One toggle: the docked rail's own Hide button; the bar's steps aside.
+  assert.equal(await page.locator('#toggleRail').isVisible(), false, 'Two rail toggles at 1440 with the rail open');
+  assert.equal(await page.locator('#rail .ds-rail__hide').isVisible(), true);
   await oneHeader(page, 'Report');
   await noOverflow(page, 'Desktop report');
-  await page.screenshot({ path: '.verify/report-desktop.png', fullPage: true });
+  await page.screenshot({ path: out('report-desktop.png'), fullPage: true });
 
   const comparison = page.locator('#stage .compare');
   await comparison.getByRole('button', { name: 'Highlight changes' }).click();
@@ -101,7 +110,7 @@ try {
   assert.equal(await page.locator('#stage .chart-bar').count(), 8);
   await page.locator('#stage .chart-values summary').click();
   assert.match(await page.locator('#stage .chart-values').innerText(), /Run 5/);
-  await page.screenshot({ path: '.verify/report-charts.png', fullPage: true });
+  await page.screenshot({ path: out('report-charts.png'), fullPage: true });
   // `]` and `[` step through the pages, one history entry each.
   const activeTab = () => page.locator('#stage .report-tab[aria-current="page"]').innerText();
   await page.locator('body').click({ position: { x: 5, y: 600 } });
@@ -112,14 +121,23 @@ try {
   assert.match(await activeTab(), /Scores & runs/);
 
   // ── The rail collapses in read mode, and the choice is kept ────────────────
-  await page.locator('#toggleRail').click();
+  await page.locator('#rail .ds-rail__hide').click();
   assert.equal(await page.locator('#rail').isVisible(), false);
   assert.equal(await page.locator('#toggleRail').getAttribute('aria-expanded'), 'false');
+  // The bar's toggle is back, with focus, and opening hands focus to Hide.
+  assert.equal(await page.locator('#toggleRail').isVisible(), true);
+  assert.equal(await page.locator('#toggleRail').evaluate((el) => el === document.activeElement), true, 'Hide left focus nowhere');
+  await page.locator('#toggleRail').click();
+  assert.equal(await page.locator('#rail').isVisible(), true);
+  assert.equal(await page.locator('#toggleRail').isVisible(), false);
+  assert.equal(await page.locator('#rail .ds-rail__hide').evaluate((el) => el === document.activeElement), true, 'Opening the rail stranded focus');
+  await page.locator('#rail .ds-rail__hide').click();
   // `/` opens it again and lands in the saved-report filter.
   await page.locator('body').click({ position: { x: 5, y: 600 } });
   await page.keyboard.press('/');
   assert.equal(await page.locator('#rail').isVisible(), true, '/ did not open the rail');
   assert.equal(await page.locator('#reportFilter').evaluate((el) => el === document.activeElement), true, '/ did not focus the filter');
+  assert.equal(await page.locator('#toggleRail').isVisible(), false);
   await page.locator('#reportFilter').blur();
 
   // ── H belongs to the kit: one bar, hidden, then back. Never two. ───────────
@@ -186,6 +204,7 @@ try {
   assert.equal(await page.locator('.report-subtitle').innerText(), 'Edited subtitle');
   await page.locator('#formPane summary').filter({ hasText: 'Side-by-side comparison' }).click();
   await page.locator('#formPane').getByRole('group', { name: 'Right', exact: true }).getByLabel('Value', { exact: true }).fill('A revised answer with specifics.');
+  await checkFormWords(page);
   await subtitle.fill('Edited subtitle after response change');
   assert.match(await page.locator('#stage .compare__face[data-side="right"]').innerText(), /A revised answer with specifics/);
 
@@ -201,7 +220,7 @@ try {
   assert.ok(Math.abs(boxes.findings.left - boxes.source.left) < 2, 'Check report is not in the editor column');
   assert.ok(boxes.findings.bottom <= boxes.source.top + 1, 'Check report overlaps the editor');
   await noOverflow(page, 'Report editor');
-  await page.screenshot({ path: '.verify/report-editor.png', fullPage: true });
+  await page.screenshot({ path: out('report-editor.png'), fullPage: true });
   // At the end of the page the sticky side column still fits above the
   // footer: Check report's heading and Close stay in the window. A short
   // window makes sure the page scrolls.
@@ -347,15 +366,15 @@ try {
     finally { URL.createObjectURL = original; }
     return captured.text();
   });
-  await fs.writeFile('.verify/comparison-standalone.html', html);
+  await fs.writeFile(out('comparison-standalone.html'), html);
   const offline = await context.newPage();
   const requests = [];
   await offline.route('**/*', (route) => {
-    if (route.request().url() === `${base}/.verify/comparison-standalone.html`) return route.continue();
+    if (route.request().url() === verifyUrl('comparison-standalone.html')) return route.continue();
     requests.push(route.request().url());
     return route.abort();
   });
-  await offline.goto(`${base}/.verify/comparison-standalone.html`);
+  await offline.goto(verifyUrl('comparison-standalone.html'));
   assert.equal(await offline.locator('.report-page').count(), 3);
   // The exported file has no Header Kit, so its report title stays the h1.
   assert.equal(await offline.locator('h1.report-title').count(), 1);
@@ -371,7 +390,7 @@ try {
   assert.equal(await offline.locator('.compare__tools').isVisible(), false);
   const noScriptContext = await browser.newContext({ javaScriptEnabled: false });
   const noScript = await noScriptContext.newPage();
-  await noScript.goto(`${base}/.verify/comparison-standalone.html`);
+  await noScript.goto(verifyUrl('comparison-standalone.html'));
   assert.equal(await noScript.locator('.compare__face:visible').count(), 2);
   assert.equal(await noScript.locator('.compare__tools').isVisible(), false);
   await noScriptContext.close();
@@ -449,11 +468,16 @@ try {
   // ── Narrow windows (check-narrow.mjs) ──────────────────────────────────────
   await checkNarrow({ browser, base, errors });
 
+  // ── Saving across reloads and tabs (check-saving.mjs) ──────────────────────
+  await checkSaving({ browser, base, errors });
+
   // ── The reading surface: tabs in view, the rail, print, line length ───────
   await checkReports({ browser, base, errors });
+  await checkReportDetails({ browser, base, errors });
+  await checkReading({ browser, base, errors });
 
   assert.deepEqual(errors, [], 'Page raised JavaScript errors');
-  console.log('Passed: one header from first paint and after H, welcome front door, report bar, rail, Edit and Done, Check report beside the editor and in the window at the page end, the Compare view and the skip link inside it, examples from Open and the block catalog, focus back from the phone menu, share and export dialog and keys, delete to welcome, shared links and broken links, slow and failed boots, persistence, rapid report switches, import recovery, YAML export, offline HTML, print, the phone menu over the drawer and 4 viewport sizes; then (check-reports.mjs) the current page tab in view at 390 and 1024 px, the rail beside a short report, its filter and cut outline links, disclosures on paper, and lines of 73 characters or fewer at every Line width in both faces, with Narrow, Normal and Wide still apart.');
+  console.log('Passed: one header from first paint and after H, one label style in the header, welcome front door, report bar, rail with one toggle at docking width and focus handed between the two, Edit and Done, Check report beside the editor and in the window at the page end, the Compare view and the skip link inside it, examples from Open and the block catalog, focus back from the phone menu, share and export dialog and keys, delete to welcome, shared links and broken links, slow and failed boots, persistence, rapid report switches, import recovery, YAML export, offline HTML, print, the phone menu over the drawer, a drawer that closes when Tab leaves it and brings its toggle back into view on Escape, the welcome examples in full rows, and 4 viewport sizes; then (check-reports.mjs) the current page tab in view at 390 and 1024 px, the rail beside a short report, its filter and cut outline links, disclosures on paper, and lines of 73 characters or fewer at every Line width in both faces, with Narrow, Normal and Wide still apart; (check-report-details.mjs) a trend chart of fixed height with 13 px values that never overlap and x labels under their points, dates in the file label read as 8 Oct 2026 in a zone west of UTC, and comparison prose with no empty paragraphs; (check-reading.mjs) Shift+Tab never leaving focus under the header at 1440 and 390 px, an outline jump landing just under it, the back-to-top button legible at rest, on hover and in focus in light, dark and a visitor theme, the headings of an imported report stepping up from its text with h3 indented in the outline, and an edit form that names each field once, in the words a reader uses; (check-report-focus.mjs) focus on the report after opening an example from the welcome screen or the Open dialog, focus kept on the current tab or outline link and the page announced and named in the tab title after a page change, Check report over the sheet in read mode without moving it, example cards named by their titles, a shortcut sheet true in both views, and a two-press delete announced and kept armed while focused; (check-saving.mjs) an edit 50 ms before a reload kept in both views, a report put into a new comparison 100 ms before a reload kept, two tabs on one report and on one comparison both keeping their edits, a refused save offering the choice, a review note typed before Back staying in its own comparison, and saving that recovers after the site data is cleared.');
 } finally {
   await browser.close();
 }

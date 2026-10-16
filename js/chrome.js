@@ -118,8 +118,16 @@ export function setRail(open, { focus = false } = {}) {
   if (!focus) return;
   if (open) {
     document.getElementById('reportFilter')?.focus();
-  } else {
-    document.getElementById('toggleRail')?.focus({ preventScroll: true });
+    return;
+  }
+  // Back to the toggle without a jump, unless the page was scrolled while the
+  // drawer was open and the toggle went off screen: then it comes into view,
+  // so focus is never left somewhere the reader cannot see (WCAG 2.4.11).
+  const toggle = document.getElementById('toggleRail');
+  toggle?.focus({ preventScroll: true });
+  if (toggle) {
+    const box = toggle.getBoundingClientRect();
+    if (box.bottom <= 0 || box.top >= window.innerHeight) toggle.scrollIntoView({ block: 'nearest' });
   }
 }
 
@@ -137,6 +145,13 @@ export function initialRail({ fromLink = false, preference = null } = {}) {
  * drawer it would become, and reaching it restores the stored choice. An
  * outline link cut short by the rail's width shows its full text as a title.
  *
+ * A drawer is a disclosure, not a dialog: it also closes when focus leaves
+ * it. Tab past its last control used to walk on into the report bar and the
+ * report under it, so focus sat on controls the drawer covered (WCAG 2.4.11).
+ * Focus stays where the visitor sent it; the drawer just gets out of the way.
+ * The header is not "outside" (the kit's phone menu hangs from it and opens
+ * over the drawer), and neither is a dialog opened from the rail.
+ *
  * @param {() => boolean|null} preference the stored `railOpen`
  */
 export function followRailWidth(preference) {
@@ -151,6 +166,12 @@ export function followRailWidth(preference) {
     if (event.key !== 'Escape' || railDocked() || !railOpen() || event.defaultPrevented) return;
     if (document.querySelector('dialog[open]')) return;
     setRail(false, { focus: true });
+  });
+  document.addEventListener('focusin', (event) => {
+    if (railDocked() || !railOpen()) return;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest('#rail, .header-bar, dialog')) return;
+    setRail(false);
   });
 }
 
@@ -206,8 +227,11 @@ const FILTER_KEY = '/';
  * The keys are the fleet's conventional ones, with their conventional
  * meanings, which is why the kit warns about them rather than refusing them:
  * `/` focuses the filter, `s` shares, `e` exports. `[` and `]` are previous
- * and next in a series, which here is the report's pages. `r` is the one
- * site-specific binding and it is not reserved or conventional.
+ * and next in a series: the report's pages in Reports, the changes (or the
+ * headings) in Compare. `/`, `s` and `e` act on the open comparison in
+ * Compare too (js/boot.js bindShortcuts), so every label names both views.
+ * `r` is the one site-specific binding, Reports only, and it is not reserved
+ * or conventional.
  *
  * `h`, `g` and `?` belong to the kit. Asking for them is refused with a
  * console warning, which is how the fleet stops an eighth site reinventing H.
@@ -222,13 +246,16 @@ export function registerShortcuts(actions) {
     return { accepted: [], rejected: [], deferred: true };
   }
 
+  // One label per key, true in both views: the kit keeps the first
+  // registration of a key and has no way to relabel it, so the sheet cannot
+  // change with the view.
   const defs = [
-    { key: FILTER_KEY, label: 'Find a saved report', hint: 'Opens the side panel first if it is closed', run: actions.filter },
-    { key: 's', label: 'Copy a share link', hint: 'The report travels inside the link', run: actions.share },
-    { key: 'e', label: 'Share and export', hint: 'A link, one HTML file, JSON, YAML, print or a deck', run: actions.export },
-    { key: '[', label: 'Previous page', run: actions.prev },
-    { key: ']', label: 'Next page', run: actions.next },
-    { key: 'r', label: 'Edit or done', hint: 'Open the editor, or put it away', run: actions.toggleMode },
+    { key: FILTER_KEY, label: 'Find a report or comparison', hint: 'Reports: the side panel filter. Compare: the Comparisons switcher', run: actions.filter },
+    { key: 's', label: 'Copy a share link', hint: 'The open report or comparison travels inside the link', run: actions.share },
+    { key: 'e', label: 'Share and export', hint: 'Reports: a link, one HTML file, JSON, YAML, print or a deck. Compare: a link, one HTML file, the comparison file or the review', run: actions.export },
+    { key: '[', label: 'Previous page or change', hint: 'In Compare, the previous change (or heading when differences are off)', run: actions.prev },
+    { key: ']', label: 'Next page or change', hint: 'In Compare, the next change (or heading when differences are off)', run: actions.next },
+    { key: 'r', label: 'Edit or done', hint: 'Reports only: open the editor, or put it away', run: actions.toggleMode },
   ].filter((d) => typeof d.run === 'function');
 
   const result = keys.register(defs);

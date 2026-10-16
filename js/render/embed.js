@@ -40,6 +40,8 @@ import { staticCopy, scriptedCopy, remoteResources, blockedSentence } from '../c
 import { htmlToIr } from '../compare/normalize.js';
 import { renderIr } from '../compare/ir-render.js';
 import { icon } from '../compare/icons.js';
+import { MODE_ROW, MODE_WORDS } from '../compare/model.js';
+import { radioSeg } from '../seg.js';
 import { embedHeadingPrefix } from './outline.js';
 
 export const EMBED_VIEWS = Object.freeze(['original', 'format', 'interactive']);
@@ -81,6 +83,8 @@ export function embedNote(text, strong = '') {
 
 /** The sentence under a frame running the report's scripts. */
 export const SCRIPTS_NOTE = 'They run in a sealed frame with no network, no storage and no access to this page. Values they compute can differ from the Original view.';
+/** Above a frame's Dossier format copy on paper, here and in js/embeds.js. */
+export const PRINT_CAPTION = '<p class="block-embed__caption">Printed in Dossier format: a frame cannot run across pages.</p>';
 
 /**
  * Dossier format: the report's text as escaped markup, with the notes that
@@ -122,19 +126,22 @@ export function originalNotes(html) {
 }
 
 /**
- * The view controls. Every button starts unpressed; js/embeds.js presses the
- * one in effect. "Run the report's scripts" is a toggle on the Original view,
- * and is only there when the source has scripts.
+ * The view controls: the same radio group as the Compare toolbar's render
+ * mode, in the same order (Dossier format, then Original; js/seg.js), with
+ * one Tab stop and the arrow keys. Every radio starts unchecked; js/embeds.js
+ * checks the one in effect. "Run the report's scripts" is an aria-pressed
+ * toggle on the Original view, right after it, and is only there when the
+ * source has scripts.
  */
 function viewBar(scripts) {
   const run = scripts
     ? `<button type="button" class="btn btn--sm btn--quiet toggle embed-bar__scripts" data-action="embed-view" data-view="interactive" aria-pressed="false"><span class="box">${icon('check')}</span>Run the report’s scripts</button>`
     : '';
+  const views = radioSeg({
+    label: 'Show this HTML report', action: 'embed-view', attr: 'view', items: MODE_ROW.map((v) => [v, MODE_WORDS[v]]), className: 'embed-bar__views',
+  });
   return `<div class="embed-bar">
-      <div class="seg embed-bar__views" role="group" aria-label="Show this HTML report">
-        <button type="button" data-action="embed-view" data-view="original" aria-pressed="false">Original</button>
-        <button type="button" data-action="embed-view" data-view="format" aria-pressed="false">Dossier format</button>
-      </div>${run}
+      ${views}${run}
     </div>`;
 }
 
@@ -176,7 +183,7 @@ export function renderEmbed(block, ctx = {}) {
 
   if (ctx.print) {
     return `<div class="block-embed-html block-embed-html--format">
-      <p class="block-embed__caption">Printed in Dossier format: a frame cannot run across pages.</p>
+      ${PRINT_CAPTION}
       ${formatMarkup(html, prefix)}
     </div>`;
   }

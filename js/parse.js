@@ -5,7 +5,8 @@
  * and renders, and every coercion is recorded.
  *
  * DOM-free. Node imports this. Parse is synchronous; YAML relies on a
- * dynamic import that happens on first use.
+ * dynamic import (`initYaml`) that the callers await when `needsYaml` says
+ * the text is YAML.
  */
 
 import { derivedFields, blockDef } from './registry/index.js';
@@ -147,18 +148,47 @@ function parseYamlSync(text, onError) {
   }
 }
 
-async function ensureYamlLoaded() {
-  if (yamlLoaded) return;
-  try {
-    yamlModule = await import('./vendor/js-yaml.mjs');
-    yamlLoaded = true;
-  } catch (e) {
-    console.error('Failed to load YAML module:', e);
+let yamlPromise = null;
+
+/**
+ * Load the YAML parser, once. Nothing loads it at boot: it is fetched only
+ * when non-JSON text actually reaches `parse` (js-yaml is a quarter of the
+ * site's scripts, and most visits never read YAML). Every path that can hand
+ * `parse` YAML awaits this first, gated on `needsYaml`. Concurrent callers
+ * share one promise; a failed import clears it, so a later call retries.
+ *
+ * @returns {Promise<void>}
+ */
+export function initYaml() {
+  if (yamlLoaded) return Promise.resolve();
+  if (!yamlPromise) {
+    yamlPromise = import('./vendor/js-yaml.mjs')
+      .then((mod) => {
+        yamlModule = mod;
+        yamlLoaded = true;
+      })
+      .catch((e) => {
+        yamlPromise = null;
+        console.error('Failed to load YAML module:', e);
+      });
   }
+  return yamlPromise;
 }
 
-export async function initYaml() {
-  await ensureYamlLoaded();
+/** True once the YAML parser is in, so `parse` reads YAML synchronously. */
+export function yamlReady() {
+  return yamlLoaded;
+}
+
+/**
+ * True when `parse` would read this text as YAML: it is not empty and does
+ * not open as JSON. Mirrors the auto branch in `parse`.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function needsYaml(text) {
+  return typeof text === 'string' && Boolean(text.trim()) && !/^\s*[{[]/.test(text);
 }
 
 function makeFatal(message, line, col, text) {

@@ -23,6 +23,7 @@ import { parse } from '../js/parse.js';
 import { validate } from '../js/validate.js';
 import { blockHtml } from '../js/render/index.js';
 import { escHtml } from '../js/neorgon-dom.js';
+import { readText } from '../js/read.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = join(__filename, '..');
@@ -293,5 +294,66 @@ describe('foreign inputs round trip', () => {
     const lh = lighthouseToDossier(readFixture('lighthouse.json')).document.dossier.pages[0].blocks;
     assert.ok(lh.find((b) => b.type === 'findings').items.every((f) => f.level === 'warning'));
     assert.ok(lh.find((b) => b.type === 'metrics').items.every((m) => m.target === 90 && m.baseline === undefined));
+  });
+});
+
+/**
+ * A Markdown report with no front matter is named from its own text. Every
+ * agent Markdown file without front matter used to open as "Document", with
+ * its H1 pushed down to a page heading, so the saved list filled with
+ * entries no one could tell apart; an H1 over 60 characters also made a page
+ * title the validator called an error.
+ */
+describe('Markdown titles', () => {
+  test('the one H1 is the title, and its page is not titled with it again', () => {
+    const doc = markdownToDossier('# Alioth FY27 Roadmap\n\nBody\n\n## A\n\nx').document.dossier;
+    assert.strictEqual(doc.title, 'Alioth FY27 Roadmap');
+    assert.deepStrictEqual(doc.pages.map((p) => p.title), ['Content']);
+    assert.deepStrictEqual(doc.pages[0].blocks.map((b) => b.type), ['prose', 'heading', 'prose']);
+    assert.strictEqual(doc.pages[0].blocks[0].text, 'Body');
+  });
+
+  test('with no H1, the file name names the report, then the first heading', () => {
+    assert.strictEqual(markdownToDossier('## Findings\n\nx', { name: 'agent-run_3.md' }).document.dossier.title, 'agent run 3');
+    assert.strictEqual(markdownToDossier('## Findings\n\nx').document.dossier.title, 'Findings');
+    assert.strictEqual(markdownToDossier('Just a paragraph.').document.dossier.title, 'Document');
+    // The dialog's label for a paste is not a file name.
+    assert.strictEqual(markdownToDossier('## Findings\n\nx', { name: 'Pasted text' }).document.dossier.title, 'Findings');
+  });
+
+  test('several H1s keep their pages, and the file name names the report', () => {
+    const doc = markdownToDossier('# One\n\nx\n\n# Two\n\ny', { name: 'reports/two-pages.markdown' }).document.dossier;
+    assert.strictEqual(doc.title, 'two pages');
+    assert.deepStrictEqual(doc.pages.map((p) => p.title), ['One', 'Two']);
+    assert.strictEqual(markdownToDossier('# One\n\nx\n\n# Two\n\ny').document.dossier.title, 'One');
+  });
+
+  test('front matter title still wins, and the H1 stays a page', () => {
+    const doc = markdownToDossier('---\ntitle: From front matter\n---\n# Page one\n\nx', { name: 'x.md' }).document.dossier;
+    assert.strictEqual(doc.title, 'From front matter');
+    assert.deepStrictEqual(doc.pages.map((p) => p.title), ['Page one']);
+  });
+
+  test('inline Markdown is taken off a heading used as the title', () => {
+    const doc = markdownToDossier('# **Bold** and [a link](https://x.test) `code`\n\nx').document.dossier;
+    assert.strictEqual(doc.title, 'Bold and a link code');
+  });
+
+  test('a long H1 makes the title, within its limit, and no validation error', () => {
+    const h1 = `Quarterly platform reliability review: ${'latency, '.repeat(6)}and the cost of every retry`;
+    assert.ok(h1.length > 60, 'precondition: longer than a page title may be');
+    const read = readText(`# ${h1}\n\nThe body.`, { name: 'review.md' });
+    assert.strictEqual(read.ok, true);
+    assert.strictEqual(read.document.dossier.title, h1);
+    assert.deepStrictEqual(read.findings.filter((f) => f.level === 'error'), []);
+    // Two H1s: each page title is clamped to 60 characters, not flagged.
+    const two = readText(`# ${h1}\n\nx\n\n# Second\n\ny`, { name: 'review.md' });
+    assert.ok(two.document.dossier.pages[0].title.length <= 60);
+    assert.deepStrictEqual(two.findings.filter((f) => f.level === 'error'), []);
+  });
+
+  test('the name reaches the adapter through readText', () => {
+    assert.strictEqual(readText('## Findings\n\nx', { name: 'agent-run_3.md' }).document.dossier.title, 'agent run 3');
+    assert.strictEqual(readText('## Findings\n\nx').document.dossier.title, 'Findings');
   });
 });

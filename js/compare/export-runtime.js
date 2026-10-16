@@ -1,9 +1,17 @@
 /**
  * The behaviour of an exported comparison file, as one self-contained
- * function: js/compare/export.js writes `(${comparisonRuntime})(document)`
- * into the file's only script, the way `bindComparisons` travels inside the
- * report export. So it may use nothing from outside its own body: no
- * imports, no module state, no network.
+ * function: js/compare/export.js writes
+ * `(${comparisonRuntime})(document, ${guardFrameLinks})` into the file's only
+ * script, the way `bindComparisons` travels inside the report export. So it
+ * may use nothing from outside its own body: no imports, no module state, no
+ * network.
+ *
+ * It keeps an Original column's links inside it, through `guard`, the app's
+ * own link policy (js/frame-links.js): an in-page link scrolls the column, a
+ * web or mail address opens in a new tab, anything else stays put, and a
+ * column that leaves its report anyway is put back. Without it a srcdoc
+ * column resolved its links against this file's address, so `#sec2` loaded
+ * the whole comparison into the column and its scroll sync was lost.
  *
  * It syncs the columns (by matched sections, each heading carrying the
  * number of its group in `data-sync`; a column in its original layout
@@ -23,8 +31,9 @@
  * phone may not show at all.
  *
  * @param {Document} doc
+ * @param {Function} [guard] `guardFrameLinks`
  */
-export function comparisonRuntime(doc) {
+export function comparisonRuntime(doc, guard) {
   var root = doc.getElementById('compareView');
   if (!root) return;
   var cols = Array.prototype.slice.call(root.querySelectorAll('.col[data-col]'));
@@ -55,6 +64,9 @@ export function comparisonRuntime(doc) {
     }
     var f = col.querySelector('iframe');
     if (!f) return null;
+    // First, so the guard's load listener runs before `listen` binds a
+    // scroll: a page that is not the report is put back, never followed.
+    if (typeof guard === 'function') guard(f, { contain: true });
     var se = function () {
       try {
         var d = f.contentDocument;

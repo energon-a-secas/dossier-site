@@ -35,13 +35,17 @@
  * line); if it is not, the reader is still inside the long change, which
  * stays current with its tag held at the column's top edge. Its tag used to
  * be cut off there, over a change outlined from somewhere above the column.
+ *
+ * When the window is too narrow for every column (three need 1060 px), a
+ * step also brings its column into the row sideways (`revealColumn`): the
+ * counter used to move while the change stayed off the right edge.
  */
 
 import { say } from '../share.js';
 import { columnById } from './model.js';
 import { displayColumns } from './blind.js';
 import { isPhone } from './popover.js';
-import { reducedMotion } from './sync.js';
+import { reducedMotion } from '../motion.js';
 import { markCurrentTick, offsetIn } from './ruler.js';
 
 /** A change lands this far under the top of its column, room for its "2 of 9" tag. */
@@ -92,6 +96,39 @@ export function createChanges({ api, ui, planFor, refOf, baseId }) {
     return rec?.kind === 'reader' ? rec.scrollEl : null;
   };
   const changeEl = (colId, n) => scrollerEl(colId)?.querySelector(`[data-chg="${n}"]`) || null;
+
+  /**
+   * Bring a column into #cmpColumns sideways. When the window is too narrow
+   * for every column, a step could land in a column off the right edge: the
+   * counter moved, nothing on screen did. Only the row scrolls, never the
+   * page, whose footer sits below the fold on purpose.
+   */
+  function revealColumn(colId, smooth) {
+    const host = compare.refs.columns;
+    const col = scrollerEl(colId)?.closest('.col');
+    if (!host || !col || host.scrollWidth <= host.clientWidth + 1) return;
+    const pad = parseFloat(getComputedStyle(host).paddingInlineStart) || 0;
+    const h = host.getBoundingClientRect();
+    const c = col.getBoundingClientRect();
+    let shift = 0;
+    if (c.right > h.right - pad) shift = c.right - (h.right - pad);
+    // The column's start wins when it is wider than the row.
+    if (c.left - shift < h.left + pad) shift = c.left - (h.left + pad);
+    if (Math.abs(shift) > 0.5) host.scrollTo({ left: host.scrollLeft + shift, behavior: smooth ? 'smooth' : 'instant' });
+  }
+
+  /**
+   * A change's hidden label. A table's header row keeps it just before the
+   * table, not in a header cell (js/compare/ir-render.js).
+   */
+  function srLabel(el) {
+    const own = el.querySelector('.u-sr');
+    if (own || !el.closest('thead')) return own;
+    for (let sib = el.closest('.r-table')?.previousElementSibling; sib && sib.localName === 'span'; sib = sib.previousElementSibling) {
+      if (sib.matches('.u-sr')) return sib;
+    }
+    return null;
+  }
   const totalOf = (colId) => planFor(columnById(compare.set, colId))?.result?.changes.length || 0;
 
   function clearCurrent() {
@@ -124,7 +161,7 @@ export function createChanges({ api, ui, planFor, refOf, baseId }) {
     } else {
       el.insertAdjacentHTML('afterbegin', tag);
     }
-    const sr = el.querySelector('.u-sr');
+    const sr = srLabel(el);
     if (sr) {
       sr.dataset.text = sr.textContent;
       sr.textContent = `${sr.dataset.text.replace(/:\s*$/, '')}, change ${n} of ${total}: `;
@@ -235,6 +272,7 @@ export function createChanges({ api, ui, planFor, refOf, baseId }) {
     ui.lockUntil = performance.now() + (smooth ? STEP_LOCK_MS : 120);
     setCurrent(colId, n);
     scroller.set(Math.max(0, offsetIn(scrollEl, el) - offset), smooth);
+    revealColumn(colId, smooth);
     return true;
   }
 
@@ -245,7 +283,7 @@ export function createChanges({ api, ui, planFor, refOf, baseId }) {
     const n = ui.current.setId === compare.set.id && ui.current.colId === colId ? ui.current.n : 0;
     const ref = refOf(colId);
     const el = n ? changeEl(colId, n) : null;
-    const what = el?.dataset.d === 'add' ? 'added' : el?.dataset.d === 'del' ? 'removed' : 'changed';
+    const what = { add: 'added', del: 'removed', mov: 'moved' }[el?.dataset.d] || 'changed';
     return {
       main: `${n} of ${total}`,
       sub: `in ${ref}`,
@@ -260,7 +298,8 @@ export function createChanges({ api, ui, planFor, refOf, baseId }) {
     const total = totalOf(colId);
     const ref = refOf(colId);
     if (!total) {
-      say(`${ref} has no differences from ${refOf(baseId())}.`);
+      const against = planFor(columnById(compare.set, colId))?.ref || baseId();
+      say(`${ref} has no differences from ${refOf(against)}.`);
       return true;
     }
     const same = ui.current.setId === compare.set.id && ui.current.colId === colId;
@@ -291,6 +330,6 @@ export function createChanges({ api, ui, planFor, refOf, baseId }) {
   }
 
   return {
-    changeColumn, showCurrent, place, goTo, counter, step, follow,
+    changeColumn, showCurrent, place, goTo, counter, step, follow, revealColumn,
   };
 }

@@ -1,8 +1,15 @@
 /**
  * What the differences mean for each column of a comparison: which column
- * is the base, each column's IR, and the plan for each column (the base,
- * not compared and why, still waiting for a drawn document, or a diff
- * result and how it is marked). Part of js/compare/analysis.js.
+ * is the base, what each column is marked against (its reference: the base,
+ * or with "Each against its source" the column a fix corrects, see
+ * js/compare/model.js `diffAgainst`), each column's IR, and the plan for
+ * each column (the base, not compared and why, still waiting for a drawn
+ * document, or a diff result and how it is marked). Part of
+ * js/compare/analysis.js.
+ *
+ * Word marks turned on by hand ask the diff for more (`force`: higher caps,
+ * more work), so the toggle marks units the default leaves unmarked rather
+ * than only switching margin bars off.
  *
  * A Dossier document's IR comes from its drawn record, so it is unknown
  * until the column is drawn; one that cannot be read is known to be
@@ -15,7 +22,7 @@ import { markdownToIr } from './markdown-ir.js';
 import { textToIr } from './ir.js';
 import { diffBlocks } from './diff.js';
 import { effectiveMode } from './column.js';
-import { columnById, defaultBase } from './model.js';
+import { columnById, diffAgainst } from './model.js';
 
 const irs = new WeakMap();
 const sourceIds = new WeakMap();
@@ -36,13 +43,19 @@ export function sourceId(source) {
  * @param {Set<string>} wordMarks columns whose Word marks are on: `${setId}:${colId}`
  */
 export function createPlans(compare, wordMarks) {
-  /** The column every other is marked against. */
+  /** The root column: the one with the Base tag, the one the Sections rows follow. */
   function baseId(set = compare.set) {
-    if (!set) return null;
-    const chosen = set.view.diff.base;
-    if (chosen && columnById(set, chosen)?.source) return chosen;
-    const fallback = defaultBase(set);
-    return fallback && columnById(set, fallback)?.source ? fallback : null;
+    return set ? diffAgainst(set).base : null;
+  }
+
+  /** The column `col` is marked against, or null (the base, or no report). */
+  function refFor(col, set = compare.set) {
+    return set && col ? diffAgainst(set).against.get(col.id) ?? null : null;
+  }
+
+  /** True when each column is marked against its own source. */
+  function isEach(set = compare.set) {
+    return Boolean(set && diffAgainst(set).each);
   }
 
   /**
@@ -71,36 +84,42 @@ export function createPlans(compare, wordMarks) {
   /**
    * What the differences mean for one column.
    *
-   * @returns {null | {base: true, unreadable?: true} | {off: 'mode'|'scripts'}
-   *   | {pending: true} | {unreadable: 'base'|'column'}
-   *   | {result: object, bars: boolean, forced: boolean, counted: boolean}}
-   *   `counted`: a Dossier document, counted and not marked. `unreadable`: a
-   *   Dossier document that could not be read, this column's or the base's,
-   *   so it is left out of the differences. It used to read as pending for
-   *   good, and the view redrew itself every frame waiting for it.
+   * @returns {null | {base: true, unreadable?: true} | {off: 'mode'|'scripts', ref: string}
+   *   | {pending: true, ref: string} | {unreadable: 'base'|'column', ref: string}
+   *   | {result: object, bars: boolean, forced: boolean, counted: boolean, ref: string}}
+   *   `ref` is the column it is marked against. `counted`: a Dossier
+   *   document, counted and not marked. `unreadable`: a Dossier document
+   *   that could not be read, this column's or its reference's, so it is
+   *   left out of the differences. It used to read as pending for good, and
+   *   the view redrew itself every frame waiting for it.
    */
   function planFor(col, record = null, set = compare.set) {
     if (!set || !col?.source || !set.view.diff.on) return null;
     const base = baseId(set);
     if (!base) return null;
     if (col.id === base) return irOf(col, record) === false ? { base: true, unreadable: true } : { base: true };
+    const ref = refFor(col, set);
+    if (!ref) return null;
     const mode = effectiveMode(set, col);
-    if (mode === 'interactive') return { off: 'scripts' };
-    if (mode !== 'format') return { off: 'mode' };
+    if (mode === 'interactive') return { off: 'scripts', ref };
+    if (mode !== 'format') return { off: 'mode', ref };
     const blocks = irOf(col, record);
-    if (blocks === false) return { unreadable: 'column' };
-    const baseBlocks = irOf(columnById(set, base));
-    if (baseBlocks === false) return { unreadable: 'base' };
-    if (!baseBlocks || !blocks) return { pending: true };
-    const result = diffBlocks(baseBlocks, blocks, set.view.diff);
+    if (blocks === false) return { unreadable: 'column', ref };
+    const refBlocks = irOf(columnById(set, ref));
+    if (refBlocks === false) return { unreadable: 'base', ref };
+    if (!refBlocks || !blocks) return { pending: true, ref };
     const forced = wordMarks.has(`${set.id}:${col.id}`);
+    const result = diffBlocks(refBlocks, blocks, { ...set.view.diff, force: forced });
     return {
       result,
       bars: result.tooDifferent && !forced,
       forced,
       counted: col.source.kind === 'dossier',
+      ref,
     };
   }
 
-  return { baseId, planFor };
+  return {
+    baseId, refFor, isEach, planFor, irOf,
+  };
 }

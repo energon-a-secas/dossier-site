@@ -7,8 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extract, statsItems, statsSentence, sectionCount, countNumbers } from '../js/compare/extract.js';
 import {
-  normHeading, similarity, alignHeadings, mapPosition, sectionMatrix, MATCH,
+  normHeading, similarity, alignHeadings, mapPosition, sectionMatrix, prepareHeadings, MATCH,
 } from '../js/compare/align.js';
+import { buildSections } from '../js/compare/sections-panel.js';
 import { markdownToIr } from '../js/compare/markdown-ir.js';
 import { headingsOf, flattenUnits, textToIr } from '../js/compare/ir.js';
 
@@ -132,12 +133,13 @@ test('aligning a few hundred headings costs no more than their pairs', () => {
   assert.ok(best < 40, `400 headings took ${best.toFixed(1)} times as long as 100, for 16 times the pairs`);
 });
 
-test('aligning headings scores each pair a fixed number of times', () => {
-  // The count the timing above cannot give on a busy machine: every score
-  // reads both headings' text, so the reads count the work. The alignment
-  // scores each pair once and each matched pair once more on its way back;
-  // the bound leaves room for twice that, while an alignment that scored
-  // each pair against a whole row or column would read 120 times as much.
+test('aligning headings reads each heading once, however many pairs it scores', () => {
+  // The count the timing above cannot give on a busy machine. Each heading
+  // is prepared once (its normalised text and bigrams), and every pair is
+  // scored from the prepared forms, so the reads grow with the headings,
+  // not with the pairs: 240 headings, 14,400 pairs. Scoring from the text
+  // read it twice per pair, and froze the first synced scroll of a long
+  // report for seconds.
   let reads = 0;
   const counted = (n, shift) => Array.from({ length: n }, (_, i) => {
     const text = `Section ${i + shift} about topic ${(i + shift) % 37}`;
@@ -153,8 +155,60 @@ test('aligning headings scores each pair a fixed number of times', () => {
   const pairs = alignHeadings(counted(n, 0), counted(n, 1));
   assert.equal(pairs.length, n - 1);
   assert.ok(pairs.every((p) => p.b === p.a - 1 && p.sim === 1));
-  assert.ok(reads >= n * n, `${reads} reads of heading text for ${n * n} pairs: the count no longer sees the scoring`);
-  assert.ok(reads <= 4 * n * n, `${reads} reads of heading text for ${n * n} pairs`);
+  assert.ok(reads > 0, 'the count sees the headings being read');
+  assert.ok(reads <= 2 * (n + n), `${reads} reads of heading text for ${2 * n} headings`);
+});
+
+test('the alignment is the same from either side, and from prepared headings', () => {
+  const human = [h('Checkout slowdown', 1), h('Summary'), h('Customer impact'), h('Timeline of events'), h('Root causes'), h('What we did')];
+  const agent = [h('Incident report', 1), h('Summary'), h('Root cause'), h('Contributing factors'), h('Impact'), h('Timeline'), h('Remediation')];
+  const forward = alignHeadings(human, agent);
+  const backward = alignHeadings(agent, human).map((p) => ({ a: p.b, b: p.a, sim: p.sim }));
+  assert.deepEqual(backward, forward);
+  assert.deepEqual(alignHeadings(prepareHeadings(human), prepareHeadings(agent)), forward);
+});
+
+test('similarity scores are the ones the Sections panel and sync were built on', () => {
+  // Fixed values: the prepared scoring must not move any of them.
+  assert.equal(similarity('Root cause', '2. Root causes'), 0.9333333333333333);
+  assert.equal(similarity('Impact', 'Customer impact'), 0.5882352941176471);
+  assert.equal(similarity('Timeline', 'Timeline of events'), 0.7);
+  assert.equal(similarity('Remediation', 'What we did'), 0.25);
+  assert.equal(similarity('IV) Timeline', 'timeline'), 1);
+  assert.equal(similarity('déjà vu', 'deja vu'), 1);
+  assert.equal(similarity('', ''), 0);
+});
+
+test('the section matrix and the Sections data are the same as before the prepared scoring', () => {
+  // Expected values recorded from the scoring before it was prepared once
+  // per heading: renamed, moved, a section only in another column, and an
+  // empty base.
+  const base = [h('Summary'), h('Root cause'), h('Contributing factors'), h('Impact'), h('Action items')];
+  const other = [h('Summary'), h('Customer impact'), h('Root causes'), h('What went well')];
+  assert.deepEqual(sectionMatrix(base, { k1: other }), {
+    rows: [
+      { index: 0, text: 'Summary', level: 2, cells: { k1: { state: 'present', index: 0, text: 'Summary' } } },
+      { index: 1, text: 'Root cause', level: 2, cells: { k1: { state: 'present', index: 2, text: 'Root causes' } } },
+      { index: 2, text: 'Contributing factors', level: 2, cells: { k1: { state: 'missing' } } },
+      { index: 3, text: 'Impact', level: 2, cells: { k1: { state: 'missing' } } },
+      { index: 4, text: 'Action items', level: 2, cells: { k1: { state: 'missing' } } },
+    ],
+    extra: { k1: [{ index: 1, text: 'Customer impact', level: 2 }, { index: 3, text: 'What went well', level: 2 }] },
+  });
+  const lists = { k1: other, k2: base, k3: [] };
+  const data = buildSections('k2', [{ id: 'k1' }, { id: 'k2' }, { id: 'k3' }], (id) => lists[id]);
+  assert.deepEqual(data.rows.map((r) => [r.text, r.cells.k1.state, r.cells.k1.moved || false, r.cells.k3.state]), [
+    ['Summary', 'present', false, 'missing'],
+    ['Root cause', 'present', false, 'missing'],
+    ['Contributing factors', 'missing', false, 'missing'],
+    ['Impact', 'renamed', true, 'missing'],
+    ['Action items', 'missing', false, 'missing'],
+  ]);
+  assert.deepEqual(data.coverage.map((c) => [c.colId, c.covered, c.renamed, c.adds, c.total]), [['k1', 3, 1, 1, 5], ['k3', 0, 0, 0, 5]]);
+  assert.deepEqual(data.extras.map((r) => [r.text, r.owner]), [['What went well', 'k1']]);
+  const empty = buildSections('k3', [{ id: 'k1' }, { id: 'k3' }], (id) => lists[id]);
+  assert.deepEqual(empty.rows, []);
+  assert.deepEqual(empty.extras.map((r) => r.text), ['Summary', 'Customer impact', 'Root causes', 'What went well']);
 });
 
 test('positions map piecewise-linearly between anchors', () => {

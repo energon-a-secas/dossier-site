@@ -12,12 +12,19 @@
  * sheet under the header with a scrim, and Tab stays inside it until it
  * closes.
  *
- * Also here: the undo toast, which unlike the page's status toast has a
- * button and so takes the pointer.
+ * The undo toast is js/compare/undo-toast.js, exported from here too, since
+ * every action that offers an undo already imports this module.
  */
+
+export { undoToast, hideToast, TOAST_MS } from './undo-toast.js';
 
 /** The phone layout: one column at a time, popovers as sheets. */
 export const PHONE = '(max-width: 699px)';
+/**
+ * A short window (150 to 200% zoom, a landscape phone): the column heads
+ * shrink to their badge row and difference line. Mirrors css/compare.css.
+ */
+export const SHORT = '(max-height: 560px)';
 
 let current = null;
 
@@ -25,14 +32,47 @@ export function isPhone() {
   return typeof matchMedia === 'function' && matchMedia(PHONE).matches;
 }
 
+export function isShort() {
+  return typeof matchMedia === 'function' && matchMedia(SHORT).matches;
+}
+
+/**
+ * Inside a closed <details>, other than in its own summary. Chromium keeps
+ * such content laid out (it has a client rect) but refuses it focus.
+ */
+function inClosedDetails(el) {
+  for (let d = el.parentElement?.closest('details'); d; d = d.parentElement?.closest('details')) {
+    if (d.open) continue;
+    const own = [...d.children].find((c) => c.localName === 'summary');
+    if (!own || !own.contains(el)) return true;
+  }
+  return false;
+}
+
+function rendered(el) {
+  return typeof el.checkVisibility === 'function'
+    ? el.checkVisibility({ visibilityProperty: true })
+    : el.getClientRects().length > 0;
+}
+
+const isRadio = (el) => el.localName === 'input' && el.type === 'radio' && Boolean(el.name);
+
 /**
  * What Tab stops on inside `root`, in order. A radio group's unchecked radios
  * carry tabindex -1 (roving focus), so they are not stops: counting the
  * hidden "Off" sync radio as the last one let Tab out of the Options sheet.
+ * A native radio group is one stop too, its checked radio or its first, as
+ * it is outside a sheet. A summary is a stop, so a closed criterion can be
+ * opened from the keyboard; what its closed details hold is not.
  */
 function focusables(root) {
-  return [...root.querySelectorAll('button, [href], input, textarea, select, [tabindex]')]
-    .filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length);
+  const all = [...root.querySelectorAll('button, [href], input, textarea, select, summary, [tabindex]')]
+    .filter((el) => !el.disabled && el.tabIndex >= 0 && !inClosedDetails(el) && rendered(el));
+  return all.filter((el) => {
+    if (!isRadio(el)) return true;
+    const group = all.filter((o) => isRadio(o) && o.name === el.name && o.form === el.form);
+    return el === (group.find((o) => o.checked) || group[0]);
+  });
 }
 
 /** The undo toast's button, while the toast shows. */
@@ -41,7 +81,14 @@ function visibleUndo() {
   return button && button.getClientRects().length ? button : null;
 }
 
+/**
+ * Under its button, or above it when it fits only there. In a short window
+ * (a zoomed page, a landscape phone) it fits on neither side: it takes the
+ * roomier one and scrolls inside, so its last items stay reachable. It used
+ * to run past the window's bottom edge, where no scroll could bring them.
+ */
 function place(pop, opener) {
+  pop.style.maxHeight = '';
   if (pop.classList.contains('is-sheet')) {
     pop.style.left = '';
     pop.style.top = '';
@@ -52,8 +99,17 @@ function place(pop, opener) {
   const height = pop.offsetHeight;
   let left = pop.dataset.align === 'start' ? box.left : box.right - width;
   left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+  const below = window.innerHeight - 8 - (box.bottom + 6);
+  const above = box.top - 6 - 8;
   let top = box.bottom + 6;
-  if (top + height > window.innerHeight - 8 && box.top - height - 6 > 8) top = box.top - height - 6;
+  if (height > below && height <= above) {
+    top = box.top - height - 6;
+  } else if (height > below && above > below) {
+    top = 8;
+    pop.style.maxHeight = `${Math.floor(above)}px`;
+  } else if (height > below) {
+    pop.style.maxHeight = `${Math.max(96, Math.floor(below))}px`;
+  }
   pop.style.left = `${Math.round(left)}px`;
   pop.style.top = `${Math.round(Math.max(8, top))}px`;
 }
@@ -128,9 +184,14 @@ export function bindPopovers() {
         // Tab stays inside the sheet, round and round.
         event.preventDefault();
         if (!items.length) return;
-        const next = at < 0 ? (event.shiftKey ? items.length - 1 : 0)
-          : (at + (event.shiftKey ? -1 : 1) + items.length) % items.length;
-        items[next].focus();
+        const step = event.shiftKey ? -1 : 1;
+        const next = at < 0 ? (event.shiftKey ? items.length - 1 : 0) : (at + step + items.length) % items.length;
+        // An element that refuses focus is passed over, so Tab can never
+        // stall on one: it used to stay put on the stop before it, for good.
+        for (let n = 0, i = next; n < items.length; n += 1, i = (i + step + items.length) % items.length) {
+          items[i].focus();
+          if (document.activeElement === items[i]) break;
+        }
         return;
       }
       // A dialog popover on a wide screen. Shift+Tab before its first control
@@ -148,7 +209,9 @@ export function bindPopovers() {
       return;
     }
     if (pop.getAttribute('role') === 'menu' && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-      const items = [...pop.querySelectorAll('[role^="menuitem"]:not([disabled])')];
+      // Only the items on screen: a phone hides "Focus on this column", and
+      // focusing it failed, so ArrowDown stopped above it.
+      const items = [...pop.querySelectorAll('[role^="menuitem"]:not([disabled])')].filter((el) => el.getClientRects().length);
       if (!items.length) return;
       event.preventDefault();
       const at = items.indexOf(document.activeElement);
@@ -186,90 +249,4 @@ export function bindPopovers() {
   window.addEventListener('resize', () => {
     if (current && !current.sheet) place(current.pop, current.opener);
   });
-}
-
-// ── Undo toast ───────────────────────────────────────────────────────────────
-
-let toastTimer = 0;
-let toastUndo = null;
-/** Where focus was when the toast appeared, for when it goes away under it. */
-let toastReturn = null;
-
-function shown(el) {
-  return el instanceof HTMLElement && el.isConnected && el.getClientRects().length > 0;
-}
-
-/** Focus is nowhere a keyboard user can carry on from: the page, or the toast. */
-function focusLost(host) {
-  const active = document.activeElement;
-  return !active || active === document.body || host.contains(active);
-}
-
-/**
- * A message with an Undo button, for six seconds. A newer one replaces it and
- * the older change stays done.
- *
- * The Undo button takes itself away, so the undo says where focus goes next:
- * `undo` may return (or resolve to) an element, or a function that finds one
- * once the change is on screen. When nothing is named, focus goes back to
- * where it was when the toast appeared, if that is still on screen.
- *
- * @param {HTMLElement} host the toast element (a polite live region)
- * @param {string} message
- * @param {(() => (HTMLElement|(() => HTMLElement|null)|null|void|Promise<unknown>))|null} undo
- */
-export function undoToast(host, message, undo = null, ms = 6000) {
-  if (!host) return;
-  clearTimeout(toastTimer);
-  toastUndo = typeof undo === 'function' ? undo : null;
-  const active = document.activeElement;
-  toastReturn = active && active !== document.body && !host.contains(active) ? active : null;
-  host.replaceChildren();
-  const text = document.createElement('span');
-  text.textContent = message;
-  host.append(text);
-  if (toastUndo) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'btn btn--sm';
-    button.textContent = 'Undo';
-    button.addEventListener('click', async () => {
-      const fn = toastUndo;
-      const back = toastReturn;
-      hideToast(host, { refocus: false });
-      if (!fn) return;
-      let next = null;
-      try {
-        next = await fn();
-      } catch {
-        next = null;
-      }
-      requestAnimationFrame(() => {
-        if (!focusLost(host)) return;
-        const target = typeof next === 'function' ? next() : next;
-        const el = shown(target) ? target : shown(back) ? back : null;
-        el?.focus({ preventScroll: true });
-      });
-    });
-    host.append(button);
-  }
-  host.classList.add('is-visible');
-  toastTimer = setTimeout(() => hideToast(host), ms);
-}
-
-/**
- * @param {HTMLElement} host
- * @param {{refocus?: boolean}} [opts] refocus: a toast that times out under
- *   the keyboard puts focus back where it was when it appeared
- */
-export function hideToast(host, { refocus = true } = {}) {
-  clearTimeout(toastTimer);
-  toastUndo = null;
-  if (!host) return;
-  if (refocus && host.contains(document.activeElement) && shown(toastReturn)) toastReturn.focus({ preventScroll: true });
-  toastReturn = null;
-  host.classList.remove('is-visible');
-  setTimeout(() => {
-    if (!host.classList.contains('is-visible')) host.replaceChildren();
-  }, 250);
 }

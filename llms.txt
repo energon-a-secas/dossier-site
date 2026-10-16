@@ -80,7 +80,7 @@
 
 ## Evidence, which is the point
 
-Any block takes an `evidence` array. The report header counts how many claims have none, so this is the field that decides whether a reader believes the rest.
+Any block takes an `evidence` array. The reader sees it under the block as a "How this was checked" disclosure that names who checked each source, and a block without one shows nothing, so this is the field that decides whether a reader believes the rest.
 
 ```json
 {
@@ -132,6 +132,72 @@ These are read natively, so hand over the tool output rather than retyping it as
 - `?src=<https url>` renders a document you host.
 - The one HTML file export opens with no account, no install and no network. That is the one to attach to a ticket.
 - Keep a link under about 8,000 characters. Above that some chat clients cut it, and the file is the better answer.
+
+## Handing over a comparison
+
+The Compare view puts two to four whole reports side by side (Human, Agent, Fixes, Other), so a reviewer can read a human draft, an agent's report and its fixes together. A comparison travels as one JSON bundle:
+
+```json
+{
+  "dossierCompare": {
+    "version": 1,
+    "title": "Incident review: human draft, agent report and fixes",
+    "prompt": "Optional: the brief every column answered.",
+    "columns": [
+      {
+        "id": "k1",
+        "role": "human",
+        "label": "Human draft",
+        "author": "",
+        "source": {
+          "kind": "html",
+          "name": "draft.html",
+          "text": "<!doctype html>..."
+        }
+      },
+      {
+        "id": "k2",
+        "role": "agent",
+        "label": "Agent report",
+        "author": "model name",
+        "source": {
+          "kind": "markdown",
+          "name": "agent.md",
+          "text": "# Incident..."
+        }
+      },
+      {
+        "id": "k3",
+        "role": "fix",
+        "fixes": "k2",
+        "label": "Fixes",
+        "source": {
+          "kind": "html",
+          "name": "fixed.html",
+          "text": "<!doctype html>..."
+        }
+      }
+    ]
+  }
+}
+```
+
+- `version` must be 1, or the bundle is refused.
+- At most 4 columns; extra columns are dropped.
+- `role` is one of `human`, `agent`, `fix`, `other`; anything else becomes `other`.
+- `fixes` is only for role `fix` and names another column's id.
+- Column ids are `k<n>`; a missing id is assigned.
+- `source.kind` is one of `html`, `markdown`, `text`, `dossier`, and `source.text` is not blank and at most 2,000,000 characters. A source outside those rules leaves an empty slot.
+- `label` is up to 40 characters, `author` up to 80, `title` up to 120, `prompt` up to 4,000.
+- `mode` is optional: `format`, `original`, `interactive`. A column that asks to run its scripts opens in `original` until the reader runs them.
+- Unknown fields are dropped.
+- Leave out `review`: the reviewer fills it in, and the tool never scores content. `view` is optional; the default is Dossier format with section sync.
+
+Handing it over:
+
+- Save it as `<name>.dossier-compare.json` and open it with the Open dialog (drop, pick or paste). It is detected and opens in Compare.
+- Or link it as `#dc=<base64url of deflate-raw JSON>`, only while the payload is under 32,000 characters; otherwise send the file.
+- `node bin/validate.mjs` checks reports, not comparison bundles.
 
 ## Check it before you ship it
 

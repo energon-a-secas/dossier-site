@@ -376,7 +376,12 @@ export async function renderExamples(host, { limit = Infinity } = {}) {
     host.appendChild(li);
     return false;
   }
-  for (const item of index.slice(0, limit)) {
+  index.slice(0, limit).forEach((item, i) => {
+    // The card's name is its title; the summary and meta are its description,
+    // read after a pause, instead of one 150 to 200 character name read on
+    // every Tab. The ids are unique: each host has its own id, and
+    // replaceChildren() took the old ones away.
+    const key = `${host.id || 'examples'}-${i}`;
     const li = document.createElement('li');
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -385,21 +390,26 @@ export async function renderExamples(host, { limit = Infinity } = {}) {
     btn.dataset.file = item.file;
     const name = document.createElement('span');
     name.className = 'ds-example__title';
+    name.id = `${key}-title`;
     name.textContent = item.title;
     const meta = document.createElement('span');
     meta.className = 'ds-example__meta';
+    meta.id = `${key}-meta`;
     meta.textContent = exampleMeta(item);
     btn.append(name);
     if (item.summary) {
       const summary = document.createElement('span');
       summary.className = 'ds-example__summary';
+      summary.id = `${key}-summary`;
       summary.textContent = item.summary;
       btn.append(summary);
     }
     btn.append(meta);
+    btn.setAttribute('aria-labelledby', name.id);
+    btn.setAttribute('aria-describedby', item.summary ? `${key}-summary ${key}-meta` : `${key}-meta`);
     li.appendChild(btn);
     host.appendChild(li);
-  }
+  });
   return true;
 }
 

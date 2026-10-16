@@ -18,17 +18,24 @@
  */
 
 import { loadSaved, setPreference, forgetPreference } from './state.js';
-import { rerender } from './pipeline.js';
+import {
+  rerender, pageFocusOrigin, restorePageFocus, announcePage, reportDocumentTitle,
+} from './pipeline.js';
 import { reportOf } from './render/index.js';
 import { loadFromUrl, fragmentCarriesReport, say, sentence } from './share.js';
-import { readReport, listReports, onExternalChange } from './store.js';
+import {
+  readReport, writeReport, listReports, onExternalChange,
+} from './store.js';
 import { refreshLibrary, persistCurrent } from './library.js';
+import { writeReportJournal, replayReportJournal } from './report-journal.js';
+import { bindReportSync, followOtherTab } from './report-sync.js';
+import { readText } from './read.js';
 import {
   initialMode, registerShortcuts, toggleMode, mode, setMode, setView, view,
   initialRail, followRailWidth, setRail, railOpen, railDocked, followFooterHeight,
 } from './chrome.js';
 import { bindEvents, elements } from './events.js';
-import { showFindings, showSourceTab } from './source-pane.js';
+import { showFindings, showSourceTab, flushEditor } from './source-pane.js';
 import {
   beginOpen, openGeneration, readRecord, applyRead, readLink, applyLink, openLink,
   replaceDeleted,
@@ -42,7 +49,6 @@ import {
 import { exampleCard } from './compare/example.js';
 import { copyComparisonLink } from './compare/export.js';
 import { init as initKeys } from './neokeys/index.js';
-import { initYaml } from './parse.js';
 
 /** Our own text surfaces, beyond the inputs and textareas NeoKeys already knows. */
 const TYPING_SURFACES = '.editor-textarea, [data-text-surface]';
@@ -85,7 +91,9 @@ async function start(state) {
   }
 
   bindEvents(state, els);
+  bindReportSync(state, els);
   bindShortcuts(state, els);
+  keepEditsOnHide(state);
   followRailWidth(() => state.preferences.railOpen);
   followFooterHeight();
   // The Compare view listens for the view and route events, so it starts
@@ -114,15 +122,18 @@ async function start(state) {
     event.preventDefault();
     target.focus();
   });
-  // Another tab wrote or deleted a report. Refresh the list rather than the
-  // document: overwriting what this tab has open would be the bug we avoid.
+  // Another tab wrote or deleted a report. The list is refreshed. The open
+  // report is replaced by the newer version only when nothing here is
+  // waiting to be saved (js/report-sync.js); otherwise the next save finds
+  // the newer revision and asks which to keep, rather than writing over it.
   onExternalChange((ids, kind) => {
     if (kind === 'delete') forgetDeleted(state, els, ids);
+    else followOtherTab(state, els, ids);
     refreshLibrary(state, els);
   });
   refreshLibrary(state, els);
-  // Warm the local parser so a YAML file dropped early still reads.
-  initYaml();
+  // No YAML warm-up: js-yaml loads only when YAML text reaches the parser,
+  // and every path that can hand it YAML awaits it first (js/parse.js).
   // Both example lists, read once. The welcome screen waits for its list
   // before it is first shown, so its cards do not arrive after it.
   // The example comparison leads both lists: it is what the tool is for.
@@ -130,7 +141,8 @@ async function start(state) {
     renderExamples(els.welcomeExamples, { limit: WELCOME_EXAMPLES }),
     renderExamples(els.openExamples),
   ]).then(() => {
-    for (const list of [els.welcomeExamples, els.openExamples]) list?.prepend(exampleCard());
+    // Each list's card gets its own ids for its name and description.
+    for (const list of [els.welcomeExamples, els.openExamples]) list?.prepend(exampleCard(`${list.id}-cmp`));
   });
 
   const ticket = beginOpen();
@@ -159,7 +171,9 @@ async function start(state) {
     // The source pane starts on whichever tab the visitor last used.
     showSourceTab(state, els, state.preferences.sourceTab || 'form');
     document.dispatchEvent(new CustomEvent('dossier-opened'));
-    if (state.findings.length && state.preferences.showFindings) showFindings(state, els, true);
+    // Check report opens on its own only where it docks, beside the editor;
+    // while reading it is a popover the reader opens.
+    if (state.findings.length && state.preferences.showFindings && mode() === 'build') showFindings(state, els, true);
     // A record from before stored documents were authored-only is saved once
     // without its derived ids (js/open.js readRecord), so it stops warning.
     if (rewrite) persistCurrent(state, els);
@@ -188,6 +202,11 @@ async function loadInitialReport(state, ticket) {
   const stillOurs = () => openGeneration() === ticket;
   const done = (claimed, rewrite = false) => ({ claimed, rewrite });
 
+  // An edit the last visit made just before it unloaded, kept in the journal
+  // because its save could not land, is saved first, whatever opens.
+  const replayed = await replayReportJournal({ readReport, writeReport, readText });
+  if (!stillOurs()) return done('superseded');
+
   if (loadFromUrl()) {
     const link = await readLink();
     if (!stillOurs()) return done('superseded');
@@ -209,6 +228,9 @@ async function loadInitialReport(state, ticket) {
     if (fragmentCarriesReport()) history.replaceState(history.state, '', location.pathname + location.search);
   }
 
+  // That report was the one being edited, so it is the one that opens.
+  if (replayed) setPreference(state, 'lastReportId', replayed);
+
   const lastId = state.preferences.lastReportId;
   const candidates = lastId ? [lastId] : [];
   const saved = (await listReports()) || [];
@@ -224,6 +246,8 @@ async function loadInitialReport(state, ticket) {
     if (!read.ok) continue;
     applyRead(state, read);
     state.reportId = id;
+    // The stored revision this tab now holds; a save checks it (js/store.js).
+    state.reportRev = record.meta?.updated ?? null;
     if (id !== lastId) setPreference(state, 'lastReportId', id);
     return done('store', stale);
   }
@@ -246,6 +270,24 @@ async function forgetDeleted(state, els, ids) {
   say(instead
     ? sentence(`This report was deleted in another tab. Showing "${instead.title}"`)
     : 'This report was deleted in another tab, so it was closed here.');
+}
+
+/**
+ * The page is hiding, and may be about to unload: the editor's waiting edit
+ * is parsed and saved now (its timer would not get another turn), and while
+ * a save is still under way the open report goes into a synchronous journal,
+ * because a write started as the page unloads never commits. The next visit
+ * replays it (`loadInitialReport`).
+ */
+function keepEditsOnHide(state) {
+  const onHide = () => {
+    flushEditor();
+    writeReportJournal(state);
+  };
+  window.addEventListener('pagehide', onHide);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') onHide();
+  });
 }
 
 // ── Routes ───────────────────────────────────────────────────────────────────
@@ -279,9 +321,19 @@ function followRoute(state, els, hash = location.hash, previous = '') {
     return;
   }
   setView(route.view);
-  if (route.view === 'reports' && showRoutePage(state, route)) {
-    rerender(state, els);
-    showSourceTab(state, els, state.preferences.sourceTab);
+  if (route.view === 'reports') {
+    // Where focus was is read before the render: the tab or outline link
+    // that was activated is still the active element now, and is gone after.
+    const origin = pageFocusOrigin(document.activeElement, els);
+    if (showRoutePage(state, route)) {
+      rerender(state, els);
+      showSourceTab(state, els, state.preferences.sourceTab);
+      restorePageFocus(origin, els);
+      announcePage(state);
+    }
+    // After setView: leaving Compare puts back the title it found at boot,
+    // and the report's own title (with its page) is the right one.
+    reportDocumentTitle(state);
   }
   announceRoute(state, route);
 }

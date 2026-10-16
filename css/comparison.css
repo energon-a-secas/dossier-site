@@ -129,6 +129,9 @@
  * so its text keeps the same length as the lines around it. */
 .compare__prose p { max-width: var(--measure); margin: 0; white-space: pre-wrap; }
 .compare__prose p + p { margin-top: .5em; }
+/* A blank line in the source: a paragraph's space, as .block-prose p + p. A
+ * single newline keeps the .5em above, so a label stays close to its text. */
+.compare__prose p.compare__line--para { margin-top: 1em; }
 .compare[data-highlight="on"] .compare__prose .compare__line--removed,
 .compare[data-highlight="on"] .compare__prose .compare__line--added { max-width: calc(var(--measure) + 28px); }
 
@@ -253,13 +256,47 @@
 .chart-bar { position: absolute; height: 100%; border-radius: 2px; }
 .chart-bar-value { min-width: 3ch; font-family: var(--font-ui); font-size: var(--text-xs); font-weight: 600; font-variant-numeric: var(--numerals-data); text-align: right; white-space: nowrap; }
 .chart-axis-note { margin-top: 20px; font-size: var(--text-xs); color: var(--text-secondary); }
-.chart-x-labels { display: flex; justify-content: space-between; gap: 6px; padding-left: 4.7%; color: var(--text-secondary); font-size: var(--text-xs); font-variant-numeric: var(--numerals-data); }
-.chart-x-labels span { min-width: 0; overflow-wrap: anywhere; }
 .chart-values { margin-top: 16px; font-size: var(--text-xs); color: var(--text-secondary); }
 .chart-values summary { margin-bottom: 8px; cursor: pointer; }
-.trend-chart .viz-line { vector-effect: non-scaling-stroke; stroke-width: 2; }
+
+/* ── Trend charts (js/render/trend.js) ─────────────────────────────────
+ * A fixed-height plot: only the lines are SVG, stretched to the box; every
+ * piece of text is HTML placed by percentage, so it stays 13 px at every
+ * width and the x labels sit under their points. */
+.trend-plot { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 10px; }
+.trend-plot--ends { grid-template-columns: max-content minmax(0, 1fr) 52px; }
+.trend-area,
+.trend-y { position: relative; height: 200px; margin-block: 24px 10px; }
+/* Room around a plot labelled on every point, for a label under a low point. */
+.trend-plot--values { margin-block: 24px; }
+.trend-y { font-family: var(--font-ui); font-size: var(--text-xs); line-height: 1; color: var(--text-secondary); font-variant-numeric: var(--numerals-data); text-align: right; }
+.trend-y > span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; }
+.trend-y > .trend-y__sizer { position: static; display: block; height: 0; overflow: hidden; visibility: hidden; transform: none; }
+.trend-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.trend-svg .viz-line { vector-effect: non-scaling-stroke; stroke-width: 2; }
+.trend-grid { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--viz-grid); }
+.trend-marks { position: absolute; inset: 0; pointer-events: none; }
+.trend-dot { position: absolute; width: 7px; height: 7px; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--surface-1); }
+.trend-value,
+.trend-end { font-family: var(--font-ui); font-size: var(--text-xs); line-height: 1.2; font-weight: 600; color: var(--text-primary); font-variant-numeric: var(--numerals-data); white-space: nowrap; }
+.trend-value { position: absolute; }
+.trend-value--above { transform: translate(-50%, calc(-100% - 7px)); }
+.trend-value--below { transform: translate(-50%, 7px); }
+.trend-end { position: absolute; left: calc(100% + 10px); display: flex; align-items: center; gap: 5px; transform: translateY(-50%); }
+.trend-end i { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.trend-ref { position: absolute; left: 0; right: 0; height: 0; border-top: 1.5px dashed var(--text-primary); }
+.trend-ref > span { position: absolute; right: 0; bottom: 3px; padding: 0 4px; font-family: var(--font-ui); font-size: var(--text-xs); line-height: 1.2; color: var(--text-secondary); background: var(--surface-1); white-space: nowrap; }
+.trend-x { grid-column: 2; position: relative; height: 1.4em; font-family: var(--font-ui); font-size: var(--text-xs); color: var(--text-secondary); font-variant-numeric: var(--numerals-data); }
+.trend-x > span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.trend-x > span:first-child { left: 0 !important; transform: none; }
+.trend-x > span:last-child { left: auto !important; right: 0; transform: none; }
+.trend-x > span:only-child { left: 50% !important; right: auto; transform: translateX(-50%); }
+@media print { .trend-chart { break-inside: avoid; } }
 @container sheet (max-width: 640px) { .chart-bar-groups { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
 @container sheet (max-width: 480px) {
   .chart-bar-row { grid-template-columns: minmax(56px, 74px) minmax(32px, 1fr) max-content; gap: 6px; }
-  .trend-chart .viz-tick { font-size: 24px; }
+  .trend-area,
+  .trend-y { height: 160px; }
+  .trend-value:not(.trend-value--last),
+  .trend-x__minor { display: none; }
 }

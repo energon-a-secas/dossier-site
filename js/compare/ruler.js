@@ -18,7 +18,9 @@ export function offsetIn(scrollEl, el) {
   return el.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop;
 }
 
-const TICK = { chg: 't-chg', add: 't-ins', del: 't-del' };
+const TICK = {
+  chg: 't-chg', add: 't-ins', del: 't-del', mov: 't-mov',
+};
 
 function draw(entry) {
   const { ruler, scrollEl } = entry;

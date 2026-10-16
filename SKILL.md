@@ -100,6 +100,10 @@ A work report is a JSON document that renders as a dashboard in the browser. The
 4. Evidence is optional on any claim block. Supply a checkedBy to say who verified it: code (test/linter), human (someone looked), llm (a model asserted it).
 5. Unknown block types cause an error. Unknown fields on known blocks are carried through but never rendered.
 
+## Handing over a comparison
+
+To put whole reports side by side, emit `{"dossierCompare": {...}}` with up to 4 columns, each with a role (human, agent, fix, other) and a source. See llms.txt for the full rules.
+
 ## Validate
 
 ```bash

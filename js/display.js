@@ -36,9 +36,10 @@ const READING_KEY = 'dossier-site:reading';
 const store = createStore({ key: READING_KEY, version: 1 });
 
 /**
- * Mirrors READING in js/appearance.js, which applies these before paint. The
- * key is the `dataset` name on <html> (readingSize is data-reading-size) and
- * the first value is the default.
+ * The same list as READING in js/appearance.js, which applies these before
+ * paint; tests/reading-parity.test.mjs holds the two equal. The key is the
+ * `dataset` name on <html> (readingSize is data-reading-size) and the first
+ * value is the default.
  */
 export const READING = Object.freeze({
   readingSize: Object.freeze(['medium', 'small', 'large', 'xlarge']),

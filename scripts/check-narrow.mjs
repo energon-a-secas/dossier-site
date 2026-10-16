@@ -2,16 +2,16 @@
  * Browser regressions at narrow widths, run by scripts/check-workspace.mjs:
  * one header from the first paint, a reachable view switch, the rail as a
  * drawer under the kit's phone menu, no sideways overflow, header controls
- * that never overlap, and focus back from the phone menu. Also the helpers
- * the workspace check shares: no overflow, and exactly one header bar.
+ * that never overlap, focus back from the phone menu, a drawer that closes
+ * when Tab leaves it and an Escape that brings its toggle into view, and the
+ * welcome examples in full rows. Also the helper
+ * the workspace check shares: exactly one header bar. No overflow is in
+ * scripts/check-helpers.mjs, with the rest of what the checks share.
  * Split out of check-workspace.mjs when it passed the 500 line cap.
  */
 import assert from 'node:assert/strict';
 import { recordFrames, checkFirstPaint } from './check-boot.mjs';
-
-export async function noOverflow(target, label) {
-  assert.equal(await target.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `${label} overflows the viewport`);
-}
+import { noOverflow, out } from './check-helpers.mjs';
 
 /** Header bars the reader can see right now. There must never be more than one. */
 export function visibleBars(target) {
@@ -32,6 +32,17 @@ export async function checkNarrow({ browser, base, errors }) {
     await narrow.goto(`${base}/?check=${width}`, { waitUntil: 'networkidle' });
     await checkFirstPaint(narrow, `${width}px first visit`);
     await noOverflow(narrow, `${width}px welcome`);
+    // The four welcome cards fill whole rows: 1+1+1+1, 2+2 or 4, never 3+1.
+    await narrow.locator('#welcomeExamples .ds-example').nth(3).waitFor();
+    const rows = await narrow.evaluate(() => {
+      const counts = new Map();
+      for (const li of document.getElementById('welcomeExamples').children) {
+        const top = Math.round(li.getBoundingClientRect().top);
+        counts.set(top, (counts.get(top) || 0) + 1);
+      }
+      return [...counts.values()];
+    });
+    assert.ok(rows.every((n) => n === rows[0]), `${width}px welcome examples leave a card alone on a row: ${rows.join('+')}`);
     await narrow.locator('#welcomeExamples [data-file="responses.json"]').click();
     await narrow.locator('#stage .compare').waitFor();
     await oneHeader(narrow, `${width}px report`);
@@ -56,6 +67,35 @@ export async function checkNarrow({ browser, base, errors }) {
     }
     await narrow.keyboard.press('Escape');
     assert.equal(await narrow.locator('#rail').isVisible(), false, 'Escape did not close the rail drawer');
+    // Tab past the drawer's last control closes it: focus never sits on a
+    // control the drawer covers (WCAG 2.4.11).
+    await narrow.locator('#toggleRail').focus();
+    await narrow.keyboard.press('Enter');
+    assert.equal(await narrow.locator('#rail').isVisible(), true);
+    for (let i = 0; i < 20 && await narrow.evaluate(() => document.getElementById('rail').contains(document.activeElement)); i += 1) {
+      await narrow.keyboard.press('Tab');
+    }
+    const left = await narrow.evaluate(() => {
+      const toggle = document.getElementById('toggleRail');
+      const box = toggle.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return { rail: document.documentElement.dataset.dossierRail, focused: document.activeElement === toggle, onTop: Boolean(hit && toggle.contains(hit)) };
+    });
+    assert.deepEqual(left, { rail: 'closed', focused: true, onTop: true }, `${width}px: Tab out of the drawer`);
+    // Escape after scrolling brings the toggle back into view with focus.
+    await narrow.locator('#toggleRail').click();
+    const hidden = await narrow.evaluate(() => {
+      window.scrollTo(0, 900);
+      return document.getElementById('toggleRail').getBoundingClientRect().bottom <= 0;
+    });
+    assert.ok(hidden, `${width}px: the page did not scroll the toggle away, so this proves nothing`);
+    await narrow.keyboard.press('Escape');
+    const back = await narrow.evaluate(() => {
+      const box = document.getElementById('toggleRail').getBoundingClientRect();
+      return { rail: document.documentElement.dataset.dossierRail, inView: box.top >= 0 && box.bottom <= innerHeight, focused: document.activeElement?.id === 'toggleRail' };
+    });
+    assert.deepEqual(back, { rail: 'closed', inView: true, focused: true }, `${width}px: Escape after a scroll left the toggle off screen`);
+    await narrow.evaluate(() => window.scrollTo(0, 0));
     await noOverflow(narrow, `${width}px report`);
     await narrow.locator('#stage').getByRole('link', { name: 'Scores & runs' }).click();
     await narrow.locator('#stage .grouped-chart').waitFor();
@@ -70,7 +110,7 @@ export async function checkNarrow({ browser, base, errors }) {
     });
     assert.equal(overlap, false, `${width}px header controls overlap`);
     if (width === 390) {
-      await narrow.screenshot({ path: '.verify/report-mobile.png', fullPage: true });
+      await narrow.screenshot({ path: out('report-mobile.png'), fullPage: true });
       // The other view is one tap away on a phone; the current one steps aside.
       assert.equal(await narrow.locator('#viewCompare').isVisible(), true);
       await narrow.locator('#viewCompare').click();
@@ -83,11 +123,13 @@ export async function checkNarrow({ browser, base, errors }) {
       await narrow.locator('#openReport').click();
       await noOverflow(narrow, 'Mobile Open dialog');
       const file = await narrow.evaluate(() => {
-        const input = document.getElementById('importFile').getBoundingClientRect();
+        const button = document.querySelector('#importDialog [data-action="import-choose-file"]').getBoundingClientRect();
         const dialog = document.getElementById('importDialog').getBoundingClientRect();
-        return { input: input.right, dialog: dialog.right };
+        return { button: button.right, dialog: dialog.right };
       });
-      assert.ok(file.input <= file.dialog, 'The file input runs past the Open dialog');
+      assert.ok(file.button <= file.dialog, 'The Choose a file button runs past the Open dialog');
+      // The platform control is hidden; the product button drives it.
+      assert.equal(await narrow.locator('#importFile').isVisible(), false, 'The platform file control shows in the Open dialog');
       // Open sat in the kit's menu, which closed when it was pressed, so
       // Cancel puts focus on the menu button, never on <body>.
       await narrow.locator('#importDialog').getByRole('button', { name: 'Cancel', exact: true }).click();

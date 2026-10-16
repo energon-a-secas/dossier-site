@@ -69,7 +69,9 @@ export function createReading(compare) {
       if (custom) return custom;
     }
     const colId = readingColumn();
-    if (!colId) return { main: '0 of 0', sub: 'headings', unit: 'heading' };
+    // Nothing to step through: the counter says so and previous and next
+    // are off (js/compare/toolbar.js `updateCounter`).
+    if (!colId) return { main: '0 of 0', sub: 'headings', unit: 'heading', empty: true };
     const total = compare.sync.headings(colId).length;
     const at = compare.sync.currentHeading(colId);
     const letter = nameOf(compare.set, colId).ref;
@@ -77,6 +79,7 @@ export function createReading(compare) {
       main: total ? `${Math.max(1, at + 1)} of ${total}` : 'No headings',
       sub: `headings in ${letter}`,
       unit: 'heading',
+      empty: !total,
     };
   }
 

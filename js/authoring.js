@@ -22,25 +22,36 @@ export function reportForm(state, onChange) {
 
   page.blocks.forEach((block, index) => {
     if (!block || !blockDef(block.type)) return;
-    host.append(section(`${index + 1}. ${block.title || blockDef(block.type).name}`, () =>
+    const def = blockDef(block.type);
+    // A block with a title of its own keeps its type in sight, since the
+    // form's legend (the type) is for assistive technology only.
+    const type = block.title && block.title !== def.name ? def.name : '';
+    host.append(section(`${index + 1}. ${block.title || def.name}`, () =>
       blockForm(block.type, block, (next) => {
         const latest = reportOf(state.model);
         const pages = latest.pages.map((p) => p.id === page.id
           ? { ...p, blocks: p.blocks.map((b, i) => i === index ? next : b) }
           : p);
         onChange({ dossier: { ...latest, pages } });
-      })
-    ));
+      }), false, type));
   });
   return host;
 }
 
-function section(label, build, open = false) {
+function section(label, build, open = false, type = '') {
   const details = document.createElement('details');
   details.className = 'ds-form-section';
   details.open = open;
   const summary = document.createElement('summary');
-  summary.textContent = label;
+  const name = document.createElement('span');
+  name.textContent = label;
+  summary.appendChild(name);
+  if (type) {
+    const kind = document.createElement('span');
+    kind.className = 'ds-form-section__type';
+    kind.textContent = type;
+    summary.appendChild(kind);
+  }
   details.appendChild(summary);
   let mounted = false;
   const mount = () => {

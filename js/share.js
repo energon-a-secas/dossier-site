@@ -30,6 +30,14 @@ import { HTML_MAX_CHARS } from './embed-policy.js';
  * reports themselves is checked.
  */
 export const INFLATE_MAX_BYTES = 4 * HTML_MAX_CHARS * 3 + 1000000;
+/**
+ * The most a `#dz=` link may inflate to: one report of the largest size
+ * Dossier opens, at the widest UTF-8 width. `INFLATE_MAX_BYTES` is sized for
+ * a four-column `#dc=` comparison, and a 63 KB `#dz=` link decoded to a 20 MB
+ * report under it. Past this many bytes the report is over 2,000,000
+ * characters whatever it holds.
+ */
+const LINK_INFLATE_MAX_BYTES = HTML_MAX_CHARS * 3;
 /** Input is fed to the inflater this many bytes at a time (see below). */
 const INFLATE_SLICE = 1024;
 
@@ -88,14 +96,31 @@ async function compressDeflateRaw(text) {
 
 /**
  * Inflate a link's bytes, or null when they are damaged or would inflate
- * past `maxBytes`.
+ * past `maxBytes`. Exported for the budget test (tests/compare-review.test.mjs),
+ * which counts how far past the budget it reads.
  *
  * The input goes in a slice at a time, each written only once the last has
  * been read out: an inflater handed everything at once unpacks all of it
  * into its queue before the first read, so a budget checked while reading
  * would come too late. A slice unpacks to about a megabyte at most.
+ *
+ * @param {Uint8Array} bytes
+ * @param {number} [maxBytes]
+ * @returns {Promise<string|null>}
  */
-async function decompressDeflateRaw(bytes, maxBytes = INFLATE_MAX_BYTES) {
+export async function decompressDeflateRaw(bytes, maxBytes = INFLATE_MAX_BYTES) {
+  const out = await inflate(bytes, maxBytes);
+  return out && typeof out.text === 'string' ? out.text : null;
+}
+
+/**
+ * `decompressDeflateRaw`, telling a link that unpacks past its budget
+ * (`{over: true}`) apart from a damaged one (null), so the reader hears that
+ * the report is too large rather than that the link is broken.
+ *
+ * @returns {Promise<{text: string}|{over: true}|null>}
+ */
+async function inflate(bytes, maxBytes) {
   try {
     if (typeof DecompressionStream === 'undefined') {
       return null;
@@ -120,7 +145,7 @@ async function decompressDeflateRaw(bytes, maxBytes = INFLATE_MAX_BYTES) {
       totalLength += result.value.length;
       if (totalLength > maxBytes) {
         await reader.cancel().catch(() => {});
-        return null;
+        return { over: true };
       }
       chunks.push(result.value);
     }
@@ -131,7 +156,7 @@ async function decompressDeflateRaw(bytes, maxBytes = INFLATE_MAX_BYTES) {
       offset += chunk.length;
     }
     const decoder = new TextDecoder();
-    return decoder.decode(combined);
+    return { text: decoder.decode(combined) };
   } catch {
     return null;
   }
@@ -224,10 +249,37 @@ export async function decodeComparison(hash) {
 }
 
 /**
+ * The id a `#dc=` link's comparison is saved under in this browser: a hash of
+ * the payload, so opening the same link again reopens the copy saved the
+ * first time instead of saving another. A changed comparison makes a new
+ * link, and so a new id. Null for anything but a `#dc=` fragment, or where
+ * the browser has no SubtleCrypto. Hex, because the set id pattern
+ * (js/compare/model.js `SET_ID`) takes letters, digits and dashes only.
+ *
+ * @param {string} hash
+ * @returns {Promise<string|null>} "c-l" and 20 hex digits
+ */
+export async function comparisonLinkId(hash) {
+  const keyed = /^#?dc=(.+)$/s.exec(String(hash || ''));
+  if (!keyed || !globalThis.crypto?.subtle) return null;
+  try {
+    const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(keyed[1])));
+    const hex = Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `c-l${hex.slice(0, 20)}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Decode a fragment into a document.
  *
+ * A report over the 2,000,000 character cap the Open dialog and the Compare
+ * view apply is not parsed: it comes back as `{tooLarge: length}`, the
+ * length null when the link unpacked past its byte budget before it ended.
+ *
  * @param {string} hash - the hash portion of the URL
- * @returns {Promise<{document: object, findings: Array}|null>}
+ * @returns {Promise<{document: object, findings: Array}|{tooLarge: number|null}|null>}
  */
 export async function decodeFragment(hash) {
   try {
@@ -255,11 +307,17 @@ export async function decodeFragment(hash) {
     if (!codec || !encoded) return null;
 
     const bytes = fromBase64url(encoded);
-    const json = codec === 'dz'
-      ? await decompressDeflateRaw(bytes)
-      : new TextDecoder().decode(bytes);
+    let json = null;
+    if (codec === 'dz') {
+      const out = await inflate(bytes, LINK_INFLATE_MAX_BYTES);
+      if (out && out.over) return { tooLarge: null };
+      json = out ? out.text : null;
+    } else {
+      json = new TextDecoder().decode(bytes);
+    }
 
     if (!json) return null;
+    if (json.length > HTML_MAX_CHARS) return { tooLarge: json.length };
     return { document: JSON.parse(json), findings: [] };
   } catch {
     return null;
@@ -313,6 +371,14 @@ export async function readUrlPayload() {
   // page link report that the link carried no readable report.
   if (!fragmentCarriesReport(url.hash)) return { found: false };
   const result = await decodeFragment(url.hash);
+  if (result && 'tooLarge' in result) {
+    const size = result.tooLarge ? `${result.tooLarge.toLocaleString('en-US')} characters` : `more than ${HTML_MAX_CHARS.toLocaleString('en-US')} characters`;
+    return {
+      found: true,
+      ok: false,
+      reason: `That link carries a report of ${size}, over the ${HTML_MAX_CHARS.toLocaleString('en-US')} character limit Dossier opens. Ask for the HTML file instead.`,
+    };
+  }
   if (!result) {
     return {
       found: true,
@@ -325,6 +391,10 @@ export async function readUrlPayload() {
 }
 
 const SRC_TIMEOUT_MS = 10000;
+
+function tooLargeAt(host, size) {
+  return `The document at ${host} is ${size}, over the ${HTML_MAX_CHARS.toLocaleString('en-US')} character limit Dossier opens. Nothing was loaded.`;
+}
 
 async function readSrc(src) {
   const fail = (reason) => ({ found: true, ok: false, reason });
@@ -345,7 +415,11 @@ async function readSrc(src) {
     if (!res.ok) {
       return fail(`${url.host} answered ${res.status}${res.statusText ? ` ${res.statusText}` : ''} for that document. Nothing was loaded.`);
     }
+    // The cap the Open dialog applies, before and after the body is read.
+    const declared = Number(res.headers.get('content-length')) || 0;
+    if (declared > HTML_MAX_CHARS * 4) return fail(tooLargeAt(url.host, `${(declared / 1e6).toLocaleString('en-US', { maximumFractionDigits: 1 })} MB`));
     const text = await res.text();
+    if (text.length > HTML_MAX_CHARS) return fail(tooLargeAt(url.host, `${text.length.toLocaleString('en-US')} characters long`));
     history.replaceState(null, '', window.location.pathname + window.location.search);
     return { found: true, ok: true, text, findings: [], source: 'src', host: url.host };
   } catch (err) {

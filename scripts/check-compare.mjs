@@ -4,7 +4,12 @@
  * and reopening, the Comparisons switcher (rename, delete, undo), the
  * bundled example, the empty column, and a view that fills the window with
  * the footer below the fold. The hostile report, SVG links and the frame
- * backstop are in scripts/check-compare-hostile.mjs, run at the end.
+ * backstop are in scripts/check-compare-hostile.mjs, run at the end, then
+ * focus in the view's chrome (the panel over the columns, the undo toast,
+ * the phone Review sheet) in scripts/check-compare-focus.mjs, and the
+ * chrome itself (toolbar widths, the Add column tile, short-window heads,
+ * the phone switcher, frame focus rings, the shared segmented rows) in
+ * scripts/check-compare-chrome.mjs.
  *
  * Run against the dev server: `node scripts/check-compare.mjs`
  * (DOSSIER_URL overrides http://127.0.0.1:8899).
@@ -13,18 +18,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
 import {
-  base, file, watch, noOverflow, fillsWindow, focusOn, chooseFile, headingTop,
-} from './compare-check-helpers.mjs';
+  base, file, out, watch, noOverflow, fillsWindow, focusOn, chooseFile, headingTop,
+} from './check-helpers.mjs';
 
 const browser = await chromium.launch();
 const errors = [];
-await fs.mkdir(file('.verify'), { recursive: true });
 
 try {
   // ── A new comparison, built from two files ─────────────────────────────────
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
-  watch(page, errors);
+  watch({ page, errors });
   // From the welcome screen: its button hides with it, so focus moves to the
   // Compare view's own header button, not to the one that leads back.
   await page.goto(`${base}/?check=compare`, { waitUntil: 'networkidle' });
@@ -43,9 +47,43 @@ try {
   assert.equal(await page.locator('#cmp-col-k1 .col__who').innerText(), 'Human, no report yet');
   assert.equal(await page.locator('#compareView .col--empty .col__who .role-name').count(), 0, 'An empty column inks its role word');
   assert.equal(await page.locator('#compareView .col--empty .col__diff').count(), 0, 'An empty column talks about differences');
+  // Nothing to step through or compare yet: the controls say so by being off.
+  const stepsOff = () => page.locator('.tb-nav [data-action="cmp-step"]').evaluateAll((list) => list.map((b) => b.disabled));
+  const diffToggle = page.locator('.cmp-toolbar [data-action="cmp-toggle-diff"]');
+  assert.deepEqual(await stepsOff(), [true, true], 'Previous and next look ready with nothing to step through');
+  assert.equal(await diffToggle.isDisabled(), true, 'Differences looks on with no reports');
+  const sectionsToggle = page.locator('.cmp-toolbar [data-action="cmp-panel"][data-panel="sections"]');
+  await sectionsToggle.click();
+  await page.locator('#compareView .panel__body .panel__intro').first().waitFor();
+  const sectionsEmpty = await page.locator('#compareView .panel__body').innerText();
+  assert.match(sectionsEmpty, /a column has a report with headings/);
+  assert.ok(!sectionsEmpty.includes('?,'), 'The Sections panel names a base that is not there');
+  // Docked at this width with nothing over the columns: its toggle closes it.
+  await sectionsToggle.click();
+  await page.waitForFunction(() => !document.querySelector('#compareView').classList.contains('panel-open'));
 
   await chooseFile(page, 'k1', 'reports/compare/human-draft.html');
+  assert.equal(await diffToggle.isDisabled(), true, 'Differences needs a second report');
   await chooseFile(page, 'k2', 'reports/compare/agent-output.md');
+  await page.waitForFunction(() => [...document.querySelectorAll('.tb-nav [data-action="cmp-step"]')].every((b) => !b.disabled));
+  assert.equal(await diffToggle.isDisabled(), false);
+  assert.equal(await diffToggle.getAttribute('aria-pressed'), 'true', 'The stored choice comes back with the second report');
+  // A table that fits is not a Tab stop; once it does not fit, it is a named region.
+  const table = page.locator('#cmp-col-k1 .r-table').first();
+  assert.equal(await table.getAttribute('data-region-label'), 'Table: UTC, Event');
+  assert.equal(await table.getAttribute('role'), null, 'A table that fits is a region');
+  assert.equal(await table.getAttribute('tabindex'), null, 'A table that fits is a Tab stop');
+  await page.evaluate(() => { document.querySelector('#cmp-col-k1 .r-table > table').style.minWidth = '900px'; });
+  await page.waitForFunction(() => {
+    const el = document.querySelector('#cmp-col-k1 .r-table');
+    return el.getAttribute('role') === 'region' && el.getAttribute('tabindex') === '0' && el.getAttribute('aria-label') === 'Table: UTC, Event';
+  });
+  await page.evaluate(() => { document.querySelector('#cmp-col-k1 .r-table > table').style.minWidth = ''; });
+  await page.waitForFunction(() => !document.querySelector('#cmp-col-k1 .r-table').hasAttribute('role'));
+  // Named after its first report until renamed, and each column names its file.
+  assert.equal(await page.locator('.cmp-toolbar .set-title__text').innerText(), 'Checkout slowdown, 8 October (illustrative example)');
+  assert.equal(await page.locator('#cmp-col-k1 .col__who').innerText(), 'Human, from human-draft.html');
+  assert.equal(await page.locator('#cmp-col-k2 .col__who').innerText(), 'Agent, from agent-output.md');
   await page.waitForFunction(() => /^#\/~compare\/c-[a-z0-9]+$/.test(location.hash));
   const setRoute = await page.evaluate(() => location.hash);
   assert.match(await page.locator('#cmp-col-k1 .col__kind').innerText(), /HTML/);
@@ -119,7 +157,7 @@ try {
   assert.equal(await page.locator('.counter').getAttribute('aria-live'), null, 'The counter would be read out on every scroll');
   assert.match(await page.locator('#cmpLive').innerText(), /^Heading \d+ of \d+ in A: /);
   await page.locator('.cmp-toolbar [data-action="cmp-toggle-diff"]').click();
-  await page.screenshot({ path: file('.verify/compare-1440.png') });
+  await page.screenshot({ path: out('compare-1440.png') });
 
   // ── Focus layout from the column menu, and back ────────────────────────────
   await page.locator('#cmp-col-k2 .col__menu').click();
@@ -167,6 +205,10 @@ try {
   assert.ok(caught.top > -24 && caught.top < caught.view * 0.35, `A's frame did not catch up with B: its "Customer impact" is at ${caught.top}px`);
   assert.equal(await page.locator('#cmp-col-k1 .col__frame').getAttribute('sandbox'), 'allow-same-origin');
   assert.equal(await page.locator('#cmp-col-k2 .col__frame').count(), 0, 'Markdown has no original layout');
+  // B stays in Dossier format, and its head says so and why.
+  assert.match(await page.locator('#cmp-col-k2 .col__mode').innerText(), /^Dossier format/);
+  assert.match(await page.locator('#cmp-col-k2 .col__mode').getAttribute('title'), /Markdown has no original layout/);
+  assert.equal(await page.locator('#cmp-col-k1 .col__mode').count(), 0, 'A follows the set: no tag');
   // A frame read to its end keeps the wheel too: the page does not move.
   await page.locator('#cmp-col-k1 .col__frame').evaluate((f) => f.contentWindow.scrollTo(0, f.contentDocument.documentElement.scrollHeight));
   await page.locator('#cmp-col-k1 .col__frame').hover();
@@ -175,6 +217,7 @@ try {
   assert.equal(await page.evaluate(() => scrollY), 0, 'A wheel past an Original frame\'s end scrolled the page');
   await page.locator('.cmp-toolbar [data-action="cmp-set-mode"][data-value="format"]').click();
   await page.locator('#cmp-col-k1 .col__scroll').waitFor();
+  assert.equal(await page.locator('#compareView .col__mode').count(), 0, 'A tag outlived the set going back to Dossier format');
   // The change is saved 400 ms after the click. A reload inside that wait
   // flushes it on pagehide, but IndexedDB does not always finish a write the
   // page started while unloading, so the reload waits for the save.
@@ -300,7 +343,7 @@ try {
   await page.mouse.click(195, 800);
   assert.equal(await page.locator('#cmpOptions').isVisible(), false);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'cmpOptionsBtn');
-  await page.screenshot({ path: file('.verify/compare-390.png') });
+  await page.screenshot({ path: out('compare-390.png') });
 
   // ── Options on a wide screen: Tab past its end closes it ───────────────────
   await page.setViewportSize({ width: 1024, height: 844 });
@@ -342,6 +385,19 @@ try {
   await page.locator('#cmpColumnMenu [data-action="cmp-edit-source"]').click();
   const edited = incident.replace(/"title":\s*"[^"]*"/, '"title": "Edited in the column"');
   await page.locator('#cmp-col-k4 textarea').fill(edited);
+  // Long lines wrap, so a value mid-paragraph needs no sideways scroll;
+  // Wrap lines off lets them run on, and keeps the unsaved text.
+  const area = page.locator('#cmp-col-k4 textarea');
+  const fit = await area.evaluate((el) => ({ over: el.scrollWidth - el.clientWidth, long: el.value.split('\n').some((l) => l.length * 6 > el.clientWidth) }));
+  assert.ok(fit.long, 'The source has no line long enough to wrap');
+  assert.ok(fit.over <= 1, `Edit source scrolls sideways by ${fit.over}px`);
+  const wrapBtn = page.locator('#cmp-col-k4 form').getByRole('button', { name: 'Wrap lines' });
+  assert.equal(await wrapBtn.getAttribute('aria-pressed'), 'true');
+  await wrapBtn.click();
+  assert.equal(await wrapBtn.getAttribute('aria-pressed'), 'false');
+  assert.ok(await area.evaluate((el) => el.scrollWidth > el.clientWidth + 1), 'Wrap lines off lets a long line run on');
+  assert.equal(await area.inputValue(), edited, 'Turning Wrap lines off lost the edit');
+  await wrapBtn.click();
   await page.locator('#cmp-col-k4 form').getByRole('button', { name: 'Save' }).click();
   await page.locator('#cmp-col-k4 .report-title', { hasText: 'Edited in the column' }).waitFor();
   // A broken edit is refused in place, with the reason, and nothing is lost.
@@ -409,13 +465,16 @@ try {
   await checkHiddenStart();
 
   assert.deepEqual(errors, [], 'The page raised errors');
-  console.log('Passed: Compare entered from the welcome screen with focus on its own button, empty columns that say "Human, no report yet" in plain text and nothing about differences, a comparison built from an HTML and a Markdown file in one typeface, a view that fills the window under the header at 1440 and 390 with the footer below the fold, reachable, a toolbar that focus brings back from under the header, and a column that keeps the wheel at its end, a toolbar title in the fixed serif whatever the Typeface, a skip link with no history entry, sections sync and sync off, ] steps headings and announces them, focus layout and back with focus kept and the columns named by their tabs, Original as a static frame that catches up with the column being read and keeps the wheel at its end, saved and reopened at the same address, scroll kept across views, rename shown in the switcher at once, delete with undo, remove a column with undo (focus back on what returned), the bundled example unsaved even after a tab tap, a pasted Dossier document with prefixed ids and nested heading levels, an Edit source that refuses a broken document, Move renaming the bodies, the phone Options sheet keeping Tab with four columns, Options at 1024 closing when Tab leaves it, a comparison bundle from the Open dialog, no sideways scroll at 1440, 1024, 768 and 390, / opens the switcher, one column at a time on a phone with the Options sheet under the bar, its title inside it, closed by Escape or the scrim, and a comparison opened while the view was hidden counting its headings from the first one.');
+  console.log('Passed: Compare entered from the welcome screen with focus on its own button, empty columns that say "Human, no report yet" in plain text and nothing about differences, previous, next and Differences off until there is something to step through and compare, a Sections panel that names no missing base, a table that is a named region only while it does not fit, a comparison built from an HTML and a Markdown file in one typeface, a view that fills the window under the header at 1440 and 390 with the footer below the fold, reachable, a toolbar that focus brings back from under the header, and a column that keeps the wheel at its end, a toolbar title in the fixed serif whatever the Typeface, a skip link with no history entry, sections sync and sync off, ] steps headings and announces them, focus layout and back with focus kept and the columns named by their tabs, Original as a static frame that catches up with the column being read and keeps the wheel at its end, saved and reopened at the same address, scroll kept across views, rename shown in the switcher at once, delete with undo, remove a column with undo (focus back on what returned), the bundled example unsaved even after a tab tap, a comparison named after its first report with each column naming its file, the head of B saying it stays in Dossier format because Markdown has no original layout, a pasted Dossier document with prefixed ids and nested heading levels, an Edit source that refuses a broken document, wraps long lines and lets them run on with Wrap lines off, Move renaming the bodies, the phone Options sheet keeping Tab with four columns, Options at 1024 closing when Tab leaves it, a comparison bundle from the Open dialog, no sideways scroll at 1440, 1024, 768 and 390, / opens the switcher, one column at a time on a phone with the Options sheet under the bar, its title inside it, closed by Escape or the scrim, and a comparison opened while the view was hidden counting its headings from the first one.');
 } finally {
   await browser.close();
 }
 
 // The second area: untrusted HTML, in every mode and in both views.
 await import('./check-compare-hostile.mjs');
+// Then where focus goes in the view's chrome, and the chrome at every width.
+await import('./check-compare-focus.mjs');
+await import('./check-compare-chrome.mjs');
 
 /**
  * A comparison opened while the view is hidden (from the Reports view's Open
@@ -426,7 +485,7 @@ await import('./check-compare-hostile.mjs');
 async function checkHiddenStart() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
-  watch(page, errors);
+  watch({ page, errors });
   await page.goto(`${base}/?check=hidden-start`, { waitUntil: 'networkidle' });
   // The Open button does nothing until boot has wired it.
   await page.waitForFunction(() => !document.documentElement.hasAttribute('data-dossier-booting'));

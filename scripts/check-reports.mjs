@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { checkReportFocus } from './check-report-focus.mjs';
 
 const COMPLETE = fileURLToPath(new URL('../fixtures/complete.json', import.meta.url));
 
@@ -30,9 +31,12 @@ export async function checkReports({ browser, base, errors }) {
   await railBesideShortReport({ browser, base, errors });
   await disclosuresPrintOpen({ browser, base, errors });
   await lineLengthAtEveryWidth({ browser, base, errors });
+  // Focus and announcements on opening and changing pages, Check report as a
+  // popover, the example cards' names and the shortcut sheet.
+  await checkReportFocus({ browser, base, errors });
 }
 
-async function fresh(browser, base, errors, label, options) {
+export async function fresh(browser, base, errors, label, options) {
   const context = await browser.newContext(options);
   const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(`${label}: ${error.message}`));
@@ -42,7 +46,7 @@ async function fresh(browser, base, errors, label, options) {
 }
 
 /** Open from the Open dialog, through the kit's phone menu when it is there. */
-async function openReport(page, { file, text, title }) {
+export async function openReport(page, { file, text, title }) {
   const menu = page.locator('.header-overflow-toggle');
   if (await menu.isVisible() && (await menu.getAttribute('aria-expanded')) !== 'true') await menu.click();
   await page.locator('#openReport').click();

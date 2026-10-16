@@ -9,13 +9,18 @@
  * `value` as a stack. So the bars are the block's categories, not its series.
  * Mapping series to items drew one bar per series, each stacked out of that
  * series' whole history, which is a chart of nothing.
+ *
+ * Trend charts (line and area) are drawn in trend.js, not by the kit's
+ * `line`: the kit's plot scales with its width, text included, and the text
+ * has to stay 13 px at every width.
  */
 
 import { escHtml } from '../neorgon-dom.js';
-import { bars, line, donut, radar, heatmap, empty } from '../viz.js';
+import { bars, donut, radar, heatmap, empty } from '../viz.js';
 import { emptyFrame } from './markdown.js';
 import { chartColor, chartLegend, chartValues, groupedBars } from './chart-data.js';
 import { safeDomId } from './ids.js';
+import { trendPlot } from './trend.js';
 
 /** The kit's right-aligned readout is where a unit belongs. */
 function scaleText(block) {
@@ -130,18 +135,11 @@ function lineChart(block, area) {
   if (!series.length) {
     return emptyFrame('Chart: add "series", each with a list of "values".');
   }
-  const data = series.map((s) => ({
-    name: s.label || '',
-    color: chartColor(s, series.indexOf(s)),
-    values: Array.isArray(s.values) ? s.values.map((v) => Number(v) || 0) : [],
-  }));
-  if (!data.some((s) => s.values.length)) return emptyFrame('Chart: the series carry no values.');
-  const labels = categoriesOf(block, Math.max(...data.map((s) => s.values.length)));
-  const colors = series.map(chartColor);
-  data.forEach((s, i) => { s.color = colors[i]; });
-  const plot = line(data, baseOpts(block, { area, max: block.max, frame: false }));
-  const ticks = `<div class="chart-x-labels">${labels.map((label) => `<span>${escHtml(label)}</span>`).join('')}</div>`;
-  return `<figure class="trend-chart"><figcaption><strong>${escHtml(block.title || 'Trend')}</strong><span>${escHtml(scaleText(block))}</span></figcaption>${chartLegend(series)}${plot}${ticks}${chartValues(block, series, labels)}</figure>`;
+  const length = Math.max(...series.map((s) => (Array.isArray(s.values) ? s.values.length : 0)));
+  if (!length) return emptyFrame('Chart: the series carry no values.');
+  const labels = categoriesOf(block, length);
+  const plot = trendPlot(block, series, labels, { area, uid: baseOpts(block).uid });
+  return `<figure class="trend-chart"><figcaption><strong>${escHtml(block.title || 'Trend')}</strong><span>${escHtml(scaleText(block))}</span></figcaption>${chartLegend(series)}${plot}${chartValues(block, series, labels)}</figure>`;
 }
 
 function donutChart(block) {

@@ -62,11 +62,14 @@ export async function loadExample() {
 /**
  * The card that opens the example, for the welcome screen and the Open
  * dialog's Examples list. Same shape as the report example cards
- * (js/catalog.js), so both lists style it the same.
+ * (js/catalog.js), so both lists style it the same, and named the same way:
+ * by its title, with the summary and meta as its description.
  *
+ * @param {string} [key] prefix for the ids of its title, summary and meta,
+ *   one per list, so the two lists never share an id
  * @returns {HTMLLIElement}
  */
-export function exampleCard() {
+export function exampleCard(key = 'cmp-example') {
   const li = document.createElement('li');
   li.className = 'ds-examples__compare';
   const button = document.createElement('button');
@@ -75,14 +78,19 @@ export function exampleCard() {
   button.dataset.action = 'cmp-example';
   const title = document.createElement('span');
   title.className = 'ds-example__title';
+  title.id = `${key}-title`;
   title.textContent = 'Example comparison: human, agent and fixes';
   const summary = document.createElement('span');
   summary.className = 'ds-example__summary';
+  summary.id = `${key}-summary`;
   summary.textContent = 'One incident report written three ways, side by side in the Compare view.';
   const meta = document.createElement('span');
   meta.className = 'ds-example__meta';
+  meta.id = `${key}-meta`;
   meta.textContent = 'Illustrative example, 3 columns';
   button.append(title, summary, meta);
+  button.setAttribute('aria-labelledby', title.id);
+  button.setAttribute('aria-describedby', `${summary.id} ${meta.id}`);
   li.append(button);
   return li;
 }

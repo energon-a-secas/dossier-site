@@ -14,20 +14,21 @@ import {
   toggleMode, mode, view, setRail, railOpen, railDocked,
 } from './chrome.js';
 import {
-  filterLibrary, confirmDelete, removeStored, focusAfterDelete, focusOpened,
+  filterLibrary, confirmDelete, removeStored, focusAfterDelete, focusOpened, focusReport,
 } from './library.js';
 import { openCatalog, isExampleFile } from './catalog.js';
 import { bindComparisons } from './comparison-controls.js';
 import { bindEmbeds } from './embeds.js';
+import { bindGroupKeys } from './seg.js';
 import { bindDisplay, openDisplay } from './display.js';
 import { registerActions, runAction } from './actions.js';
 import {
-  openText, openStored, openBlank, loadFixture, replaceDeleted,
-  describeDetected,
+  openStored, openBlank, loadFixture, replaceDeleted,
 } from './open.js';
+import { bindOpenDialog, openDroppedFile } from './open-dialog.js';
 import {
   mountEditor, mountFindings, mountCatalog, syncEditor, insertBlock,
-  showFindings, showSourceTab, gotoHeading,
+  showFindings, hideFindings, bindFindingsPopover, showSourceTab, gotoHeading,
 } from './source-pane.js';
 import { registerExportActions } from './export-dialog.js';
 import { routeFor } from './router.js';
@@ -55,6 +56,7 @@ export function elements() {
     shareReport: $('shareReport'),
     importDialog: $('importDialog'),
     importFile: $('importFile'),
+    importFileName: $('importFileName'),
     importText: $('importText'),
     importDetected: $('importDetected'),
     exportDialog: $('exportDialog'),
@@ -78,6 +80,11 @@ export function bindEvents(state, els) {
   });
   bindComparisons(document);
   bindEmbeds();
+  // The edit pane's Form and JSON tabs: the arrow keys, Home and End move
+  // between them and choose, through the tab's own `source-tab` click.
+  const sourceTabs = document.querySelector('.ds-source__tabs');
+  if (sourceTabs) bindGroupKeys(sourceTabs);
+  bindFindingsPopover(state, els);
   document.addEventListener('dossier-opened', () => syncEditor(state));
 
   // No fallback of their own: js/dialogs.js returns focus to the kit's menu
@@ -95,14 +102,8 @@ export function bindEvents(state, els) {
     if (target) runAction(target.dataset.action, target, event);
   });
 
-  els.importFile?.addEventListener('change', async () => {
-    const file = els.importFile.files && els.importFile.files[0];
-    if (!file) return;
-    const text = await file.text();
-    if (els.importText) els.importText.value = text;
-    describeDetected(els, text);
-  });
-  els.importText?.addEventListener('input', () => describeDetected(els, els.importText.value));
+  // The Open dialog's file button, paste box, Open it and emptying on close.
+  bindOpenDialog(state, els);
   els.reportFilter?.addEventListener('input', () => filterLibrary(els, els.reportFilter.value));
 
   // A dropped file anywhere on the page opens it. The page is one surface and
@@ -119,7 +120,7 @@ export function bindEvents(state, els) {
     const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (!file) return;
     e.preventDefault();
-    openText(state, els, await file.text(), file.name);
+    openDroppedFile(state, els, file);
   });
 
   document.addEventListener('dossier-mode', () => {
@@ -132,7 +133,18 @@ export function bindEvents(state, els) {
       const label = btn.querySelector('span');
       if (label) label.textContent = reading ? 'Edit' : 'Done';
     }
-    if (!reading) showSourceTab(state, els, state.preferences.sourceTab);
+    if (reading) {
+      // Check report docks beside the editor and floats over the sheet while
+      // reading. A docked panel must not turn into an open popover over the
+      // report when Done is pressed.
+      hideFindings(els);
+    } else {
+      showSourceTab(state, els, state.preferences.sourceTab);
+      // Edit brings the docked panel back where it was wanted.
+      if (state.findings.length && (state.preferences.showFindings || state.findings.some((f) => f.level === 'error'))) {
+        showFindings(state, els, true);
+      }
+    }
   });
 
   // Focus left in the view that just hid moves somewhere visible. The
@@ -182,18 +194,18 @@ function registerReportActions(state, els) {
     view: (el) => goToView(state, el.dataset.view === 'compare' ? 'compare' : 'reports'),
     open: (el) => openDialog(els.importDialog, el),
     display: (el) => openDisplay(els.displayDialog, el),
-    'import-confirm': () => {
-      if (openText(state, els, els.importText?.value || '', 'Pasted text')) els.importDialog?.close();
-    },
     'new-report': () => openBlank(state, els),
-    example: (el) => {
+    example: async (el) => {
       const file = el.dataset.file;
       if (!isExampleFile(file)) return;
       els.importDialog?.close();
-      loadFixture(state, els, `reports/${file}`);
+      // The card that was pressed hides with the welcome screen, and focus
+      // fell to the body, so the next Tab went to the footer, past the whole
+      // report. Only a load that committed moves focus.
+      if (await loadFixture(state, els, `reports/${file}`)) focusReport(els);
     },
     catalog: (el) => openCatalog(el),
-    findings: () => showFindings(state, els, els.findingsPanel?.hidden !== false),
+    findings: (el) => showFindings(state, els, els.findingsPanel?.hidden !== false, { focus: el === els.toggleFindings }),
     'source-tab': (el) => showSourceTab(state, els, el.dataset.pane),
     'toggle-mode': () => {
       toggleMode();
@@ -204,6 +216,12 @@ function registerReportActions(state, els) {
       // Focus follows a drawer, and leaves a docked rail's own Hide button
       // before that button disappears.
       setRail(open, { focus: !railDocked() || Boolean(el.closest('#rail')) });
+      // Docked, the report bar's toggle is the only way to open the rail and
+      // it hides once the rail is open (css/shell.css), so focus moves to the
+      // rail's Hide button, the control that undoes it, rather than staying
+      // on a button that is gone. Closing from the rail already sends focus
+      // back to the bar's toggle (setRail).
+      if (railDocked() && open) document.querySelector('#rail .ds-rail__hide')?.focus({ preventScroll: true });
       if (railDocked()) setPreference(state, 'railOpen', open);
     },
     'open-report': async (el) => {

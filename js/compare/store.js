@@ -11,6 +11,17 @@
  * Every write and delete is announced on the `dossier-compare`
  * BroadcastChannel, so a second tab refreshes its list instead of saving over
  * what this one changed.
+ *
+ * A set's `updated` is its revision and only goes up. `writeSet` can be told
+ * which revision a save was made on (`expect`): when another tab has saved
+ * since, nothing is written and the stored set comes back, for the caller to
+ * merge (js/compare/merge.js). Each record also notes which tab wrote it
+ * (`writer`, outside the set itself), so a journal replayed after a reload
+ * (js/compare/journal.js) can tell its own tab's last write from another's.
+ *
+ * A connection the browser closes on its own (site data cleared while the
+ * tab is open) is forgotten, and the next call opens a new one: before, every
+ * later save failed silently until the page was reloaded.
  */
 
 import { sanitizeSet, describeSet } from './records.js';
@@ -22,6 +33,17 @@ const CHANNEL_NAME = 'dossier-compare';
 
 let db = null;
 let opening = null;
+
+/** This tab, as the writer of the records it saves. */
+export const TAB_ID = `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** Let go of a closed connection, so the next call opens a new one. */
+function forget(conn) {
+  if (db !== conn) return;
+  // Both: left resolved, `opening` would hand the dead connection back.
+  db = null;
+  opening = null;
+}
 
 function open() {
   return new Promise((resolve) => {
@@ -55,11 +77,10 @@ function open() {
       // would block it. The next call opens again.
       database.onversionchange = () => {
         database.close();
-        if (db === database) {
-          db = null;
-          opening = null;
-        }
+        forget(database);
       };
+      // The browser closed it (site data cleared): the next call reopens.
+      database.onclose = () => forget(database);
       resolve(database);
     };
   });
@@ -73,14 +94,35 @@ async function database() {
   return db;
 }
 
+/** What a transaction on a connection the browser has closed throws. */
+const DEAD_CONNECTION = ['InvalidStateError', 'UnknownError'];
+
+/**
+ * A transaction on the store, or null. A connection that died before its
+ * close event arrived is closed, forgotten and opened again, once.
+ */
+async function transaction(mode) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const conn = await database();
+    if (!conn) return null;
+    try {
+      return conn.transaction(STORE, mode);
+    } catch (err) {
+      if (attempt || !DEAD_CONNECTION.includes(err && err.name)) return null;
+      try { conn.close(); } catch { /* already closed */ }
+      forget(conn);
+    }
+  }
+  return null;
+}
+
 /** Run one request in a transaction, resolving `fallback` on any failure. */
 async function run(mode, makeRequest, fallback) {
   try {
-    const conn = await database();
-    if (!conn) return fallback;
+    const tx = await transaction(mode);
+    if (!tx) return fallback;
     return await new Promise((resolve) => {
       try {
-        const tx = conn.transaction(STORE, mode);
         const req = makeRequest(tx.objectStore(STORE));
         let value = fallback;
         if (req) req.onsuccess = () => { value = req.result; };
@@ -166,17 +208,65 @@ export async function readSet(id) {
 }
 
 /**
- * Save a set. `updated` is stamped here.
+ * One set as stored, with the tab that wrote it, or null. For the journal:
+ * everything else reads `readSet`.
  *
- * @returns {Promise<object|null>} the record written, or null
+ * @returns {Promise<{set: object, writer: string|null}|null>}
  */
-export async function writeSet(set) {
-  const clean = sanitizeSet({ ...set, updated: Date.now() });
-  if (!clean) return null;
-  const ok = await run('readwrite', (store) => { store.put(clean); return null; }, false);
-  if (!ok) return null;
-  announce([clean.id], 'write');
-  return clean;
+export async function readSetRecord(id) {
+  if (typeof id !== 'string' || !id) return null;
+  const record = await run('readonly', (store) => store.get(id), null);
+  const set = record ? sanitizeSet(record) : null;
+  return set ? { set, writer: typeof record.writer === 'string' ? record.writer : null } : null;
+}
+
+/**
+ * Save a set. `updated` is stamped here, strictly later than the stored
+ * revision it replaces. The read and the write share one transaction, so
+ * another tab's save cannot land between the check and the put.
+ *
+ * @param {object} set
+ * @param {{expect?: number}} [opts] expect: the revision (`updated`) this
+ *   save was made on; undefined saves whatever is stored
+ * @returns {Promise<object|{conflict: true, current: object}|null>} the set
+ *   written, a conflict carrying the stored set, or null
+ */
+export async function writeSet(set, { expect } = {}) {
+  if (!sanitizeSet(set)) return null;
+  try {
+    const tx = await transaction('readwrite');
+    if (!tx) return null;
+    const result = await new Promise((resolve) => {
+      try {
+        const store = tx.objectStore(STORE);
+        let out = null;
+        const prior = store.get(set.id);
+        prior.onsuccess = () => {
+          const existing = prior.result;
+          const before = Number.isFinite(existing?.updated) ? existing.updated : 0;
+          if (expect !== undefined && existing && existing.updated !== expect) {
+            const current = sanitizeSet(existing);
+            out = current ? { conflict: true, current } : null;
+            if (!current) tx.abort();
+            return;
+          }
+          const clean = sanitizeSet({ ...set, updated: Math.max(Date.now(), before + 1) });
+          if (!clean) { tx.abort(); return; }
+          store.put({ ...clean, writer: TAB_ID });
+          out = clean;
+        };
+        tx.oncomplete = () => resolve(out);
+        tx.onerror = () => resolve(null);
+        tx.onabort = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+    if (result && !result.conflict) announce([result.id], 'write');
+    return result;
+  } catch {
+    return null;
+  }
 }
 
 /** @returns {Promise<boolean>} */

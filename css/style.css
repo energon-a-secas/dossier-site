@@ -34,6 +34,10 @@ button, a, input, textarea, select, summary { -webkit-tap-highlight-color: trans
 /* One ring everywhere, drawn outside the control so it sits on paper, desk or
  * manila and never on an ink fill (folder brown on ink is 2.4:1). */
 :focus-visible { outline: var(--focus-width) solid var(--focus); outline-offset: var(--focus-offset); }
+/* A report frame with focus: focus is inside its document, where neither
+ * :focus nor :focus-within reaches, so js/frame-focus.js marks it. Drawn
+ * inside its edge, so the column or page around it never clips the ring. */
+iframe[data-focus-ring] { outline: var(--focus-width) solid var(--focus); outline-offset: calc(-1 * var(--focus-width)); }
 ::selection { background: var(--manila-strong); color: var(--text-primary); }
 kbd {
   display: inline-grid;
@@ -202,9 +206,12 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 .rb--sm { width: 20px; height: 20px; }
 
 /* ── Toast ──────────────────────────────────────────────────────────────── */
+/* Lifted above the Compare view's undo toast while that shows (its height,
+ * measured into --toast-lift by js/compare/undo-toast.js): the two share this
+ * corner, and a status message used to cover Undo. */
 .toast {
   position: fixed;
-  bottom: 24px;
+  bottom: calc(24px + var(--toast-lift, 0px));
   right: 24px;
   z-index: var(--z-toast);
   max-width: min(420px, calc(100vw - 32px));
@@ -218,7 +225,7 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
   pointer-events: none;
   opacity: 0;
   transform: translateY(8px);
-  transition: opacity var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
+  transition: opacity var(--dur) var(--ease-out), transform var(--dur) var(--ease-out), bottom var(--dur) var(--ease-out);
 }
 .toast.visible { opacity: 1; transform: translateY(0); }
 @media (max-width: 600px) { .toast { left: 16px; right: 16px; max-width: none; } }
@@ -263,6 +270,12 @@ html:not([data-theme]) .header-bar[data-header-skin="custom"] {
  * and a 2 px manila underline: 7.6:1 or more for the label on every stop of
  * the bar. */
 .header-actions > .header-btn-group { display: inline-flex; }
+/* Open and Share get the same type for the same reason. The kit's fallback
+ * sets .875rem and 500 on them at zero specificity, and the `button { font:
+ * inherit }` reset near the top of this file outranks it, so they rendered at
+ * 15 px and 400 beside a 14 px, 500 view switch. Drop this with the group's
+ * pair below if the kit's fallback ever carries real specificity. */
+.header-actions > button { font-size: .875rem; font-weight: 500; }
 .header-btn-group > .nav-link {
   padding: 0 12px;
   border: 1px solid var(--header-control-border, var(--header-border-strong));
@@ -305,7 +318,9 @@ html:not([data-theme]) .header-bar[data-header-skin="custom"] {
  * The footer README sanctions overriding its tokens on .neo-footer. On the
  * desk: the footer line 7.9:1, the faded stamp 4.7:1 and "Fin." 6.2:1 (the kit
  * defaults gave 3.7 and 3.5), and focus in folder brown, not magenta.
- * --footer-text-dim is set in css/tokens.css. */
+ * --footer-text-dim is set in css/tokens.css.
+ * The back-to-top button lives outside .neo-footer; its tokens are set on
+ * .neo-top below. */
 .neo-footer {
   --footer-text: var(--text-secondary);
   --footer-text-strong: var(--text-primary);
@@ -313,6 +328,23 @@ html:not([data-theme]) .header-bar[data-header-skin="custom"] {
   --footer-border-strong: var(--border-strong);
   --footer-accent: var(--focus);
   --footer-hover: var(--surface-2);
+}
+/* The back-to-top button is appended to <body> by the kit, outside
+ * .neo-footer, so the override above never reaches it: it read the kit's navy
+ * disc with the site's dark --text-secondary arrow (1.9:1 on the light desk),
+ * a magenta ring (2.0:1), and a white-wash hover (1.2:1). It keeps the
+ * header's ink in both appearances: a dark disc with a light arrow, and the
+ * folder-brown focus ring. */
+.neo-top {
+  --footer-text-strong: var(--header-text);
+  --footer-hover: var(--header-menu-bg);
+  --footer-accent: var(--focus);
+}
+html:not([data-theme]) .neo-top {
+  --header-menu-bg: #171e2a;
+  --header-text: #f5f1e6;
+  --footer-border-strong: rgba(230, 207, 148, .5);
+  --footer-hover: #232c3b;
 }
 
 /* ── Motion, touch, forced colours ─────────────────────────────────────── */

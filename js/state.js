@@ -32,6 +32,16 @@ export const state = {
   view: 'reports',
   /** The id of the record in js/store.js, or null for an unsaved report. */
   reportId: null,
+  /**
+   * The stored record's `updated` this tab last read or wrote, or null. A
+   * save expects the record still to be at this revision, so an older tab
+   * cannot silently save over a newer edit made in another one.
+   */
+  reportRev: null,
+  /** Set when a save found a newer version from another tab: its revision. */
+  reportConflict: null,
+  /** True from the moment a save starts until every save under way has landed. */
+  savePending: false,
   /** Which page of the report is on screen. */
   page: null,
   /** Findings from the parser and the validator, merged. */
